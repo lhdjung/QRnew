@@ -5,8 +5,7 @@ use cosmic::app::context_drawer;
 use cosmic::iced::alignment::{Horizontal, Vertical};
 use cosmic::iced::{Alignment, Length};
 use cosmic::prelude::*;
-use cosmic::widget::{self, about::About, menu};
-use qrcode::EcLevel;
+use cosmic::widget::{self, about::About, menu, qr_code::ErrorCorrection};
 use std::collections::HashMap;
 
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
@@ -19,7 +18,7 @@ pub struct AppModel {
     key_binds: HashMap<menu::KeyBind, MenuAction>,
     input: String,
     qr_data: Option<widget::qr_code::Data>,
-    ec_level: EcLevel,
+    ec_level: ErrorCorrection,
 }
 
 #[derive(Debug, Clone)]
@@ -27,7 +26,7 @@ pub enum Message {
     LaunchUrl(String),
     ToggleContextPage(ContextPage),
     InputChanged(String),
-    EcLevelChanged(EcLevel),
+    ErrorCorrectionChanged(ErrorCorrection),
 }
 
 impl cosmic::Application for AppModel {
@@ -63,7 +62,7 @@ impl cosmic::Application for AppModel {
             key_binds: HashMap::new(),
             input: String::new(),
             qr_data: None,
-            ec_level: EcLevel::M,
+            ec_level: ErrorCorrection::Medium,
         };
 
         let command = app.update_title();
@@ -108,10 +107,10 @@ impl cosmic::Application for AppModel {
 
         let ec_row = widget::row::with_children(vec![
             widget::text(fl!("ec-label")).into(),
-            ec_button(fl!("ec-low"), EcLevel::L, self.ec_level),
-            ec_button(fl!("ec-medium"), EcLevel::M, self.ec_level),
-            ec_button(fl!("ec-quartile"), EcLevel::Q, self.ec_level),
-            ec_button(fl!("ec-high"), EcLevel::H, self.ec_level),
+            ec_button(fl!("ec-low"), ErrorCorrection::Low, self.ec_level),
+            ec_button(fl!("ec-medium"), ErrorCorrection::Medium, self.ec_level),
+            ec_button(fl!("ec-quartile"), ErrorCorrection::Quartile, self.ec_level),
+            ec_button(fl!("ec-high"), ErrorCorrection::High, self.ec_level),
         ])
         .spacing(space_s)
         .align_y(Alignment::Center);
@@ -153,7 +152,7 @@ impl cosmic::Application for AppModel {
                 self.regenerate_qr();
             }
 
-            Message::EcLevelChanged(level) => {
+            Message::ErrorCorrectionChanged(level) => {
                 self.ec_level = level;
                 self.regenerate_qr();
             }
@@ -190,25 +189,26 @@ impl AppModel {
             self.qr_data = None;
             return;
         }
-        self.qr_data = widget::qr_code::Data::new(self.input.as_bytes())
-            .ok()
-            .map(Some)
-            .unwrap_or(None);
+        self.qr_data = widget::qr_code::Data::with_error_correction(
+            self.input.as_bytes(),
+            self.ec_level,
+        )
+        .ok();
     }
 }
 
 fn ec_button<'a>(
     label: String,
-    level: EcLevel,
-    current: EcLevel,
+    level: ErrorCorrection,
+    current: ErrorCorrection,
 ) -> Element<'a, Message> {
     if level == current {
         widget::button::suggested(label)
-            .on_press(Message::EcLevelChanged(level))
+            .on_press(Message::ErrorCorrectionChanged(level))
             .into()
     } else {
         widget::button::standard(label)
-            .on_press(Message::EcLevelChanged(level))
+            .on_press(Message::ErrorCorrectionChanged(level))
             .into()
     }
 }
