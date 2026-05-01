@@ -1,7 +1,12 @@
-app-title = Qrnew
+app-title = QR New
 about = About
 repository = Repository
 view = View
-welcome = Welcome to COSMIC! ✨
-page-id = Page { $num }
+input-placeholder = Enter text or URL…
+ec-label = Error correction:
+ec-low = Low
+ec-medium = Medium
+ec-quartile = Quartile
+ec-high = High
+qr-placeholder = Type something to generate a QR code
 git-description = Git commit {$hash} on {$date}
