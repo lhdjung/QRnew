@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Qrnew
+Comment=All-local QR code generator
+Type=Application
+Icon=com.github.pop-os.cosmic-app-template
+Exec=qrnew %F
+Terminal=false
+StartupNotify=true
+Categories=COSMIC
+Keywords=COSMIC
+MimeType=
