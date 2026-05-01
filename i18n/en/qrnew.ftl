@@ -9,4 +9,6 @@ ec-medium = Medium
 ec-quartile = Quartile
 ec-high = High
 qr-placeholder = Type something to generate a QR code
+save = Save as PNG…
+copy = Copy to Clipboard
 git-description = Git commit {$hash} on {$date}

@@ -1,21 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::fl;
-use cosmic::app::context_drawer;
 use cosmic::iced::alignment::{Horizontal, Vertical};
 use cosmic::iced::{Alignment, Length};
 use cosmic::prelude::*;
-use cosmic::widget::{self, about::About, menu, qr_code::ErrorCorrection};
-use std::collections::HashMap;
-
-const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
-const APP_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/apps/icon.svg");
+use cosmic::widget::{self, qr_code::ErrorCorrection};
 
 pub struct AppModel {
     core: cosmic::Core,
-    context_page: ContextPage,
-    about: About,
-    key_binds: HashMap<menu::KeyBind, MenuAction>,
     input: String,
     qr_data: Option<widget::qr_code::Data>,
     ec_level: ErrorCorrection,
@@ -23,10 +15,11 @@ pub struct AppModel {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    LaunchUrl(String),
-    ToggleContextPage(ContextPage),
     InputChanged(String),
     ErrorCorrectionChanged(ErrorCorrection),
+    SaveQr,
+    CopyQr,
+    Noop,
 }
 
 impl cosmic::Application for AppModel {
@@ -44,58 +37,18 @@ impl cosmic::Application for AppModel {
         &mut self.core
     }
 
-    fn init(
-        core: cosmic::Core,
-        _flags: Self::Flags,
-    ) -> (Self, Task<cosmic::Action<Self::Message>>) {
-        let about = About::default()
-            .name(fl!("app-title"))
-            .icon(widget::icon::from_svg_bytes(APP_ICON))
-            .version(env!("CARGO_PKG_VERSION"))
-            .links([(fl!("repository"), REPOSITORY)])
-            .license(env!("CARGO_PKG_LICENSE"));
-
+    fn init(core: cosmic::Core, _flags: ()) -> (Self, Task<cosmic::Action<Message>>) {
         let mut app = AppModel {
             core,
-            context_page: ContextPage::default(),
-            about,
-            key_binds: HashMap::new(),
             input: String::new(),
             qr_data: None,
             ec_level: ErrorCorrection::Medium,
         };
-
-        let command = app.update_title();
-        (app, command)
+        let cmd = app.update_title();
+        (app, cmd)
     }
 
-    fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
-        let menu_bar = menu::bar(vec![menu::Tree::with_children(
-            menu::root(fl!("view")).apply(Element::from),
-            menu::items(
-                &self.key_binds,
-                vec![menu::Item::Button(fl!("about"), None, MenuAction::About)],
-            ),
-        )]);
-
-        vec![menu_bar.into()]
-    }
-
-    fn context_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Self::Message>> {
-        if !self.core.window.show_context {
-            return None;
-        }
-
-        Some(match self.context_page {
-            ContextPage::About => context_drawer::about(
-                &self.about,
-                |url| Message::LaunchUrl(url.to_string()),
-                Message::ToggleContextPage(ContextPage::About),
-            ),
-        })
-    }
-
-    fn view(&self) -> Element<'_, Self::Message> {
+    fn view(&self) -> Element<'_, Message> {
         let spacing = cosmic::theme::spacing();
         let space_l = spacing.space_l;
         let space_m = spacing.space_m;
@@ -116,9 +69,25 @@ impl cosmic::Application for AppModel {
         .align_y(Alignment::Center);
 
         let qr_area: Element<_> = if let Some(data) = &self.qr_data {
-            widget::container(widget::qr_code(data).cell_size(8))
-                .padding(space_m)
-                .into()
+            let action_row = widget::row::with_children(vec![
+                widget::button::standard(fl!("save"))
+                    .on_press(Message::SaveQr)
+                    .into(),
+                widget::button::standard(fl!("copy"))
+                    .on_press(Message::CopyQr)
+                    .into(),
+            ])
+            .spacing(space_s);
+
+            widget::column::with_children(vec![
+                widget::container(widget::qr_code(data).cell_size(8))
+                    .padding(space_m)
+                    .into(),
+                action_row.into(),
+            ])
+            .align_x(Alignment::Center)
+            .spacing(space_s)
+            .into()
         } else {
             widget::container(widget::text(fl!("qr-placeholder")).size(14))
                 .width(Length::Fixed(300.0))
@@ -145,7 +114,7 @@ impl cosmic::Application for AppModel {
             .into()
     }
 
-    fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
+    fn update(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::InputChanged(text) => {
                 self.input = text;
@@ -157,43 +126,91 @@ impl cosmic::Application for AppModel {
                 self.regenerate_qr();
             }
 
-            Message::ToggleContextPage(page) => {
-                if self.context_page == page {
-                    self.core.window.show_context = !self.core.window.show_context;
-                } else {
-                    self.context_page = page;
-                    self.core.window.show_context = true;
-                }
+            Message::SaveQr => {
+                let input = self.input.clone();
+                let ec: qrcode::EcLevel = self.ec_level.into();
+                return Task::perform(
+                    async move {
+                        let Some(handle) = rfd::AsyncFileDialog::new()
+                            .add_filter("PNG Image", &["png"])
+                            .set_file_name("qrcode.png")
+                            .save_file()
+                            .await
+                        else {
+                            return;
+                        };
+                        let Ok(code) = qrcode::QrCode::with_error_correction_level(
+                            input.as_bytes(),
+                            ec,
+                        ) else {
+                            return;
+                        };
+                        let img = code
+                            .render::<image::Luma<u8>>()
+                            .quiet_zone(true)
+                            .module_dimensions(10, 10)
+                            .build();
+                        let _ = img.save(handle.path());
+                    },
+                    |_| cosmic::Action::App(Message::Noop),
+                );
             }
 
-            Message::LaunchUrl(url) => {
-                let _ = open::that_detached(&url);
+            Message::CopyQr => {
+                let input = self.input.clone();
+                let ec: qrcode::EcLevel = self.ec_level.into();
+                return Task::perform(
+                    async move {
+                        let Ok(code) = qrcode::QrCode::with_error_correction_level(
+                            input.as_bytes(),
+                            ec,
+                        ) else {
+                            return;
+                        };
+                        let img = code
+                            .render::<image::Luma<u8>>()
+                            .quiet_zone(true)
+                            .module_dimensions(10, 10)
+                            .build();
+                        let width = img.width() as usize;
+                        let height = img.height() as usize;
+                        let rgba: Vec<u8> = img
+                            .pixels()
+                            .flat_map(|p| [p.0[0], p.0[0], p.0[0], 255u8])
+                            .collect();
+                        if let Ok(mut cb) = arboard::Clipboard::new() {
+                            let _ = cb.set_image(arboard::ImageData {
+                                width,
+                                height,
+                                bytes: rgba.into(),
+                            });
+                        }
+                    },
+                    |_| cosmic::Action::App(Message::Noop),
+                );
             }
+
+            Message::Noop => {}
         }
         Task::none()
     }
 }
 
 impl AppModel {
-    pub fn update_title(&mut self) -> Task<cosmic::Action<Message>> {
-        let window_title = fl!("app-title");
+    fn update_title(&mut self) -> Task<cosmic::Action<Message>> {
         if self.core.main_window_id().is_some() {
-            self.set_window_title(window_title)
+            self.set_window_title(fl!("app-title"))
         } else {
             Task::none()
         }
     }
 
     fn regenerate_qr(&mut self) {
-        if self.input.is_empty() {
-            self.qr_data = None;
-            return;
-        }
-        self.qr_data = widget::qr_code::Data::with_error_correction(
-            self.input.as_bytes(),
-            self.ec_level,
-        )
-        .ok();
+        self.qr_data = if self.input.is_empty() {
+            None
+        } else {
+            widget::qr_code::Data::with_error_correction(self.input.as_bytes(), self.ec_level).ok()
+        };
     }
 }
 
@@ -210,26 +227,5 @@ fn ec_button<'a>(
         widget::button::standard(label)
             .on_press(Message::ErrorCorrectionChanged(level))
             .into()
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub enum ContextPage {
-    #[default]
-    About,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MenuAction {
-    About,
-}
-
-impl menu::action::MenuAction for MenuAction {
-    type Message = Message;
-
-    fn message(&self) -> Self::Message {
-        match self {
-            MenuAction::About => Message::ToggleContextPage(ContextPage::About),
-        }
     }
 }
