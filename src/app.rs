@@ -139,10 +139,9 @@ impl cosmic::Application for AppModel {
                         else {
                             return;
                         };
-                        let Ok(code) = qrcode::QrCode::with_error_correction_level(
-                            input.as_bytes(),
-                            ec,
-                        ) else {
+                        let Ok(code) =
+                            qrcode::QrCode::with_error_correction_level(input.as_bytes(), ec)
+                        else {
                             return;
                         };
                         let img = code
@@ -161,10 +160,9 @@ impl cosmic::Application for AppModel {
                 let ec: qrcode::EcLevel = self.ec_level.into();
                 return Task::perform(
                     async move {
-                        let Ok(code) = qrcode::QrCode::with_error_correction_level(
-                            input.as_bytes(),
-                            ec,
-                        ) else {
+                        let Ok(code) =
+                            qrcode::QrCode::with_error_correction_level(input.as_bytes(), ec)
+                        else {
                             return;
                         };
                         let img = code
