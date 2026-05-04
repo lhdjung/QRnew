@@ -6,6 +6,8 @@ use cosmic::iced::{Alignment, Length};
 use cosmic::prelude::*;
 use cosmic::widget::{self, about::About, qr_code::ErrorCorrection};
 
+const INPUT_ID: fn() -> widget::Id = || widget::Id::new("main-input");
+
 pub struct AppModel {
     core: cosmic::Core,
     input: String,
@@ -58,7 +60,8 @@ impl cosmic::Application for AppModel {
             show_about: false,
             about,
         };
-        let cmd = app.update_title();
+
+        let cmd = Task::batch([app.update_title(), widget::text_input::focus(INPUT_ID())]);
         (app, cmd)
     }
 
@@ -90,7 +93,8 @@ impl cosmic::Application for AppModel {
 
         let input = widget::text_input(fl!("input-placeholder"), &self.input)
             .on_input(Message::InputChanged)
-            .width(Length::Fixed(400.0));
+            .width(Length::Fixed(400.0))
+            .id(INPUT_ID());
 
         let ec_label = widget::tooltip(
             widget::text(fl!("ec-label")),
