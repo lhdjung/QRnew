@@ -1,6 +1,6 @@
 # Qrnew
 
-All-local QR code generator
+Local-only QR code generator
 
 ## Installation
 

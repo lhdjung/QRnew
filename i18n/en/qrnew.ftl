@@ -1,6 +1,7 @@
 app-title = QRnew
+app-description = Small and simple QR code generator. Local-only, no telemetry. Your data are safe.
 about = About
-repository = Repository
+repository = Github repository
 view = View
 input-placeholder = Enter text or URL…
 ec-label = Error correction level:

@@ -3,7 +3,7 @@ name = "qrnew"
 version = "0.1.0"
 edition = "2024"
 license = "MPL-2.0"
-description = "All-local QR code generator"
+description = "Local-only QR code generator"
 repository = "https://github.com/lhdjung/qrnew"
 
 [dependencies]

@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=QRnew
-Comment=All-local QR code generator
+Comment=Local-only QR code generator
 Type=Application
 Icon=dev.lhdjung.QrNew
 Exec=qrnew %F

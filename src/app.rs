@@ -45,9 +45,10 @@ impl cosmic::Application for AppModel {
     fn init(core: cosmic::Core, _flags: ()) -> (Self, Task<cosmic::Action<Message>>) {
         let about = About::default()
             .name(fl!("app-title"))
+            .author(fl!("app-description"))
             .comments(concat!("Version ", env!("CARGO_PKG_VERSION")))
             .icon(widget::icon::from_name(Self::APP_ID))
-            .links([("Repository", env!("CARGO_PKG_REPOSITORY"))]);
+            .links([("Github repository", env!("CARGO_PKG_REPOSITORY"))]);
 
         let mut app = AppModel {
             core,
