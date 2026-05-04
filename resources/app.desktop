@@ -1,8 +1,8 @@
 [Desktop Entry]
-Name=Qrnew
+Name=QRnew
 Comment=All-local QR code generator
 Type=Application
-Icon=com.github.pop-os.cosmic-app-template
+Icon=dev.lhdjung.QrNew
 Exec=qrnew %F
 Terminal=false
 StartupNotify=true

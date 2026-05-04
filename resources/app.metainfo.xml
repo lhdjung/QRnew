@@ -1,17 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.github.pop-os.cosmic-app-template</id>
+  <id>dev.lhdjung.QrNew</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MPL-2.0</project_license>
-  <name>Qrnew</name>
+  <name>QRnew</name>
   <summary>All-local QR code generator</summary>
-  <icon type="remote" width="64" height="64" scale="1">
-    https://github.com/pop-os/cosmic-app-template/raw/main/resources/icons/hicolor/scalable/apps/icon.svg
-  </icon>
-  <url type="vcs-browser">https://github.com/pop-os/cosmic-app-template</url>
-  <launchable type="desktop-id">com.github.pop-os.cosmic-app-template.desktop</launchable>
+  <icon type="stock">dev.lhdjung.QrNew</icon>
+  <url type="vcs-browser">https://github.com/lhdjung/qrnew</url>
+  <launchable type="desktop-id">dev.lhdjung.QrNew.desktop</launchable>
   <provides>
-    <id>com.github.pop-os.cosmic-app-template</id>
+    <id>dev.lhdjung.QrNew</id>
     <binaries>
       <binary>qrnew</binary>
     </binaries>
@@ -29,7 +27,7 @@
   </categories>
   <keywords>
     <keyword>COSMIC</keyword>
+    <keyword>QR</keyword>
   </keywords>
   <content_rating type="oars-1.1" />
 </component>
-

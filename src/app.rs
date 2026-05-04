@@ -4,21 +4,26 @@ use crate::fl;
 use cosmic::iced::alignment::{Horizontal, Vertical};
 use cosmic::iced::{Alignment, Length};
 use cosmic::prelude::*;
-use cosmic::widget::{self, qr_code::ErrorCorrection};
+use cosmic::widget::{self, about::About, qr_code::ErrorCorrection};
 
 pub struct AppModel {
     core: cosmic::Core,
     input: String,
     qr_data: Option<widget::qr_code::Data>,
     ec_level: ErrorCorrection,
+    show_about: bool,
+    about: About,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     InputChanged(String),
     ErrorCorrectionChanged(ErrorCorrection),
-    SaveQr,
+    SaveQrPng,
+    SaveQrSvg,
     CopyQr,
+    ToggleAbout,
+    OpenUrl(String),
     Noop,
 }
 
@@ -27,7 +32,7 @@ impl cosmic::Application for AppModel {
     type Flags = ();
     type Message = Message;
 
-    const APP_ID: &'static str = "dev.lukasjung.QrNew";
+    const APP_ID: &'static str = "dev.lhdjung.QrNew";
 
     fn core(&self) -> &cosmic::Core {
         &self.core
@@ -38,14 +43,42 @@ impl cosmic::Application for AppModel {
     }
 
     fn init(core: cosmic::Core, _flags: ()) -> (Self, Task<cosmic::Action<Message>>) {
+        let about = About::default()
+            .name(fl!("app-title"))
+            .comments(concat!("Version ", env!("CARGO_PKG_VERSION")))
+            .icon(widget::icon::from_name(Self::APP_ID))
+            .links([("Repository", env!("CARGO_PKG_REPOSITORY"))]);
+
         let mut app = AppModel {
             core,
             input: String::new(),
             qr_data: None,
             ec_level: ErrorCorrection::Medium,
+            show_about: false,
+            about,
         };
         let cmd = app.update_title();
         (app, cmd)
+    }
+
+    fn header_end(&self) -> Vec<Element<'_, Message>> {
+        vec![
+            widget::button::icon(widget::icon::from_name("help-about-symbolic"))
+                .on_press(Message::ToggleAbout)
+                .into(),
+        ]
+    }
+
+    fn context_drawer(&self) -> Option<cosmic::app::context_drawer::ContextDrawer<'_, Message>> {
+        if !self.show_about {
+            return None;
+        }
+
+        Some(cosmic::app::context_drawer::about(
+            &self.about,
+            |url| Message::OpenUrl(url.to_owned()),
+            Message::ToggleAbout,
+        ))
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -58,8 +91,18 @@ impl cosmic::Application for AppModel {
             .on_input(Message::InputChanged)
             .width(Length::Fixed(400.0));
 
+        let ec_label = widget::tooltip(
+            widget::text(fl!("ec-label")),
+            widget::container(
+                widget::text(fl!("ec-tooltip"))
+                    .size(13)
+                    .width(Length::Fixed(260.0)),
+            ),
+            widget::tooltip::Position::Bottom,
+        );
+
         let ec_row = widget::row::with_children(vec![
-            widget::text(fl!("ec-label")).into(),
+            ec_label.into(),
             ec_button(fl!("ec-low"), ErrorCorrection::Low, self.ec_level),
             ec_button(fl!("ec-medium"), ErrorCorrection::Medium, self.ec_level),
             ec_button(fl!("ec-quartile"), ErrorCorrection::Quartile, self.ec_level),
@@ -70,8 +113,11 @@ impl cosmic::Application for AppModel {
 
         let qr_area: Element<_> = if let Some(data) = &self.qr_data {
             let action_row = widget::row::with_children(vec![
-                widget::button::standard(fl!("save"))
-                    .on_press(Message::SaveQr)
+                widget::button::standard(fl!("save-png"))
+                    .on_press(Message::SaveQrPng)
+                    .into(),
+                widget::button::standard(fl!("save-svg"))
+                    .on_press(Message::SaveQrSvg)
                     .into(),
                 widget::button::standard(fl!("copy"))
                     .on_press(Message::CopyQr)
@@ -126,7 +172,7 @@ impl cosmic::Application for AppModel {
                 self.regenerate_qr();
             }
 
-            Message::SaveQr => {
+            Message::SaveQrPng => {
                 let input = self.input.clone();
                 let ec: qrcode::EcLevel = self.ec_level.into();
                 return Task::perform(
@@ -150,6 +196,34 @@ impl cosmic::Application for AppModel {
                             .module_dimensions(10, 10)
                             .build();
                         let _ = img.save(handle.path());
+                    },
+                    |_| cosmic::Action::App(Message::Noop),
+                );
+            }
+
+            Message::SaveQrSvg => {
+                let input = self.input.clone();
+                let ec: qrcode::EcLevel = self.ec_level.into();
+                return Task::perform(
+                    async move {
+                        let Some(handle) = rfd::AsyncFileDialog::new()
+                            .add_filter("SVG Image", &["svg"])
+                            .set_file_name("qrcode.svg")
+                            .save_file()
+                            .await
+                        else {
+                            return;
+                        };
+                        let Ok(code) =
+                            qrcode::QrCode::with_error_correction_level(input.as_bytes(), ec)
+                        else {
+                            return;
+                        };
+                        let svg = code
+                            .render::<qrcode::render::svg::Color>()
+                            .quiet_zone(true)
+                            .build();
+                        let _ = std::fs::write(handle.path(), svg);
                     },
                     |_| cosmic::Action::App(Message::Noop),
                 );
@@ -188,6 +262,15 @@ impl cosmic::Application for AppModel {
                 );
             }
 
+            Message::ToggleAbout => {
+                self.show_about = !self.show_about;
+                self.set_show_context(self.show_about);
+            }
+
+            Message::OpenUrl(url) => {
+                let _ = open::that(url);
+            }
+
             Message::Noop => {}
         }
         Task::none()
@@ -217,13 +300,13 @@ fn ec_button<'a>(
     level: ErrorCorrection,
     current: ErrorCorrection,
 ) -> Element<'a, Message> {
-    if level == current {
+    let button = if level == current {
         widget::button::suggested(label)
-            .on_press(Message::ErrorCorrectionChanged(level))
-            .into()
     } else {
         widget::button::standard(label)
-            .on_press(Message::ErrorCorrectionChanged(level))
-            .into()
-    }
+    };
+
+    button
+        .on_press(Message::ErrorCorrectionChanged(level))
+        .into()
 }
