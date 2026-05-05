@@ -50,7 +50,7 @@ impl cosmic::Application for AppModel {
             .author(fl!("app-description"))
             .comments(concat!("Version ", env!("CARGO_PKG_VERSION")))
             .icon(widget::icon::from_name(Self::APP_ID))
-            .links([("Github repository", env!("CARGO_PKG_REPOSITORY"))]);
+            .links([("Source code (Github)", env!("CARGO_PKG_REPOSITORY"))]);
 
         let mut app = AppModel {
             core,
