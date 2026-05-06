@@ -117,7 +117,7 @@ impl cosmic::Application for AppModel {
         .align_y(Alignment::Center);
 
         let qr_area: Element<_> = if let Some(data) = &self.qr_data {
-            let action_column = widget::column::with_children(vec![
+            let action_row = widget::row::with_children(vec![
                 widget::button::standard(fl!("save-png"))
                     .on_press(Message::SaveQrPng)
                     .into(),
@@ -130,13 +130,13 @@ impl cosmic::Application for AppModel {
             ])
             .spacing(space_s);
 
-            widget::row::with_children(vec![
+            widget::column::with_children(vec![
+                action_row.into(),
                 widget::container(widget::qr_code(data).cell_size(8))
                     .padding(space_m)
                     .into(),
-                action_column.into(),
             ])
-            .align_y(Alignment::Center)
+            .align_x(Alignment::Center)
             .spacing(space_s)
             .into()
         } else {
