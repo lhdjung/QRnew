@@ -131,10 +131,10 @@ impl cosmic::Application for AppModel {
             .spacing(space_s);
 
             widget::column::with_children(vec![
+                action_row.into(),
                 widget::container(widget::qr_code(data).cell_size(8))
                     .padding(space_m)
                     .into(),
-                action_row.into(),
             ])
             .align_x(Alignment::Center)
             .spacing(space_s)
