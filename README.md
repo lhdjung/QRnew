@@ -2,6 +2,36 @@
 
 Local-only QR code generator
 
+## Building
+
+### Prerequisites
+
+- [Rust][rustup] via rustup
+- [just][just] command runner (`cargo install just`)
+- [ImageMagick][imagemagick] for the `bundle-*` recipes
+
+### Desktop bundles
+
+**macOS** — creates `QrNew.app` in the project root; drag it to `/Applications`:
+
+```sh
+just bundle-macos
+```
+
+**Linux** — installs to `~/.local/` without root and registers the app in the launcher:
+
+```sh
+just bundle-linux
+```
+
+Ensure `~/.local/bin` is in your `PATH`.
+
+**Windows** — creates `QRnew-windows/` with `QRnew.exe` and `QRnew.ico` (run in Git Bash):
+
+```sh
+just bundle-windows
+```
+
 ## Installation
 
 A [justfile](./justfile) is included by default for the [casey/just][just] command runner.
@@ -34,6 +64,7 @@ It is recommended to build a source tarball with the vendored dependencies, whic
 
 Developers should install [rustup][rustup] and configure their editor to use [rust-analyzer][rust-analyzer]. To improve compilation times, disable LTO in the release profile, install the [mold][mold] linker, and configure [sccache][sccache] for use with Rust. The [mold][mold] linker will only improve link times if LTO is disabled.
 
+[imagemagick]: https://imagemagick.org/
 [fluent]: https://projectfluent.org/
 [fluent-guide]: https://projectfluent.org/fluent/guide/hello.html
 [iso-codes]: https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes
