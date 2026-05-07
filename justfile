@@ -79,7 +79,7 @@ bundle-macos: build-release
     mkdir -p QRnew.app/Contents/MacOS QRnew.app/Contents/Resources
     cp {{cargo-target-dir}}/release/{{name}} QRnew.app/Contents/MacOS/{{name}}
     icon=resources/icons/hicolor/scalable/apps/icon.svg
-    iconset=/tmp/qrnew_$$.iconset
+    iconset=/tmp/QRnew_$$.iconset
     mkdir "$iconset"
     for size in 16 32 128 256 512; do
         magick "$icon" -background none -resize "${size}x${size}"     "$iconset/icon_${size}x${size}.png"
