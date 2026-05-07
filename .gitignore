@@ -1,5 +1,7 @@
 .cargo/
 *.pdb
+QrNew.app/
+QRnew-windows/
 **/*.rs.bk
 debug/
 target/
