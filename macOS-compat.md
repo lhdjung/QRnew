@@ -1,8 +1,8 @@
-# macOS Porting Protocol for `qrnew`
+# macOS Porting Protocol for QRnew
 
 ## Background
 
-`qrnew` is built on `libcosmic`, the Pop!_OS COSMIC desktop framework. By default, libcosmic depends on Wayland as its windowing system, which does not exist on macOS. libcosmic is built on top of `iced`, which supports macOS via `winit` (a cross-platform windowing library backed by AppKit on macOS). The changes below switch the windowing backend from Wayland to winit and fix one API difference that exists between the two backends.
+QRnew is built on `libcosmic`, the Pop!_OS COSMIC desktop framework. By default, libcosmic depends on Wayland as its windowing system, which does not exist on macOS. libcosmic is built on top of `iced`, which supports macOS via `winit` (a cross-platform windowing library backed by AppKit on macOS). The changes below switch the windowing backend from Wayland to winit and fix one API difference that exists between the two backends.
 
 ---
 

@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>dev.lhdjung.QrNew</id>
+  <id>dev.lhdjung.QRnew</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MPL-2.0</project_license>
   <name>QRnew</name>
   <summary>Local-only QR code generator</summary>
-  <icon type="stock">dev.lhdjung.QrNew</icon>
-  <url type="vcs-browser">https://github.com/lhdjung/qrnew</url>
-  <launchable type="desktop-id">dev.lhdjung.QrNew.desktop</launchable>
+  <icon type="stock">dev.lhdjung.QRnew</icon>
+  <url type="vcs-browser">https://github.com/lhdjung/QRnew</url>
+  <launchable type="desktop-id">dev.lhdjung.QRnew.desktop</launchable>
   <provides>
-    <id>dev.lhdjung.QrNew</id>
+    <id>dev.lhdjung.QRnew</id>
     <binaries>
-      <binary>qrnew</binary>
+      <binary>QRnew</binary>
     </binaries>
   </provides>
   <requires>

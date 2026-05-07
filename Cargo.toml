@@ -1,10 +1,10 @@
 [package]
-name = "qrnew"
+name = "QRnew"
 version = "0.1.0"
 edition = "2024"
 license = "MPL-2.0"
 description = "Local-only QR code generator"
-repository = "https://github.com/lhdjung/qrnew"
+repository = "https://github.com/lhdjung/QRnew"
 
 [dependencies]
 arboard = "3"

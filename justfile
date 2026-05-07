@@ -1,5 +1,5 @@
 # Name of the application's binary.
-name := 'qrnew'
+name := 'QRnew'
 # The unique ID of the application.
 appid := 'com.github.pop-os.cosmic-app-template'
 
@@ -71,13 +71,13 @@ install:
 uninstall:
     rm {{bin-dst}} {{desktop-dst}} {{icon-svg-dst}}
 
-# Creates a macOS .app bundle at QrNew.app/; drag it to /Applications to install
+# Creates a macOS .app bundle at QRnew.app/; drag it to /Applications to install
 bundle-macos: build-release
     #!/usr/bin/env bash
     set -euo pipefail
-    rm -rf QrNew.app
-    mkdir -p QrNew.app/Contents/MacOS QrNew.app/Contents/Resources
-    cp {{cargo-target-dir}}/release/{{name}} QrNew.app/Contents/MacOS/{{name}}
+    rm -rf QRnew.app
+    mkdir -p QRnew.app/Contents/MacOS QRnew.app/Contents/Resources
+    cp {{cargo-target-dir}}/release/{{name}} QRnew.app/Contents/MacOS/{{name}}
     icon=resources/icons/hicolor/scalable/apps/icon.svg
     iconset=/tmp/qrnew_$$.iconset
     mkdir "$iconset"
@@ -86,16 +86,16 @@ bundle-macos: build-release
         double=$((size * 2))
         magick "$icon" -background none -resize "${double}x${double}" "$iconset/icon_${size}x${size}@2x.png"
     done
-    iconutil -c icns -o QrNew.app/Contents/Resources/AppIcon.icns "$iconset"
+    iconutil -c icns -o QRnew.app/Contents/Resources/AppIcon.icns "$iconset"
     rm -rf "$iconset"
-    cat > QrNew.app/Contents/Info.plist << 'PLIST'
+    cat > QRnew.app/Contents/Info.plist << 'PLIST'
     <?xml version="1.0" encoding="UTF-8"?>
     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
     <plist version="1.0">
     <dict>
     <key>CFBundleName</key><string>QRnew</string>
     <key>CFBundleDisplayName</key><string>QRnew</string>
-    <key>CFBundleIdentifier</key><string>dev.lhdjung.QrNew</string>
+    <key>CFBundleIdentifier</key><string>dev.lhdjung.QRnew</string>
     <key>CFBundleVersion</key><string>0.1.0</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleExecutable</key><string>{{name}}</string>
@@ -113,9 +113,9 @@ bundle-linux: build-release
     set -euo pipefail
     install -Dm0755 {{cargo-target-dir}}/release/{{name}} ~/.local/bin/{{name}}
     install -Dm0644 resources/app.desktop \
-        ~/.local/share/applications/dev.lhdjung.QrNew.desktop
+        ~/.local/share/applications/dev.lhdjung.QRnew.desktop
     install -Dm0644 resources/icons/hicolor/scalable/apps/icon.svg \
-        ~/.local/share/icons/hicolor/scalable/apps/dev.lhdjung.QrNew.svg
+        ~/.local/share/icons/hicolor/scalable/apps/dev.lhdjung.QRnew.svg
     update-desktop-database ~/.local/share/applications 2>/dev/null || true
     gtk-update-icon-cache -f ~/.local/share/icons/hicolor 2>/dev/null || true
 

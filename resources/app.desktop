@@ -2,7 +2,7 @@
 Name=QRnew
 Comment=Local-only QR code generator
 Type=Application
-Icon=dev.lhdjung.QrNew
+Icon=dev.lhdjung.QRnew
 Exec=qrnew %F
 Terminal=false
 StartupNotify=true

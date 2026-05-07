@@ -12,7 +12,7 @@ Local-only QR code generator
 
 ### Desktop bundles
 
-**macOS** — creates `QrNew.app` in the project root; drag it to `/Applications`:
+**macOS** — creates `QRnew.app` in the project root; drag it to `/Applications`:
 
 ```sh
 just bundle-macos

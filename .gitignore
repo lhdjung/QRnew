@@ -1,6 +1,6 @@
 .cargo/
 *.pdb
-QrNew.app/
+QRnew.app/
 QRnew-windows/
 **/*.rs.bk
 debug/
