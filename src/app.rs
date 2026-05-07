@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 
+// QRnew is a QR code generator desktop app built using libcosmic and the qrcode crate.
+// The app is small, simple, and offline-only, so user data remain private. It is also very fast.
+// QR codes can be saved as PNG or SVG, or copied to clipboard. Error correction is supported.
+
+// Max length of input text for which a QR code will be generated (N of identical letters): 2331
+
 use crate::fl;
 use cosmic::iced::alignment::{Horizontal, Vertical};
 use cosmic::iced::{Alignment, Length};
@@ -29,6 +35,7 @@ pub enum Message {
     Noop,
 }
 
+/// Create a COSMIC application from the app model
 impl cosmic::Application for AppModel {
     type Executor = cosmic::executor::Default;
     type Flags = ();
@@ -44,6 +51,7 @@ impl cosmic::Application for AppModel {
         &mut self.core
     }
 
+    /// Initializes the application with any given flags and startup commands.
     fn init(core: cosmic::Core, _flags: ()) -> (Self, Task<cosmic::Action<Message>>) {
         let about = About::default()
             .name(fl!("app-title"))
@@ -85,6 +93,7 @@ impl cosmic::Application for AppModel {
         ))
     }
 
+    /// Describes the interface based on the current state of the application model.
     fn view(&self) -> Element<'_, Message> {
         let spacing = cosmic::theme::spacing();
         let space_l = spacing.space_l;
@@ -165,6 +174,7 @@ impl cosmic::Application for AppModel {
             .into()
     }
 
+    /// Handles messages emitted by the application and its widgets.
     fn update(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::InputChanged(text) => {
@@ -283,6 +293,7 @@ impl cosmic::Application for AppModel {
 }
 
 impl AppModel {
+    /// Updates the header and window titles.
     fn update_title(&mut self) -> Task<cosmic::Action<Message>> {
         if self.core.main_window_id().is_some() {
             self.set_window_title(fl!("app-title"))
@@ -291,6 +302,7 @@ impl AppModel {
         }
     }
 
+    /// Redraws the QR code when input or error correction level changes.
     fn regenerate_qr(&mut self) {
         self.qr_data = if self.input.is_empty() {
             None
@@ -300,6 +312,7 @@ impl AppModel {
     }
 }
 
+/// Creates a button to select an error detection level.
 fn ec_button<'a>(
     label: String,
     level: ErrorCorrection,
