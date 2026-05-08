@@ -3,22 +3,6 @@
 version = 4
 
 [[package]]
-name = "QRnew"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "i18n-embed",
- "i18n-embed-fl",
- "image 0.24.9",
- "libcosmic",
- "open",
- "qrcode",
- "rfd",
- "rust-embed",
- "tokio",
-]
-
-[[package]]
 name = "ab_glyph"
 version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3730,6 +3714,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "166f136dfdb199f98186f3649cf7a0536534a61417a1a30221b492b4fb60ce3f"
 dependencies = [
  "image 0.24.9",
+]
+
+[[package]]
+name = "qrnew"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "i18n-embed",
+ "i18n-embed-fl",
+ "image 0.24.9",
+ "libcosmic",
+ "open",
+ "qrcode",
+ "rfd",
+ "rust-embed",
+ "tokio",
 ]
 
 [[package]]

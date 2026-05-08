@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            runner: ubuntu-latest
+            asset: qrnew-linux.tar.gz
+          - name: macOS
+            runner: macos-latest
+            asset: QRnew-macos.zip
+          - name: Windows
+            runner: windows-latest
+            asset: QRnew-windows.zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libgtk-3-dev
+
+      - run: cargo build --release --locked
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          rm -rf QRnew.app
+          mkdir -p QRnew.app/Contents/MacOS QRnew.app/Contents/Resources
+          cp target/release/qrnew QRnew.app/Contents/MacOS/qrnew
+          icon=resources/icons/hicolor/scalable/apps/icon.svg
+          iconset=/tmp/QRnew_$$.iconset
+          mkdir "$iconset"
+          for size in 16 32 128 256 512; do
+            magick "$icon" -background none -resize "${size}x${size}"     "$iconset/icon_${size}x${size}.png"
+            double=$((size * 2))
+            magick "$icon" -background none -resize "${double}x${double}" "$iconset/icon_${size}x${size}@2x.png"
+          done
+          iconutil -c icns -o QRnew.app/Contents/Resources/AppIcon.icns "$iconset"
+          rm -rf "$iconset"
+          cat > QRnew.app/Contents/Info.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+          <key>CFBundleName</key><string>QRnew</string>
+          <key>CFBundleDisplayName</key><string>QRnew</string>
+          <key>CFBundleIdentifier</key><string>dev.lhdjung.QrNew</string>
+          <key>CFBundleVersion</key><string>0.1.0</string>
+          <key>CFBundleShortVersionString</key><string>0.1.0</string>
+          <key>CFBundleExecutable</key><string>qrnew</string>
+          <key>CFBundleIconFile</key><string>AppIcon</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>LSMinimumSystemVersion</key><string>11.0</string>
+          <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          zip -r QRnew-macos.zip QRnew.app
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir qrnew-linux
+          cp target/release/qrnew                                   qrnew-linux/qrnew
+          cp resources/app.desktop                                   qrnew-linux/dev.lhdjung.QrNew.desktop
+          cp resources/icons/hicolor/scalable/apps/icon.svg          qrnew-linux/dev.lhdjung.QrNew.svg
+          tar czf qrnew-linux.tar.gz qrnew-linux/
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p QRnew-windows
+          cp target/release/qrnew.exe QRnew-windows/QRnew.exe
+          icon=resources/icons/hicolor/scalable/apps/icon.svg
+          tmpdir=$(mktemp -d)
+          for size in 16 32 48 64 128 256; do
+            magick "$icon" -background none -resize "${size}x${size}" "$tmpdir/icon_${size}.png"
+          done
+          magick "$tmpdir/icon_16.png" "$tmpdir/icon_32.png" "$tmpdir/icon_48.png" \
+            "$tmpdir/icon_64.png" "$tmpdir/icon_128.png" "$tmpdir/icon_256.png" \
+            QRnew-windows/QRnew.ico
+          rm -rf "$tmpdir"
+          7z a QRnew-windows.zip QRnew-windows/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}
