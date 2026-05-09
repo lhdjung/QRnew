@@ -18,6 +18,8 @@ Local-only QR code generator
 just bundle-macos
 ```
 
+> **First launch:** macOS will block the app because it is not notarized. After the warning appears, open **System Settings → Privacy & Security**, scroll down to the Security section, and click **Open Anyway**.
+
 **Linux** — installs to `~/.local/` without root and registers the app in the launcher:
 
 ```sh
