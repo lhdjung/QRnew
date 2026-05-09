@@ -179,12 +179,12 @@ impl cosmic::Application for AppModel {
         match message {
             Message::InputChanged(text) => {
                 self.input = text;
-                self.regenerate_qr();
+                self.draw_qr_code();
             }
 
             Message::ErrorCorrectionChanged(level) => {
                 self.ec_level = level;
-                self.regenerate_qr();
+                self.draw_qr_code();
             }
 
             Message::SaveQrPng => {
@@ -302,8 +302,8 @@ impl AppModel {
         }
     }
 
-    /// Redraws the QR code when input or error correction level changes.
-    fn regenerate_qr(&mut self) {
+    /// Generates a QR code when input or error correction level changes.
+    fn draw_qr_code(&mut self) {
         self.qr_data = if self.input.is_empty() {
             None
         } else {
