@@ -51,6 +51,10 @@ jobs:
 
       - run: cargo build --release --locked
 
+      - name: Install ImageMagick (macOS)
+        if: runner.os == 'macOS'
+        run: brew install imagemagick
+
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
