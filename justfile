@@ -106,6 +106,8 @@ bundle-macos: build-release
     </dict>
     </plist>
     PLIST
+    codesign --force --deep --sign - QRnew.app
+    ditto -c -k --keepParent QRnew.app QRnew-macos.zip
 
 # Installs to ~/.local for the current user (Linux); adds app to launcher with icon
 bundle-linux: build-release

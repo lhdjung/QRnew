@@ -89,7 +89,8 @@ jobs:
           </dict>
           </plist>
           PLIST
-          zip -r QRnew-macos.zip QRnew.app
+          codesign --force --deep --sign - QRnew.app
+          ditto -c -k --keepParent QRnew.app QRnew-macos.zip
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
