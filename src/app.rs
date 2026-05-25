@@ -32,6 +32,7 @@ pub enum Message {
     ErrorCorrectionChanged(ErrorCorrection),
     DarkColorUpdate(ColorPickerUpdate),
     LightColorUpdate(ColorPickerUpdate),
+    ResetColors,
     SaveQrPng,
     SaveQrSvg,
     CopyQr,
@@ -149,10 +150,17 @@ impl cosmic::Application for AppModel {
             widget::text(fl!("color-dark-label")).into(),
             self.dark_color_picker
                 .picker_button(Message::DarkColorUpdate, None)
+                .width(Length::Fixed(40.0))
+                .height(Length::Fixed(40.0))
                 .into(),
             widget::text(fl!("color-light-label")).into(),
             self.light_color_picker
                 .picker_button(Message::LightColorUpdate, None)
+                .width(Length::Fixed(40.0))
+                .height(Length::Fixed(40.0))
+                .into(),
+            widget::button::standard(fl!("color-reset"))
+                .on_press(Message::ResetColors)
                 .into(),
         ])
         .spacing(space_s)
@@ -262,6 +270,15 @@ impl cosmic::Application for AppModel {
 
             Message::LightColorUpdate(update) => {
                 return self.light_color_picker.update::<cosmic::Action<Message>>(update);
+            }
+
+            Message::ResetColors => {
+                let _ = self
+                    .dark_color_picker
+                    .update::<cosmic::Action<Message>>(ColorPickerUpdate::Reset);
+                let _ = self
+                    .light_color_picker
+                    .update::<cosmic::Action<Message>>(ColorPickerUpdate::Reset);
             }
 
             Message::SaveQrPng => {

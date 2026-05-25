@@ -19,4 +19,5 @@ color-light-label = Background:
 color-recent = Recent colors
 color-copy = Copy to clipboard
 color-copied = Copied!
+color-reset = Reset to black & white
 git-description = Git commit {$hash} on {$date}
