@@ -277,8 +277,14 @@ impl cosmic::Application for AppModel {
                     .dark_color_picker
                     .update::<cosmic::Action<Message>>(ColorPickerUpdate::Reset);
                 let _ = self
+                    .dark_color_picker
+                    .update::<cosmic::Action<Message>>(ColorPickerUpdate::ActionFinished);
+                let _ = self
                     .light_color_picker
                     .update::<cosmic::Action<Message>>(ColorPickerUpdate::Reset);
+                let _ = self
+                    .light_color_picker
+                    .update::<cosmic::Action<Message>>(ColorPickerUpdate::ActionFinished);
             }
 
             Message::SaveQrPng => {
