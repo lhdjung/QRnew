@@ -46,6 +46,8 @@ jobs:
             libxkbcommon-dev \
             libgtk-3-dev
 
+      - run: cargo test --workspace --locked
+
       - run: cargo build --release --locked
 
       - uses: actions/upload-artifact@v4
