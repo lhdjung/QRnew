@@ -8,4 +8,7 @@ repository = "https://github.com/lhdjung/QRnew"
 
 [dependencies]
 qrcode = { version = "0.13", default-features = false }
-resvg = { version = "0.45", default-features = false }
+resvg = { version = "0.45", default-features = false, features = ["raster-images"] }
+
+[dev-dependencies]
+rqrr = { version = "0.10.1", default-features = false }

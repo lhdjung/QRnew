@@ -129,6 +129,38 @@ What a logo inset and rounded modules actually require:
 Point 4 is the entire difficulty of this feature, and it is identical in Rust
 and JavaScript.
 
+### What the rules turned out to be
+
+Shapes and insets are now in `qrnew-core`, and two of the numbers above were
+wrong. Both were caught by rendering codes and reading them back with `rqrr`, a
+dev-dependency added for exactly that (`qrnew-core/tests/scannable.rs`); every
+shape and logo combination the crate offers is checked against it.
+
+**Rounded finder patterns have a hard limit, and circular ones do not work at
+all.** A scanner locates a code by sweeping lines across it and looking for the
+1:1:3:1:1 run of dark and light that a finder pattern leaves behind. Rounding
+the outer corners shortens the runs near the top and bottom of the ring. At a
+corner radius of 1.0 modules the code still decodes; at 1.5 the grid is found
+but sampled wrong ("too many errors to correct"); at 2.0 the code is not found
+at all. A fully circular ring fails at every resolution tested, from 8 to 40
+pixels per module. `FinderShape` therefore ships `Square` and `Rounded` only,
+with the radius pinned at 1.0. The hole and the center pupil turn out to be
+unconstrained — the pupil is a full circle — because only the outer silhouette
+carries the signature.
+
+**The 25–30% occlusion figure is too generous.** Quoted, `High` error
+correction survives 30% damage; measured, decoding starts failing just past 19%
+of the code's area, consistently across codes from 37 to 121 modules wide.
+`MAX_LOGO_AREA` is set to 15%, which leaves headroom for the printing, lighting
+and camera angle that a real scan has to survive on top of the loss. The rest of
+point 4 held up: error correction is forced to `High`, the logo has to clear the
+finder patterns and their separators, and a logo that breaks either rule is
+refused rather than silently shrunk.
+
+Module shapes, by contrast, needed no rules at all. Square, rounded and dot
+modules all decode, because each covers the center of its own cell and nothing
+else's — which is the only thing a scanner samples.
+
 The honest advantage on the JS side is that libraries like `qr-code-styling`
 have already made those decisions for you. That is a real time saving. It is
 also the kind of thing you can port the *rules* from without adopting the
@@ -224,10 +256,12 @@ information, and the rewrite shrinks to swapping a UI layer over a stable core.
 
 Concretely, in order:
 
-1. Extract `qrnew-core` with a styled-SVG generator. Switch the preview to
-   `widget::svg` fed by the same function as the export.
-2. Build insets and shapes in that core. This is where the actual difficulty is,
-   and you'll learn more about the problem here than from any framework choice.
+1. ~~Extract `qrnew-core` with a styled-SVG generator. Switch the preview to
+   `widget::svg` fed by the same function as the export.~~ Done.
+2. ~~Build insets and shapes in that core.~~ Done; see "What the rules turned
+   out to be" above. Nothing in the UI drives any of it yet — `QrStyle` still
+   arrives from `src/app.rs` with default shapes and no logo — so the next step
+   is controls for it.
 3. Separately and at whatever pace suits you, chase the `tiny-skia` idle-repaint
    issue upstream. A 67 MB footprint is sitting there behind one bug.
 4. Revisit Tauri once the core exists.
