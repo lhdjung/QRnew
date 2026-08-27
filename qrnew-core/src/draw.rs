@@ -31,11 +31,21 @@ const MODULE_RADIUS: f32 = 0.5;
 /// This one is not a matter of taste. A scanner finds a code by sweeping lines
 /// across it and looking for the 1:1:3:1:1 run of dark and light that a finder
 /// pattern produces; rounding the outer corners shortens the runs near the top
-/// and bottom of the ring and eventually breaks that signature. The
-/// round-trip tests in `tests/scannable.rs` put the cliff just past 1.25
-/// modules, so this stays a step below it. Nothing else about the pattern is
-/// so constrained: the hole and the center can be as round as they like.
-const FINDER_RADIUS: f32 = 1.0;
+/// and bottom of the ring and eventually breaks that signature.
+///
+/// How much rounding is too much depends on the resolution the code is read
+/// at, which is why the round-trip tests sweep both. At 1.25 modules a code
+/// fails to decode however large it is drawn. At 1.0 it decodes from ten
+/// pixels per module upwards and is unreliable below that — a trap, since it
+/// looks perfectly fine at whatever single size you happen to test. At 0.8 and
+/// below that fragility is gone: a plain code reads down to four or five
+/// pixels per module instead of ten. The crate only claims ten either way, but
+/// that margin is what absorbs the printing and camera angle the tests do not
+/// model, so this sits at 0.75.
+///
+/// The rest of the pattern is unconstrained: the hole and the center can be as
+/// round as they like, and the center is a full circle.
+const FINDER_RADIUS: f32 = 0.75;
 
 /// Writes the matrix as an SVG document.
 pub fn draw(colors: &[Color], modules: u32, size: u32, style: &QrStyle) -> String {
@@ -222,7 +232,7 @@ fn finder_paths(svg: &mut String, modules: u32, quiet: f32, style: &QrStyle) {
             }
             FinderShape::Rounded => {
                 rounded_rect(&mut rings, x, y, 7.0, [FINDER_RADIUS; 4]);
-                rounded_rect_reversed(&mut rings, x + 1.0, y + 1.0, 5.0, 1.0);
+                rounded_rect_reversed(&mut rings, x + 1.0, y + 1.0, 5.0, FINDER_RADIUS);
                 circle(&mut centers, x + 3.5, y + 3.5, 1.5, true);
             }
         }

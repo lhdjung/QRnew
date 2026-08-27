@@ -139,14 +139,21 @@ shape and logo combination the crate offers is checked against it.
 **Rounded finder patterns have a hard limit, and circular ones do not work at
 all.** A scanner locates a code by sweeping lines across it and looking for the
 1:1:3:1:1 run of dark and light that a finder pattern leaves behind. Rounding
-the outer corners shortens the runs near the top and bottom of the ring. At a
-corner radius of 1.0 modules the code still decodes; at 1.5 the grid is found
-but sampled wrong ("too many errors to correct"); at 2.0 the code is not found
-at all. A fully circular ring fails at every resolution tested, from 8 to 40
-pixels per module. `FinderShape` therefore ships `Square` and `Rounded` only,
-with the radius pinned at 1.0. The hole and the center pupil turn out to be
-unconstrained — the pupil is a full circle — because only the outer silhouette
-carries the signature.
+the outer corners shortens the runs near the top and bottom of the ring. A
+fully circular ring fails at every resolution tested, from 8 to 40 pixels per
+module, so `FinderShape` ships `Square` and `Rounded` only. The hole and the
+center pupil turn out to be unconstrained — the pupil is a full circle —
+because only the outer silhouette carries the signature.
+
+How much rounding the outer ring tolerates depends on the resolution the code
+is read at, which is the part that nearly got missed. Swept at ten pixels per
+module alone, radius 1.0 passes and 1.25 fails, and 1.0 looks like the answer.
+Swept across resolutions, radius 1.0 turns out to decode from ten pixels per
+module up and to be unreliable below that — the worst kind of bug, invisible at
+whatever single size you happen to test. At 0.75 the fragility is gone and
+plain codes read down to four or five pixels per module. The round-trip tests
+now sweep resolution as well as style, because one scale proves much less than
+it appears to.
 
 **The 25–30% occlusion figure is too generous.** Quoted, `High` error
 correction survives 30% damage; measured, decoding starts failing just past 19%
@@ -160,6 +167,13 @@ refused rather than silently shrunk.
 Module shapes, by contrast, needed no rules at all. Square, rounded and dot
 modules all decode, because each covers the center of its own cell and nothing
 else's — which is the only thing a scanner samples.
+
+The crate also reads codes now, which is the same pipeline pointed backwards:
+an image file is wrapped in a `data:` URL and rasterized by `resvg` exactly as
+a logo inset is, then decoded by `rqrr`. That cost `rqrr` moving from
+dev-dependencies to dependencies, and no new machinery at all. It is what the
+round-trip tests run through, so the reader is exercised by every style the
+generator can produce.
 
 The honest advantage on the JS side is that libraries like `qr-code-styling`
 have already made those decisions for you. That is a real time saving. It is
@@ -259,9 +273,9 @@ Concretely, in order:
 1. ~~Extract `qrnew-core` with a styled-SVG generator. Switch the preview to
    `widget::svg` fed by the same function as the export.~~ Done.
 2. ~~Build insets and shapes in that core.~~ Done; see "What the rules turned
-   out to be" above. Nothing in the UI drives any of it yet — `QrStyle` still
-   arrives from `src/app.rs` with default shapes and no logo — so the next step
-   is controls for it.
+   out to be" above. Reading codes came along with it. Nothing in the UI drives
+   the styling yet — `QrStyle` still arrives from `src/app.rs` with default
+   shapes and no logo — so the next step is controls for it.
 3. Separately and at whatever pace suits you, chase the `tiny-skia` idle-repaint
    issue upstream. A 67 MB footprint is sitting there behind one bug.
 4. Revisit Tauri once the core exists.

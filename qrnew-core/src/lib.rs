@@ -12,6 +12,7 @@
 
 mod draw;
 mod logo;
+mod read;
 mod style;
 
 use std::fmt;
@@ -21,6 +22,7 @@ use resvg::tiny_skia;
 use resvg::usvg;
 
 pub use crate::logo::ImageFormat;
+pub use crate::read::{ReadError, read};
 pub use crate::style::{
     Clearing, DEFAULT_QUIET_ZONE, ErrorCorrection, Finder, FinderShape, Logo, ModuleShape, QrStyle,
     Rgb,

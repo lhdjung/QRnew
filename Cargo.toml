@@ -32,6 +32,12 @@ features = [
     "winit",
 ]
 
+# Image work — rasterizing and decoding — is unusably slow in an unoptimized
+# build, and it is all in dependencies. Optimizing those keeps `cargo test`
+# quick without giving up debug info in our own code.
+[profile.dev.package."*"]
+opt-level = 2
+
 [profile.release]
 opt-level = "z"
 lto = true

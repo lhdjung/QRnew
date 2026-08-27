@@ -2,7 +2,9 @@
 
 Local-only QR code generator
 
-Small, simple, and and offline-only, so user data remain private. Create a QR code immediately, then save it as PNG or SVG. You can also copy it, or scan it directly from screen.
+Small, simple, and offline-only, so user data remain private. Create a QR code immediately, then save it as PNG or SVG. You can also copy it, or scan it directly from screen.
+
+QRnew reads QR codes as well. Open an image file — PNG, JPEG, GIF, WebP or SVG — and its contents land in the input box, ready to be edited, restyled and saved again.
 
 ![demo](resources/qrnew-demo.png)
 

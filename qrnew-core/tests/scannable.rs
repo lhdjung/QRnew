@@ -4,20 +4,26 @@
 //!
 //! The unit tests check that each shape covers the middle of its own module,
 //! which is the property a scanner relies on. These tests check the conclusion
-//! rather than the reasoning: they rasterize the code and read it back with
-//! `rqrr`, an independent implementation that knows nothing about how it was
-//! drawn.
+//! rather than the reasoning: they export the code and read it back through
+//! `qrnew_core::read`, which decodes with `rqrr` — an independent
+//! implementation that knows nothing about how the code was drawn.
 
 use qrnew_core::{
     Clearing, ErrorCorrection, Finder, FinderShape, Logo, MAX_LOGO_AREA, ModuleShape, Qr, QrStyle,
-    Rgb,
+    ReadError, Rgb, read,
 };
 
 const DATA: &str = "https://github.com/lhdjung/QRnew";
 
-/// Pixels per module. Enough that a decoder is reading the shapes rather than
-/// fighting the resolution.
-const SCALE: u32 = 10;
+/// Pixels per module to export at before reading back.
+///
+/// More than one, deliberately. A style can decode at one resolution and fail
+/// at another — rounding a finder pattern's corners by a full module used to
+/// read fine at ten pixels per module and fail below it — so a single scale
+/// here proves much less than it looks like it does. Ten is the lowest this
+/// crate claims, and what the app exports at; the second is there to catch
+/// anything that depends on resolution in the other direction.
+const SCALES: [u32; 2] = [10, 16];
 
 /// A rounded blue square with a white ring, standing in for a real logo.
 const LOGO: &str = concat!(
@@ -30,33 +36,10 @@ fn logo() -> Vec<u8> {
     LOGO.as_bytes().to_vec()
 }
 
-/// Rasterizes a code and reads it back. Returns what the decoder made of it.
-fn scan(qr: &Qr) -> Result<String, String> {
-    let raster = qr.to_rgba(SCALE).unwrap();
-    let luma: Vec<u8> = raster
-        .pixels
-        .chunks_exact(4)
-        .map(|px| {
-            let [r, g, b] = [px[0] as u32, px[1] as u32, px[2] as u32];
-            ((r * 299 + g * 587 + b * 114) / 1000) as u8
-        })
-        .collect();
-
-    let mut image = rqrr::PreparedImage::prepare_from_greyscale(
-        raster.width as usize,
-        raster.height as usize,
-        |x, y| luma[y * raster.width as usize + x],
-    );
-
-    let grids = image.detect_grids();
-    if grids.is_empty() {
-        return Err("no code found".to_owned());
-    }
-
-    grids[0]
-        .decode()
-        .map(|(_, content)| content)
-        .map_err(|error| error.to_string())
+/// Exports a code as a PNG and reads it back, the way a user would who saved
+/// the file and opened it again.
+fn scan(qr: &Qr, scale: u32) -> Result<String, ReadError> {
+    read(&qr.to_png(scale).unwrap())
 }
 
 fn shapes() -> impl Iterator<Item = (ModuleShape, FinderShape)> {
@@ -82,7 +65,13 @@ fn every_combination_of_shapes_scans() {
         };
         let qr = Qr::new(DATA, ErrorCorrection::Medium, &style).unwrap();
 
-        assert_eq!(scan(&qr).as_deref(), Ok(DATA), "{module:?} + {finder:?}");
+        for scale in SCALES {
+            assert_eq!(
+                scan(&qr, scale).as_deref(),
+                Ok(DATA),
+                "{module:?} + {finder:?} at {scale} px per module",
+            );
+        }
     }
 }
 
@@ -107,11 +96,13 @@ fn every_combination_of_shapes_scans_with_a_logo_in_the_way() {
             };
             let qr = Qr::new(DATA, ErrorCorrection::Low, &style).unwrap();
 
-            assert_eq!(
-                scan(&qr).as_deref(),
-                Ok(DATA),
-                "{module:?} + {finder:?} + {clearing:?}",
-            );
+            for scale in SCALES {
+                assert_eq!(
+                    scan(&qr, scale).as_deref(),
+                    Ok(DATA),
+                    "{module:?} + {finder:?} + {clearing:?} at {scale} px per module",
+                );
+            }
         }
     }
 }
@@ -134,7 +125,9 @@ fn the_largest_logo_the_rules_allow_still_scans() {
     };
     let qr = Qr::new(&data, ErrorCorrection::Low, &style).unwrap();
 
-    assert_eq!(scan(&qr).as_deref(), Ok(data.as_str()));
+    for scale in SCALES {
+        assert_eq!(scan(&qr, scale).as_deref(), Ok(data.as_str()), "at {scale}");
+    }
 }
 
 /// Colors have to keep enough contrast for a decoder, and the code is drawn
@@ -154,5 +147,26 @@ fn a_recolored_code_scans() {
     };
     let qr = Qr::new(DATA, ErrorCorrection::Quartile, &style).unwrap();
 
-    assert_eq!(scan(&qr).as_deref(), Ok(DATA));
+    for scale in SCALES {
+        assert_eq!(scan(&qr, scale).as_deref(), Ok(DATA), "at {scale}");
+    }
+}
+
+/// The app saves SVG as well as PNG, and the reader takes an SVG through the
+/// same path as a raster. Saving a code and opening it again has to work in
+/// either format.
+#[test]
+fn an_svg_export_reads_back() {
+    let style = QrStyle {
+        module: ModuleShape::Rounded,
+        finder: Finder {
+            shape: FinderShape::Rounded,
+            ..Finder::default()
+        },
+        logo: Some(Logo::new(LOGO.as_bytes().to_vec())),
+        ..QrStyle::default()
+    };
+    let qr = Qr::new(DATA, ErrorCorrection::Medium, &style).unwrap();
+
+    assert_eq!(read(qr.svg().as_bytes()).as_deref(), Ok(DATA));
 }

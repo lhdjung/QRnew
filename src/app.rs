@@ -12,7 +12,7 @@ use cosmic::iced::{Alignment, Color, Length};
 use cosmic::prelude::*;
 use cosmic::widget::color_picker::ColorPickerUpdate;
 use cosmic::widget::{self, about::About};
-use qrnew_core::{ErrorCorrection, Qr, QrStyle, Rgb};
+use qrnew_core::{ErrorCorrection, Qr, QrStyle, ReadError, Rgb};
 
 const INPUT_ID: fn() -> widget::Id = || widget::Id::new("main-input");
 
@@ -32,6 +32,8 @@ pub struct AppModel {
     light_color_picker: widget::ColorPickerModel,
     show_about: bool,
     about: About,
+    /// Why the last attempt to read a code out of a file failed, if it did.
+    read_error: Option<ReadError>,
 }
 
 /// A generated code, kept next to the handle that draws its SVG on screen.
@@ -47,6 +49,8 @@ pub enum Message {
     DarkColorUpdate(ColorPickerUpdate),
     LightColorUpdate(ColorPickerUpdate),
     ResetColors,
+    ReadQrFile,
+    QrFileRead(Result<String, ReadError>),
     SaveQrPng,
     SaveQrSvg,
     CopyQr,
@@ -99,6 +103,7 @@ impl cosmic::Application for AppModel {
             ),
             show_about: false,
             about,
+            read_error: None,
         };
 
         let cmd = Task::batch([app.update_title(), widget::text_input::focus(INPUT_ID())]);
@@ -136,6 +141,39 @@ impl cosmic::Application for AppModel {
             .on_input(Message::InputChanged)
             .width(Length::Fixed(400.0))
             .id(INPUT_ID());
+
+        let read_row = widget::column::with_children({
+            let mut items: Vec<Element<_>> = vec![
+                widget::button::standard(fl!("read-file"))
+                    .on_press(Message::ReadQrFile)
+                    .into(),
+            ];
+
+            if let Some(error) = &self.read_error {
+                items.push(
+                    widget::text(match error {
+                        ReadError::NotAnImage => fl!("read-error-not-an-image"),
+                        ReadError::Damaged(_) => fl!("read-error-damaged"),
+                        ReadError::NoCode => fl!("read-error-no-code"),
+                        ReadError::Unreadable(_) => fl!("read-error-unreadable"),
+                    })
+                    .size(13)
+                    .width(Length::Fixed(400.0))
+                    .align_x(Horizontal::Center)
+                    .class(cosmic::theme::Text::Custom(|theme| {
+                        cosmic::iced::widget::text::Style {
+                            color: Some(theme.cosmic().destructive_text_color().into()),
+                            ..Default::default()
+                        }
+                    }))
+                    .into(),
+                );
+            }
+
+            items
+        })
+        .align_x(Alignment::Center)
+        .spacing(space_s);
 
         let ec_label = widget::tooltip(
             widget::text(fl!("ec-label")),
@@ -216,6 +254,7 @@ impl cosmic::Application for AppModel {
         let mut content_items: Vec<Element<_>> = vec![
             widget::text::title2(fl!("app-title")).into(),
             input.into(),
+            read_row.into(),
             ec_row.into(),
             color_row.into(),
         ];
@@ -255,6 +294,7 @@ impl cosmic::Application for AppModel {
     fn update(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::InputChanged(text) => {
+                self.read_error = None;
                 self.input = text;
                 self.draw_qr_code();
             }
@@ -298,6 +338,36 @@ impl cosmic::Application for AppModel {
                     .update::<cosmic::Action<Message>>(ColorPickerUpdate::ActionFinished);
                 self.redraw_if_restyled(previous);
             }
+
+            Message::ReadQrFile => {
+                return Task::perform(
+                    async move {
+                        let Some(handle) = rfd::AsyncFileDialog::new()
+                            .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "svg"])
+                            .pick_file()
+                            .await
+                        else {
+                            return Message::Noop;
+                        };
+
+                        Message::QrFileRead(match std::fs::read(handle.path()) {
+                            Ok(bytes) => qrnew_core::read(&bytes),
+                            Err(error) => Err(ReadError::Damaged(error.to_string())),
+                        })
+                    },
+                    cosmic::Action::App,
+                );
+            }
+
+            Message::QrFileRead(result) => match result {
+                Ok(text) => {
+                    self.read_error = None;
+                    self.input = text;
+                    self.draw_qr_code();
+                    return widget::text_input::focus(INPUT_ID());
+                }
+                Err(error) => self.read_error = Some(error),
+            },
 
             Message::SaveQrPng => {
                 let Some(qr) = self.current_qr() else {
