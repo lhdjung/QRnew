@@ -20,7 +20,7 @@ Go to [Releases][releases] and download the asset for your operating system, the
 
 ## Dev build
 
-Building from source needs the [Rust] toolchain, plus the development headers for `libxkbcommon` on Linux or the Xcode command line tools on macOS. [just] is optional, and only carries the packaging recipes.
+Building from source needs the [Rust] toolchain, plus the development headers for `fontconfig`, `libwayland` and `libxkbcommon` on Linux — `fontconfig` is linked rather than loaded at run time, so its absence stops the build rather than the app — or the Xcode command line tools on macOS. [just] is optional, and only carries the packaging recipes.
 
 ```sh
 git clone https://github.com/lhdjung/QRnew

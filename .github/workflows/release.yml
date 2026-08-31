@@ -39,6 +39,10 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      # `fontconfig` is what Parley finds fonts through, and it is linked
+      # rather than dlopened, so the build stops without its headers. GTK is
+      # not here any more: the file dialogs went from libcosmic to `rfd`, which
+      # asks the desktop portal over D-Bus and links nothing.
       - name: Install system dependencies
         if: runner.os == 'Linux'
         run: |
@@ -47,7 +51,7 @@ jobs:
             pkg-config \
             libwayland-dev \
             libxkbcommon-dev \
-            libgtk-3-dev
+            libfontconfig1-dev
 
       - run: cargo build --release --locked
 
@@ -78,7 +82,7 @@ jobs:
           <dict>
           <key>CFBundleName</key><string>QRnew</string>
           <key>CFBundleDisplayName</key><string>QRnew</string>
-          <key>CFBundleIdentifier</key><string>dev.lhdjung.QrNew</string>
+          <key>CFBundleIdentifier</key><string>dev.lhdjung.QRnew</string>
           <key>CFBundleVersion</key><string>0.1.0</string>
           <key>CFBundleShortVersionString</key><string>0.1.0</string>
           <key>CFBundleExecutable</key><string>qrnew</string>
@@ -97,8 +101,8 @@ jobs:
         run: |
           mkdir qrnew-linux
           cp target/release/qrnew                                   qrnew-linux/qrnew
-          cp resources/app.desktop                                   qrnew-linux/dev.lhdjung.QrNew.desktop
-          cp resources/icons/hicolor/scalable/apps/icon.svg          qrnew-linux/dev.lhdjung.QrNew.svg
+          cp resources/app.desktop                                   qrnew-linux/dev.lhdjung.QRnew.desktop
+          cp resources/icons/hicolor/scalable/apps/icon.svg          qrnew-linux/dev.lhdjung.QRnew.svg
           tar czf qrnew-linux.tar.gz qrnew-linux/
 
       - name: Package (Windows)

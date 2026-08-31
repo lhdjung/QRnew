@@ -1,7 +1,17 @@
-# Name of the application's binary.
+# The name the application is known by, which is not what cargo calls it.
 name := 'QRnew'
-# The unique ID of the application.
-appid := 'com.github.pop-os.cosmic-app-template'
+# Name of the application's binary, which is the package's and so lower case.
+# The two are only the same file on a case-insensitive filesystem, which is why
+# every recipe below takes the source from `bin` and the destination from
+# whichever of the two the platform shows a person.
+bin := 'qrnew'
+# The unique ID of the application, and the name every file that is not the
+# binary is installed under. The repository had three of these: the COSMIC
+# template's, still here; this one, in the metainfo and the desktop entry's
+# `Icon=`; and `dev.lhdjung.QrNew`, in the release workflow, which shipped a
+# desktop entry pointing at an icon installed under the other spelling. One ID,
+# and this is it.
+appid := 'dev.lhdjung.QRnew'
 
 # Path to root file system, which defaults to `/`.
 rootdir := ''
@@ -17,13 +27,18 @@ desktop := appid + '.desktop'
 # Application's icon.
 icon-svg := appid + '.svg'
 
+# Where those three come from, which is not what they are installed as.
+appdata-src := 'resources' / 'app.metainfo.xml'
+desktop-src := 'resources' / 'app.desktop'
+icon-src := 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'icon.svg'
+
 # Install destinations
 base-dir := absolute_path(clean(rootdir / prefix))
 appdata-dst := base-dir / 'share' / 'appdata' / appdata
-bin-dst := base-dir / 'bin' / name
+bin-dst := base-dir / 'bin' / bin
 desktop-dst := base-dir / 'share' / 'applications' / desktop
 icons-dst := base-dir / 'share' / 'icons' / 'hicolor'
-icon-svg-dst := icons-dst / 'scalable' / 'apps'
+icon-svg-dst := icons-dst / 'scalable' / 'apps' / icon-svg
 
 # Default recipe which runs `just build-release`
 default: build-release
@@ -62,14 +77,14 @@ run *args:
 
 # Installs files
 install:
-    install -Dm0755 {{ cargo-target-dir / 'release' / name }} {{bin-dst}}
-    install -Dm0644 {{ 'resources' / desktop }} {{desktop-dst}}
-    install -Dm0644 {{ 'resources' / appdata }} {{appdata-dst}}
-    install -Dm0644 {{ 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'icon.svg' }} {{icon-svg-dst}}
+    install -Dm0755 {{ cargo-target-dir / 'release' / bin }} {{bin-dst}}
+    install -Dm0644 {{desktop-src}} {{desktop-dst}}
+    install -Dm0644 {{appdata-src}} {{appdata-dst}}
+    install -Dm0644 {{icon-src}} {{icon-svg-dst}}
 
 # Uninstalls installed files
 uninstall:
-    rm {{bin-dst}} {{desktop-dst}} {{icon-svg-dst}}
+    rm {{bin-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-svg-dst}}
 
 # Creates a macOS .app bundle at QRnew.app/; drag it to /Applications to install
 bundle-macos: build-release
@@ -77,7 +92,7 @@ bundle-macos: build-release
     set -euo pipefail
     rm -rf QRnew.app
     mkdir -p QRnew.app/Contents/MacOS QRnew.app/Contents/Resources
-    cp {{cargo-target-dir}}/release/{{name}} QRnew.app/Contents/MacOS/{{name}}
+    cp {{cargo-target-dir}}/release/{{bin}} QRnew.app/Contents/MacOS/{{bin}}
     icon=resources/icons/hicolor/scalable/apps/icon.svg
     iconset=/tmp/QRnew_$$.iconset
     mkdir "$iconset"
@@ -95,10 +110,10 @@ bundle-macos: build-release
     <dict>
     <key>CFBundleName</key><string>QRnew</string>
     <key>CFBundleDisplayName</key><string>QRnew</string>
-    <key>CFBundleIdentifier</key><string>dev.lhdjung.QRnew</string>
+    <key>CFBundleIdentifier</key><string>{{appid}}</string>
     <key>CFBundleVersion</key><string>0.1.0</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    <key>CFBundleExecutable</key><string>{{name}}</string>
+    <key>CFBundleExecutable</key><string>{{bin}}</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>LSMinimumSystemVersion</key><string>11.0</string>
@@ -113,11 +128,11 @@ bundle-macos: build-release
 bundle-linux: build-release
     #!/usr/bin/env bash
     set -euo pipefail
-    install -Dm0755 {{cargo-target-dir}}/release/{{name}} ~/.local/bin/{{name}}
-    install -Dm0644 resources/app.desktop \
-        ~/.local/share/applications/dev.lhdjung.QRnew.desktop
-    install -Dm0644 resources/icons/hicolor/scalable/apps/icon.svg \
-        ~/.local/share/icons/hicolor/scalable/apps/dev.lhdjung.QRnew.svg
+    install -Dm0755 {{cargo-target-dir}}/release/{{bin}} ~/.local/bin/{{bin}}
+    install -Dm0644 {{desktop-src}} \
+        ~/.local/share/applications/{{desktop}}
+    install -Dm0644 {{icon-src}} \
+        ~/.local/share/icons/hicolor/scalable/apps/{{icon-svg}}
     update-desktop-database ~/.local/share/applications 2>/dev/null || true
     gtk-update-icon-cache -f ~/.local/share/icons/hicolor 2>/dev/null || true
 
@@ -127,7 +142,7 @@ bundle-windows: build-release
     set -euo pipefail
     rm -rf QRnew-windows
     mkdir QRnew-windows
-    cp {{cargo-target-dir}}/release/{{name}}.exe QRnew-windows/QRnew.exe
+    cp {{cargo-target-dir}}/release/{{bin}}.exe QRnew-windows/{{name}}.exe
     icon=resources/icons/hicolor/scalable/apps/icon.svg
     tmpdir=$(mktemp -d)
     for size in 16 32 48 64 128 256; do

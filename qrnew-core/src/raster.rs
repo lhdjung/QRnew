@@ -25,8 +25,7 @@ pub fn href(image: &[u8], format: ImageFormat) -> String {
 /// The size the image declares, which is its own rather than whatever document
 /// it is sitting in.
 ///
-/// `None` means `usvg` dropped the `<image>`, which it does when the bytes are
-/// not the picture they claim to be.
+/// `None` means the bytes are not the picture they claim to be.
 pub fn natural_size(href: &str) -> Option<(f32, f32)> {
     fn found_in(group: &usvg::Group) -> Option<(f32, f32)> {
         group.children().iter().find_map(|node| match node {
@@ -36,15 +35,32 @@ pub fn natural_size(href: &str) -> Option<(f32, f32)> {
         })
     }
 
-    // Nothing is drawn from this document, and an `<image>` reports the size
-    // of the picture rather than the size it was given, so one pixel square is
-    // as good a box as any — but it does have to *be* a box. An `<image>` with
-    // no width or height at all is sized from the file's own header and kept
-    // whatever that header says, so the bad bytes above arrive as an image half
-    // a billion pixels wide rather than as no image at all.
+    // Nothing is drawn from this document, and an `<image>` reports the size of
+    // the picture rather than the size it was given, so one pixel square is as
+    // good a box as any.
     let tree = usvg::Tree::from_str(&document(1, 1, href), &usvg::Options::default()).ok()?;
+    let size = found_in(tree.root())?;
 
-    found_in(tree.root())
+    decodes(href).then_some(size)
+}
+
+/// Whether the bytes really are a picture, which is not a question the size
+/// answers.
+///
+/// `usvg` reads a size out of the file's own header and takes its word for it:
+/// eight PNG magic bytes followed by nonsense arrive as an image half a billion
+/// pixels wide rather than as no image at all. Nothing short of decoding tells
+/// the two apart — 0.45 decoded while parsing and dropped the node, 0.48 leaves
+/// it to the render — so draw the thing into a thumbnail with nothing behind
+/// it. A picture leaves something in there; a failed decode leaves it clear.
+///
+/// A wholly transparent image is clear too, and is called damaged rather than
+/// blank. It holds no code either way.
+fn decodes(href: &str) -> bool {
+    const PROBE: (u32, u32) = (8, 8);
+
+    draw(href, PROBE, None)
+        .is_some_and(|pixmap| pixmap.pixels().iter().any(|pixel| pixel.alpha() > 0))
 }
 
 /// The image drawn at `size`, over `background` if it is given one.

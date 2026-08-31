@@ -1,5 +1,12 @@
 # macOS Porting Protocol for QRnew
 
+> **This describes the libcosmic build, which the Dioxus Native rewrite
+> replaced.** None of the changes below apply to the current tree: there is no
+> `libcosmic` dependency to give a backend to, and the window comes from
+> `winit` by way of Blitz on all three platforms. It is kept because every
+> release published so far is a libcosmic build, and because
+> `tauri-assessment.md` and `dioxus-assessment.md` both argue against it.
+
 ## Background
 
 QRnew is built on `libcosmic`, the Pop!_OS COSMIC desktop framework. By default, libcosmic depends on Wayland as its windowing system, which does not exist on macOS. libcosmic is built on top of `iced`, which supports macOS via `winit` (a cross-platform windowing library backed by AppKit on macOS). The changes below switch the windowing backend from Wayland to winit and fix one API difference that exists between the two backends.

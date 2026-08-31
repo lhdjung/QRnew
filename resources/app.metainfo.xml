@@ -11,7 +11,7 @@
   <provides>
     <id>dev.lhdjung.QRnew</id>
     <binaries>
-      <binary>QRnew</binary>
+      <binary>qrnew</binary>
     </binaries>
   </provides>
   <requires>
@@ -23,11 +23,14 @@
     <control>touch</control>
   </supports>
   <categories>
-    <category>COSMIC</category>
+    <category>Utility</category>
+    <category>Graphics</category>
   </categories>
   <keywords>
-    <keyword>COSMIC</keyword>
     <keyword>QR</keyword>
+    <keyword>barcode</keyword>
+    <keyword>generator</keyword>
+    <keyword>offline</keyword>
   </keywords>
   <content_rating type="oars-1.1" />
 </component>

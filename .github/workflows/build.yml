@@ -2,7 +2,11 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    # `dioxus-native` is here while the rewrite lives on it: Linux and Windows
+    # are the two platforms the migration has never been run on, and a branch
+    # that only builds after it merges answers the question too late.
+    branches: [main, dioxus-native]
+  pull_request:
 
 jobs:
   build:
@@ -36,6 +40,10 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      # `fontconfig` is what Parley finds fonts through, and it is linked
+      # rather than dlopened, so the build stops without its headers. GTK is
+      # not here any more: the file dialogs went from libcosmic to `rfd`, which
+      # asks the desktop portal over D-Bus and links nothing.
       - name: Install system dependencies
         if: runner.os == 'Linux'
         run: |
@@ -44,7 +52,7 @@ jobs:
             pkg-config \
             libwayland-dev \
             libxkbcommon-dev \
-            libgtk-3-dev
+            libfontconfig1-dev
 
       - run: cargo test --workspace --locked
 

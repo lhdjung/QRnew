@@ -329,9 +329,8 @@ not nothing.
   exists as a fallback, but choosing between them per machine is new work.
 - **Whether a published Blitz release suffices.** The spike used a `main`
   clone because one was already on this machine.
-- **Long inputs.** Measured with one URL. A 2,331-character input produces a
-  much larger matrix and a much larger SVG document; nothing suggests a problem,
-  but nothing measured one either.
+- **Long inputs.** ~~Measured with one URL.~~ Measured — see section 6. A
+  2,255-character input costs 3.3 MB more than a short URL and no CPU at all.
 - **Startup time.** Not instrumented on either side.
 
 ## Recommendation
@@ -429,7 +428,7 @@ has the saturation/value square this document budgeted most of the work for.
 `qrnew-core` was not touched. Fifteen interface tests run headlessly in half a
 second, and QRnew had none before.
 
-Five things this document got wrong or could not know.
+Six things this document got wrong or could not know.
 
 ## 1. IME exists now, and the blocker is gone
 
@@ -522,17 +521,118 @@ No `MountedData::set_focus`, no `RefCell already borrowed`, no custom
 its `inner` private and wrapping it is not the small job the reference tree's
 shell makes it look.
 
+## 6. The finished app costs more than the spike, and a picture costs a lot
+
+The table at the top measures a 129-line spike with a code on screen and
+nothing else. The finished app was never measured until now. Same machine,
+same method — release build, `--quit`, `vmmap --summary`, physical footprint,
+three runs where the spread is quoted and two where it is not.
+
+One difference in the method matters: **the spike was measured at 1019×762 and
+the app cannot be.** `--width 1019` asks for a window narrower than the
+interface's own minimum, and winit hands back 1160×762 — three columns need the
+room. That is 3.4 MB more swapchain (27.8 MB of `IOSurface` against the spike's
+24.4), and it is part of every figure below.
+
+| state | settled | peak | idle CPU |
+| --- | ---: | ---: | ---: |
+| a URL, no picture | **73.6 MB** | 195.6 MB | 0.00 s |
+| the largest input a code can hold (2,255 characters) | 76.9 MB | 201.7 MB | 0.00 s |
+| a 200×200 picture in the middle | 129.1 MB | 266.7 MB | 0.00 s |
+| a 512×512 picture | 144.3 MB | 281.3 MB | 0.00 s |
+| a 10.7-megapixel photograph | 196.8 MB | 336.3 MB | 0.00 s |
+| *(the same photograph, before the change below)* | *237.4 MB* | *376.8 MB* | *0.00 s* |
+
+Read the first row against the two figures this document already has: **73.6 MB
+against the libcosmic build's 160.7 MB.** The case holds. The spike's 63.8 MB
+was optimistic by about ten megabytes, which is i18n, the file reader, the
+exports, the clipboard, the About panel and a colour picker — and the wider
+window. Idle CPU is still zero, at every size, and the largest code a QR
+can hold costs three megabytes more than a short URL. Long inputs are no
+longer unmeasured.
+
+**The inset is the finding.** A picture in the middle of the code costs between
+55 and 123 MB, and `vmmap`'s region table says where it goes:
+
+| region, resident | no picture | a 200×200 picture | a photograph |
+| --- | ---: | ---: | ---: |
+| `owned unmapped (graphics)` | 17.2 MB | 83.8 MB | 83.8 MB |
+| `MALLOC_LARGE (empty)` | 0.0 MB | 0.0 MB | 94.6 MB |
+
+Two separate things, and only one of them is QRnew's.
+
+**The 66.6 MB is `vello_hybrid`'s image atlas**, which is 4096×4096 RGBA —
+67.1 MB — and is allocated whole the first time any image is drawn, at the same
+size for a 200-pixel thumbnail as for a photograph. It is the same allocation
+whose `TextureTooLarge` closed the window before `MAX_LOGO_SIDE` existed. There
+is no way to ask for a smaller one through `dioxus-native`, so this is
+upstream's number and it is a hard 67 MB on the day a person picks their first
+picture. Worth saying plainly: **with an inset in place, this app is no cheaper
+than the libcosmic build it replaces.** Without one — which is every code the
+app has ever drawn until the inset feature landed — it is less than half.
+
+**The 94.6 MB is the crate's own downscaling, and it came down to 54.**
+`shrink_logo` decoded the photograph at its natural size (4167×2573 is 43 MB as
+a pixmap) and halved it from there, while `resvg` held a full-size decode of
+its own behind the same call. Those pages are freed and macOS keeps them
+resident — `malloc_zone_pressure_relief` on the default zone and on all zones
+returns zero and releases nothing — so the app carries them for as long as it
+runs. The chain now starts at half the natural size whenever it has a halving
+to spare, which is `resvg`'s 2:1 filter in place of the first box halving.
+Measured on a zone plate against a true box average: **9.2 levels out of 255
+for the old chain, 10.2 for the new one, 22.9 starting a quarter of the way
+down, and 53.3 going straight to the target in one leap.** One level for three
+quarters of the largest allocation the crate makes, and
+`a_scaled_photograph_is_averaged_rather_than_sampled` holds the line at 20.
+
+`shrink_logo` on that photograph: 98.3 MB of footprint before, 57.3 MB after.
+In the app: 237.4 MB settled before, 196.8 MB after.
+
 ## What is still open
 
-- **Linux and Windows.** Still unrun. The existing `build.yml` already does
-  `cargo test --workspace` on all three, so the first push to this branch is
-  the answer; its apt list may need widening.
-- **Two copies of `usvg`.** `qrnew-core` is on `resvg 0.45`, `blitz-dom` on
-  `usvg 0.48`. The preview and the export still go through the same *code*,
-  but not the same *build* of it. Bumping the core dedupes them.
+- **Linux and Windows.** Still unrun, but no longer unrunnable. `build.yml`
+  only fired on `main`, so a branch could not be checked until after it had
+  been merged; it now fires on this branch and on pull requests. Its apt list
+  did need widening, and in the direction nobody would have guessed from the
+  error: **Parley finds fonts through `fontconfig`, and `yeslogic-fontconfig-sys`
+  links it rather than dlopening it**, so the build stops in a `build.rs` with
+  `pkg_config::find_library("fontconfig").unwrap()` before a line of QRnew is
+  compiled. `libgtk-3-dev` came off the same list — `rfd` asks the desktop
+  portal over D-Bus and there is no GTK anywhere in the tree any more. What
+  neither can be checked from here is whether Stylo, Parley and fontique lay
+  the interface out the same way on a machine whose default font is not San
+  Francisco; the tests that measure anything measure fixed CSS sizes or
+  compare two boxes with slack, which is the shape that survives a font
+  change, but that is an argument rather than a run.
+- **Two copies of `usvg` — closed.** `qrnew-core` is on `resvg 0.48` and the
+  whole tree shares one build of `usvg`, `tiny-skia`, `png` and `base64`. It
+  cost one behaviour change, and it is a change worth knowing about: **0.45
+  decoded an `<image>` while parsing and dropped the node when the bytes were
+  not a picture; 0.48 believes the size in the file's header and leaves the
+  decoding to the render.** Eight PNG magic bytes followed by nonsense arrive
+  as an image half a billion pixels wide. `raster::natural_size` now draws the
+  thing into an 8×8 thumbnail with nothing behind it and calls it a picture
+  only if something lands in there, which is the one question a size cannot
+  answer.
 - **Backspace cannot be tested on macOS.** `blitz-dom` routes it through
   AppKit's standard key bindings, which arrive from a window; the headless
   harness cannot produce one. The hex field's test clears with Home and Delete
   and says so.
-- **Packaging, and the COSMIC identity.** Exactly as this document described.
-  Nothing here helps with either.
+- **The COSMIC identity — closed, as far as the packaging goes.** The desktop
+  entry was `Categories=COSMIC` with `Exec=QRnew`, which is not a freedesktop
+  category and not the name of the binary cargo builds; the metainfo listed
+  COSMIC as a category and a keyword; and the app had three IDs, one of them
+  still the COSMIC template's. One ID now (`dev.lhdjung.QRnew`), one binary
+  name (`qrnew`, with `QRnew` kept as the name a person sees), and the recipes
+  take the source from one and the destination from the other — which is what
+  `just install` and `just bundle-linux` were getting wrong in a way that only
+  shows on a case-sensitive filesystem.
+- **The atlas, and it is now the largest single number in the app.** 67 MB the
+  moment a picture is drawn, for a picture that is at most 512 pixels on its
+  longest side. `vello_hybrid` takes an `AtlasConfig`, and nothing between here
+  and it — `anyrender_vello_hybrid`, `blitz-paint`, `dioxus-native` — passes one
+  through. That is an upstream ask rather than a workaround, and it is the one
+  change that would put an inset back inside this document's headline.
+- **Packaging itself.** Unchanged and unhelped: `codesign --sign -` is still an
+  ad-hoc signature, there is still no notarization, and the README still warns
+  about the first launch.

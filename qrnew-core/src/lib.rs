@@ -374,8 +374,25 @@ pub fn shrink_logo(image: &[u8]) -> Option<Vec<u8>> {
 /// to five hundred samples one row in eight and throws the rest away, so fine
 /// detail arrives as speckle; halving averages every pixel into the one below
 /// it, and the step that finishes the job is always under 2:1.
+///
+/// The first draw is the expensive one — a ten-megapixel photograph is 43 MB
+/// as a pixmap, and `resvg` has already decoded its own copy of the same
+/// thing behind this call — so it is made at half the natural size whenever
+/// the chain has a halving to spare. That swaps the first box halving for
+/// `resvg`'s own 2:1 filter, which is measurably almost the same picture: on a
+/// zone plate, the standard way to make a downscaler show what it throws away,
+/// the two chains land 9.2 and 10.2 levels out of 255 from a true box average,
+/// while starting a quarter of the way down lands 22.9 and going straight to
+/// the target lands 53.3. One level of accuracy for three quarters of the
+/// largest allocation the crate makes.
 fn in_halves(href: &str, natural: (u32, u32), target: (u32, u32)) -> Option<tiny_skia::Pixmap> {
-    let mut pixmap = raster::draw(href, natural, None)?;
+    let room_to_spare = natural.0 >= target.0 * 4 && natural.1 >= target.1 * 4;
+    let first = if room_to_spare {
+        (natural.0 / 2, natural.1 / 2)
+    } else {
+        natural
+    };
+    let mut pixmap = raster::draw(href, first, None)?;
 
     while pixmap.width() >= target.0 * 2 && pixmap.height() >= target.1 * 2 {
         let half = (pixmap.width() / 2, pixmap.height() / 2);
@@ -700,6 +717,110 @@ mod tests {
     #[test]
     fn bytes_that_are_not_an_image_are_left_alone() {
         assert_eq!(shrink_logo(b"not an image at all"), None);
+    }
+
+    /// Magic bytes are a claim, not a picture. `usvg` believes the claim and
+    /// reads a size out of whatever follows them — here half a billion pixels
+    /// wide — so this is the case that has to be caught by decoding rather than
+    /// by measuring.
+    #[test]
+    fn bytes_that_only_claim_to_be_an_image_are_left_alone() {
+        let mut lying = b"\x89PNG\r\n\x1a\n".to_vec();
+        lying.extend_from_slice(b"and then nothing that belongs in one");
+
+        assert_eq!(shrink_logo(&lying), None);
+    }
+
+    /// A zone plate — rings that get finer towards the edge — is the standard
+    /// way to make a downscaler show what it throws away, and it is the one
+    /// picture where the difference between [`in_halves`] and a single leap to
+    /// the target is not a matter of taste. Against a true box average the
+    /// chain lands about ten levels out of 255 and one leap lands above fifty,
+    /// so the bound below is not a tight fit to the current number: it is the
+    /// line between averaging and sampling.
+    #[test]
+    fn a_scaled_photograph_is_averaged_rather_than_sampled() {
+        let (width, height) = (2048, 1536);
+        let plate = zone_plate(width, height);
+        let shrunk = shrink_logo(&plate).unwrap();
+
+        let href = raster::href(&shrunk, ImageFormat::Png);
+        let target = raster::natural_size(&href).unwrap();
+        let target = (target.0 as u32, target.1 as u32);
+        let scaled = raster::draw(&href, target, None).unwrap();
+
+        let full = raster::draw(
+            &raster::href(&plate, ImageFormat::Png),
+            (width, height),
+            None,
+        );
+        let reference = box_average(&full.unwrap(), target);
+
+        let difference = mean_difference(&scaled, &reference);
+        assert!(
+            difference < 20.0,
+            "{difference} levels away from a box average"
+        );
+    }
+
+    /// Rings whose spacing falls off with the square of the distance from the
+    /// middle, drawn as a PNG.
+    fn zone_plate(width: u32, height: u32) -> Vec<u8> {
+        let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
+        let (cx, cy) = (f64::from(width) / 2.0, f64::from(height) / 2.0);
+        for y in 0..height {
+            for x in 0..width {
+                let (dx, dy) = (f64::from(x) - cx, f64::from(y) - cy);
+                let level = (((dx * dx + dy * dy) * 0.0009).sin() * 0.5 + 0.5) * 255.0;
+                let level = level as u8;
+                pixmap.pixels_mut()[(y * width + x) as usize] =
+                    tiny_skia::ColorU8::from_rgba(level, level, level, 255).premultiply();
+            }
+        }
+        pixmap.encode_png().unwrap()
+    }
+
+    /// Every source pixel averaged into the one it lands in, which is what a
+    /// downscale is supposed to approximate.
+    fn box_average(source: &tiny_skia::Pixmap, size: (u32, u32)) -> tiny_skia::Pixmap {
+        let mut out = tiny_skia::Pixmap::new(size.0, size.1).unwrap();
+        let across = f64::from(source.width()) / f64::from(size.0);
+        let down = f64::from(source.height()) / f64::from(size.1);
+        let width = source.width() as usize;
+        for y in 0..size.1 {
+            for x in 0..size.0 {
+                let x0 = (f64::from(x) * across) as usize;
+                let x1 = ((f64::from(x + 1) * across) as usize).max(x0 + 1);
+                let y0 = (f64::from(y) * down) as usize;
+                let y1 = ((f64::from(y + 1) * down) as usize).max(y0 + 1);
+                let (mut sum, mut count) = (0u64, 0u64);
+                for row in y0..y1 {
+                    for column in x0..x1 {
+                        sum += u64::from(source.pixels()[row * width + column].red());
+                        count += 1;
+                    }
+                }
+                let level = (sum / count) as u8;
+                out.pixels_mut()[(y * size.0 + x) as usize] =
+                    tiny_skia::ColorU8::from_rgba(level, level, level, 255).premultiply();
+            }
+        }
+        out
+    }
+
+    /// Mean absolute difference in levels out of 255, on the grey the two
+    /// pictures above are drawn in.
+    fn mean_difference(a: &tiny_skia::Pixmap, b: &tiny_skia::Pixmap) -> f64 {
+        assert_eq!((a.width(), a.height()), (b.width(), b.height()));
+        let total: u64 = a
+            .pixels()
+            .iter()
+            .zip(b.pixels())
+            .map(|(one, other)| {
+                u64::from((i32::from(one.red()) - i32::from(other.red())).unsigned_abs())
+            })
+            .sum();
+        total as f64 / f64::from(a.width() * a.height())
     }
 
     /// The scaled picture has to survive everything the original would have:
