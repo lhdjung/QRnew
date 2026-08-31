@@ -370,8 +370,8 @@ mod tests {
     fn style_colors_reach_the_document() {
         let svg = render_svg(SHORT, ErrorCorrection::Medium, &styled()).unwrap();
 
-        assert!(svg.contains(r##"fill="#FF0000""##), "{svg}");
-        assert!(svg.contains(r##"fill="#0000FF""##), "{svg}");
+        assert!(svg.contains(r##"fill="#ff0000""##), "{svg}");
+        assert!(svg.contains(r##"fill="#0000ff""##), "{svg}");
         assert!(!svg.contains("#000000"), "{svg}");
     }
 

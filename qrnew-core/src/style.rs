@@ -22,9 +22,15 @@ impl Rgb {
         Self { r, g, b }
     }
 
-    /// Formats the color as `#RRGGBB`.
+    /// Formats the color as `#rrggbb`.
+    ///
+    /// Lower case, everywhere and without exception: this string is what the
+    /// interface puts in front of somebody as *their* colour, and a hex code
+    /// in capitals reads as machine output rather than as a value they chose.
+    /// The SVG is written with the same function, so a saved file and the
+    /// window agree character for character.
     pub fn to_hex(self) -> String {
-        format!("#{:02X}{:02X}{:02X}", self.r, self.g, self.b)
+        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
     }
 }
 

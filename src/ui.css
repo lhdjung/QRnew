@@ -59,6 +59,10 @@
   --accent-line: rgba(78, 203, 143, 0.45);
 
   --danger: #ff9585;
+  /* A caution rather than a failure: the app will happily draw a code with a
+   * one-module border, it just will not promise the code scans. Salmon is
+   * already spoken for by the things that did not work. */
+  --warn: #e9c07c;
   --shadow-deep: rgba(0, 0, 0, 0.6);
 }
 
@@ -189,20 +193,29 @@ body {
   border-radius: 16px;
 }
 
+/* A section's name. Larger *and* brighter than the controls under it rather
+ * than the same size in a paler ink, so the eye can find the top of a card
+ * without reading it. The heads were dimmer than the labels they sat above,
+ * which is exactly backwards for the one line that says where you are. */
 .card-head {
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 9px;
-  color: var(--ink-2);
-  font-size: 14px;
+  color: var(--ink);
+  font-size: 16px;
   font-weight: 600;
+  letter-spacing: -0.005em;
 }
 
+/* The sentence under a control that says what it does. It was 13px in the
+ * palest ink there is, which is a footnote — and a footnote is the wrong
+ * shape for the only explanation the app offers. Same ink as the labels it
+ * explains, so it reads as part of the control rather than as fine print. */
 .hint {
   margin: 0;
-  color: var(--ink-3);
-  font-size: 13px;
+  color: var(--ink-2);
+  font-size: 15px;
   line-height: 1.45;
 }
 
@@ -210,9 +223,9 @@ body {
  * sentence still wraps, and so an empty one still holds its place. */
 .note {
   margin: -4px 0 0;
-  min-height: 18px;
-  color: var(--ink-3);
-  font-size: 13px;
+  min-height: 20px;
+  color: var(--ink-2);
+  font-size: 14.5px;
   line-height: 1.4;
 }
 
@@ -220,12 +233,17 @@ body {
   color: var(--danger);
 }
 
-/* The preview column. */
+/* The preview column.
+ *
+ * Top-aligned, not centred. Centring put the code lower than everything
+ * beside it, so the window read as two columns of interface with a picture
+ * floating past them; starting the code at the height the cards start at
+ * gives the three columns one shared top edge. */
 .stage {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 22px;
   flex: 1 1 auto;
   min-width: 0;
@@ -389,22 +407,136 @@ body {
 }
 
 .well-name {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 500;
   line-height: 1.25;
 }
 
+/* The hex under the name. It used to be 11.5px of monospace, which made the
+ * one piece of the interface a person reads back to somebody else the hardest
+ * thing in the window to read — and made it look like a log line in an app
+ * that has none anywhere else. The system font at a legible size, with a
+ * little air between the characters so the digits still hold their shape. */
 .well-hex {
-  font-family: ui-monospace, "SF Mono", "Cascadia Mono", monospace;
-  font-size: 11.5px;
+  font-size: 13.5px;
   line-height: 1.3;
-  color: var(--ink-3);
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
 }
 
 .error {
   margin: 0;
   color: var(--danger);
-  font-size: 13px;
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+
+/* -------------------------------------------------------------- read-out */
+
+/* What came out of an image. It is a panel rather than a line of text because
+ * it can be anything from a four-digit number to a paragraph, and because the
+ * button under it belongs to it and not to the card. */
+.readout {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.readout-head {
+  color: var(--ink-2);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+/* A code can hold a few thousand characters, so this is capped and scrolls
+ * rather than pushing the rest of the column out of the window. Selectable,
+ * because reading a code and then taking part of what it said is an ordinary
+ * thing to want — the button beside it only offers the whole of it. */
+.readout-text {
+  margin: 0;
+  max-height: 96px;
+  overflow-y: auto;
+  color: var(--ink);
+  font-size: 14.5px;
+  line-height: 1.45;
+  /* A code's payload is more often a URL than a sentence, and a URL is one
+   * long word: without this it would run out of the card rather than wrap. */
+  overflow-wrap: break-word;
+  user-select: text;
+}
+
+/* ---------------------------------------------------------------- stepper */
+
+/* The margin control: a number with a button on either side of it, which is
+ * the layout somebody expects from a quantity they are going to nudge.
+ *
+ * The buttons are wide and the field is not. It holds one integer — two
+ * digits at the very most — so a field stretched across the card was
+ * promising room nobody can use, while the two targets that get pressed over
+ * and over were the smallest things in the column. The space went to them,
+ * and what is left over goes to the warning. */
+.stepper {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 56px;
+  height: 44px;
+  padding: 0;
+  background: var(--raised);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+}
+
+.step:hover {
+  background: var(--raised-hi);
+  border-color: #464d57;
+}
+
+.count {
+  flex: 0 0 62px;
+  height: 44px;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 17px;
+  text-align: center;
+  color: var(--ink);
+  background: var(--sunken);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  user-select: text;
+}
+
+.count:hover {
+  border-color: var(--raised-hi);
+}
+
+.count:focus {
+  background: #14171a;
+  border-color: var(--accent-line);
+  outline: none;
+}
+
+/* The caution that appears when the margin goes under two, in the space the
+ * stepper leaves at the end of its row. It is only ever on screen while the
+ * value it is about is on screen next to it. */
+.warn {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--warn);
+  font-size: 12.5px;
+  line-height: 1.35;
 }
 
 /* ----------------------------------------------------------------- picker */
@@ -472,11 +604,11 @@ body {
 }
 
 .hex {
-  width: 122px;
-  padding: 8px 10px;
+  width: 132px;
+  padding: 9px 10px;
   font: inherit;
   font-family: ui-monospace, "SF Mono", "Cascadia Mono", monospace;
-  font-size: 13px;
+  font-size: 14.5px;
   color: var(--ink);
   background: var(--sunken);
   border: 1px solid var(--line-2);

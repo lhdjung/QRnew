@@ -75,6 +75,32 @@ fn every_combination_of_shapes_scans() {
     }
 }
 
+/// A narrow quiet zone is still a quiet zone.
+///
+/// The standard asks for four modules of blank border and this crate defaults
+/// to four, but the app lets somebody take it down — and opens on two, because
+/// four is a third of a small code's width and looks like a mistake on screen.
+/// That is only a defensible default if a code drawn that way actually reads,
+/// so this is where the claim is checked rather than assumed.
+#[test]
+fn a_narrow_margin_still_scans() {
+    for quiet_zone in [2, 3, 4] {
+        let style = QrStyle {
+            quiet_zone,
+            ..QrStyle::default()
+        };
+        let qr = Qr::new(DATA, ErrorCorrection::Medium, &style).unwrap();
+
+        for scale in SCALES {
+            assert_eq!(
+                scan(&qr, scale).as_deref(),
+                Ok(DATA),
+                "a {quiet_zone}-module margin at {scale} px per module",
+            );
+        }
+    }
+}
+
 #[test]
 fn every_combination_of_shapes_scans_with_a_logo_in_the_way() {
     for (module, finder) in shapes() {

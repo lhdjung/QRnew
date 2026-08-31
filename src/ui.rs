@@ -43,6 +43,34 @@ use crate::fl;
 /// Resolution of saved and copied images, in pixels per module.
 const EXPORT_SCALE: u32 = 10;
 
+/// The narrowest border the app is prepared to vouch for, in modules.
+///
+/// Two modules of white is enough for a phone camera to find the edge of the
+/// code; below that a scan starts to depend on what the code is printed on and
+/// on how steady the hand holding the camera is. The claim is checked rather
+/// than assumed — `a_narrow_margin_still_scans` in `qrnew-core` decodes a
+/// two-module border at both export sizes.
+///
+/// It is one constant and not two because the default and the warning are the
+/// same idea from either side: the app opens at the narrowest border it will
+/// stand behind, and says so as soon as somebody goes under it.
+pub const SAFE_MARGIN: u32 = 2;
+
+/// Width of the blank border the app starts with, in modules.
+///
+/// The QR standard asks for four, which `qrnew_core::DEFAULT_QUIET_ZONE` is,
+/// and four is visibly generous on screen: a third of a small code's width is
+/// border. [`SAFE_MARGIN`] is what the app opens at instead, and the control
+/// is right there for anybody printing something that has to survive a bad
+/// photocopier.
+pub const DEFAULT_MARGIN: u32 = SAFE_MARGIN;
+
+/// As wide a border as the stepper will go to.
+///
+/// Past this the code is a stamp in the middle of an empty page, and the
+/// preview stops being a useful picture of what gets saved.
+pub const MAX_MARGIN: u32 = 16;
+
 /// The colours offered in the picker.
 ///
 /// Two rows of eight: a grey ramp, and hues dark enough to still read as the
@@ -93,22 +121,23 @@ pub fn App() -> Element {
     let mut input = use_signal(|| {
         dioxus_core::try_consume_context::<Fill>().map_or_else(String::new, |fill| fill.0)
     });
-    // Bumped when the app — rather than the person — puts text in the field,
-    // which happens in exactly one place: after a code is read out of a file.
-    //
-    // It is the field's `key`, so a bump rebuilds the element instead of
-    // updating it, and rebuilding re-runs `autofocus`. That is how the
-    // keyboard comes back to the field once the file dialog has closed, which
-    // is what `widget::text_input::focus` did in the libcosmic build.
-    //
-    // The roundabout route is the point: the direct way to ask for the focus
-    // is `MountedData::set_focus`, and it takes `doc_mut()` from inside a
-    // borrow an event handler is already holding, so it panics with `RefCell
-    // already borrowed` from a stack that names neither.
-    let mut revision = use_signal(|| 0u32);
     let mut ec = use_signal(|| ErrorCorrection::Medium);
     let mut dark = use_signal(|| Rgb::BLACK);
     let mut light = use_signal(|| Rgb::WHITE);
+    let mut margin = use_signal(|| DEFAULT_MARGIN);
+    // The stepper's field keeps its own text for the same reason the hex field
+    // does: half-typed input is not a number, and a field rewritten from the
+    // value on every keystroke cannot be emptied to type a new one into.
+    let mut margin_draft = use_signal(|| DEFAULT_MARGIN.to_string());
+    // What was decoded out of an image, and whether it has been copied since.
+    //
+    // It is shown under the button rather than dropped into the field: reading
+    // a code and writing one are two different errands, and somebody checking
+    // what a printed code says did not ask for the code they were looking at
+    // to become the code the app is drawing.
+    let mut read_text = use_signal(|| None::<String>);
+    let mut copied = use_signal(|| false);
+    let mut copied_image = use_signal(|| false);
     let mut read_error = use_signal(|| None::<ReadError>);
     let mut editing = use_signal(|| Well::Dark);
     let mut about = use_signal(|| false);
@@ -124,6 +153,7 @@ pub fn App() -> Element {
         let style = QrStyle {
             dark: dark(),
             light: light(),
+            quiet_zone: margin(),
             ..QrStyle::default()
         };
         // `Err` is an input past what the densest code can hold. The libcosmic
@@ -145,16 +175,20 @@ pub fn App() -> Element {
             else {
                 return;
             };
-            match std::fs::read(handle.path()) {
-                Ok(bytes) => match qrnew_core::read(&bytes) {
-                    Ok(text) => {
-                        read_error.set(None);
-                        input.set(text);
-                        *revision.write() += 1;
-                    }
-                    Err(error) => read_error.set(Some(error)),
-                },
-                Err(error) => read_error.set(Some(ReadError::Damaged(error.to_string()))),
+            let outcome = match std::fs::read(handle.path()) {
+                Ok(bytes) => qrnew_core::read(&bytes),
+                Err(error) => Err(ReadError::Damaged(error.to_string())),
+            };
+            match outcome {
+                Ok(text) => {
+                    read_error.set(None);
+                    copied.set(false);
+                    read_text.set(Some(text));
+                }
+                Err(error) => {
+                    read_text.set(None);
+                    read_error.set(Some(error));
+                }
             }
         });
     };
@@ -197,12 +231,42 @@ pub fn App() -> Element {
             return;
         };
         if let Ok(mut clipboard) = arboard::Clipboard::new() {
-            let _ = clipboard.set_image(arboard::ImageData {
+            let copy = clipboard.set_image(arboard::ImageData {
                 width: raster.width as usize,
                 height: raster.height as usize,
                 bytes: raster.pixels.into(),
             });
+            copied_image.set(copy.is_ok());
         }
+    };
+
+    let copy_text = move |_| {
+        let Some(text) = read_text() else { return };
+        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+            copied.set(clipboard.set_text(text).is_ok());
+        }
+    };
+
+    // The confirmation belongs to the image that was copied, so any edit that
+    // redraws the code takes it back: what is on the clipboard is no longer
+    // what is on the stage, and a button still saying "Copied." would be
+    // claiming otherwise.
+    use_effect(move || {
+        code.read();
+        // `peek`, not a read: subscribing to the flag here would make the
+        // effect run on the write that raises it and put it straight back
+        // down again.
+        if *copied_image.peek() {
+            copied_image.set(false);
+        }
+    });
+
+    // Both stepper buttons and the field itself go through here, so the number
+    // and the text under it cannot disagree about what the margin is.
+    let mut set_margin = move |next: u32| {
+        let next = next.min(MAX_MARGIN);
+        margin.set(next);
+        margin_draft.set(next.to_string());
     };
 
     // Whether there is anything to save, copy or look at. It decides both the
@@ -256,7 +320,6 @@ pub fn App() -> Element {
                             span { {fl!("section-content")} }
                         }
                         input {
-                            key: "{revision}",
                             class: "field",
                             r#type: "text",
                             // The field is the app, so it holds the keyboard
@@ -299,6 +362,30 @@ pub fn App() -> Element {
                                 }
                             }
                         }
+                        // What was in the image, in the same place the failure
+                        // message appears — so the one button has one place it
+                        // reports to, whichever way it went.
+                        if let Some(text) = read_text() {
+                            div { class: "readout",
+                                span { class: "readout-head", {fl!("read-result")} }
+                                p { class: "readout-text", "data-readout": "true", "{text}" }
+                                button {
+                                    class: "btn wide",
+                                    "data-copy-text": "true",
+                                    onclick: copy_text,
+                                    {
+                                        glyph(
+                                            if copied() { Glyph::Check } else { Glyph::Copy },
+                                            if copied() { Ink::Accent } else { Ink::Plain },
+                                            "glyph",
+                                        )
+                                    }
+                                    span {
+                                        {if copied() { fl!("read-copied") } else { fl!("read-copy") }}
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     div { class: "card",
@@ -331,6 +418,78 @@ pub fn App() -> Element {
                         // There is room for it here, and a sentence somebody
                         // can read is worth more than one they have to find.
                         p { class: "hint", {fl!("ec-hint")} }
+                    }
+
+                    div { class: "card",
+                        div { class: "card-head",
+                            {glyph(Glyph::Frame, Ink::Accent, "glyph")}
+                            span { {fl!("section-margin")} }
+                        }
+                        // A number with a button on either side of it. The
+                        // buttons are for the adjustment somebody is making by
+                        // eye, watching the preview; the field is for the one
+                        // they already know the answer to.
+                        div { class: "stepper",
+                            button {
+                                class: "step",
+                                "data-margin-less": "true",
+                                aria_label: fl!("margin-less"),
+                                onclick: move |_| set_margin(margin().saturating_sub(1)),
+                                {glyph(Glyph::Minus, Ink::Plain, "glyph")}
+                            }
+                            input {
+                                class: "count",
+                                r#type: "text",
+                                "data-margin": "true",
+                                value: "{margin_draft}",
+                                oninput: move |event| {
+                                    let text = event.value();
+                                    match text.trim().parse::<u32>() {
+                                        // Out of range is clamped rather than
+                                        // refused, so a stray digit corrects
+                                        // itself instead of stopping the field.
+                                        Ok(value) if value > MAX_MARGIN => set_margin(MAX_MARGIN),
+                                        Ok(value) => {
+                                            margin.set(value);
+                                            margin_draft.set(text);
+                                        }
+                                        // Not a number yet — most often an
+                                        // empty field on the way to one.
+                                        Err(_) => margin_draft.set(text),
+                                    }
+                                },
+                                // Half-typed input is allowed to sit in the
+                                // field while it is being typed, but it cannot
+                                // outlive the keyboard: the code is still drawn
+                                // at the last number that parsed, so leaving an
+                                // empty field behind would leave the app
+                                // showing one margin and the field claiming
+                                // another. Whatever is applied is what comes
+                                // back.
+                                onblur: move |_| margin_draft.set(margin().to_string()),
+                            }
+                            button {
+                                class: "step",
+                                "data-margin-more": "true",
+                                aria_label: fl!("margin-more"),
+                                onclick: move |_| set_margin(margin() + 1),
+                                {glyph(Glyph::Plus, Ink::Plain, "glyph")}
+                            }
+                            // Beside the number rather than under the card,
+                            // and only once somebody has actually gone below
+                            // two. A caveat printed permanently is read once
+                            // and then stops being read; this one arrives at
+                            // the moment it applies, next to the value that
+                            // caused it.
+                            if margin() < SAFE_MARGIN {
+                                span {
+                                    class: "warn",
+                                    "data-margin-warning": "true",
+                                    {fl!("margin-warning")}
+                                }
+                            }
+                        }
+                        p { class: "hint", {fl!("margin-hint")} }
                     }
                 }
 
@@ -407,8 +566,16 @@ pub fn App() -> Element {
                             span { {fl!("save-svg")} }
                         }
                         button { class: "{export_class}", onclick: copy,
-                            {glyph(Glyph::Copy, export_ink, "glyph")}
-                            span { {fl!("copy")} }
+                            {
+                                glyph(
+                                    if copied_image() { Glyph::Check } else { Glyph::Copy },
+                                    if copied_image() { Ink::Accent } else { export_ink },
+                                    "glyph",
+                                )
+                            }
+                            span {
+                                {if copied_image() { fl!("copy-copied") } else { fl!("copy") }}
+                            }
                         }
                     }
                 }
@@ -734,7 +901,7 @@ impl Ink {
 /// The icons, as the paths that draw them on a 24×24 grid.
 ///
 /// Hand-drawn rather than pulled from an icon font, for the reason the whole
-/// app exists: a font is a file to ship and a licence to honour, and eleven
+/// app exists: a font is a file to ship and a licence to honour, and fifteen
 /// icons is less of both. They are stroked, round-capped and unfilled, which
 /// is the one decision that keeps them looking like a set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -750,6 +917,12 @@ enum Glyph {
     Undo,
     Download,
     Copy,
+    /// The copy that has already happened.
+    Check,
+    /// A border around a smaller square: the margin, drawn as what it is.
+    Frame,
+    Minus,
+    Plus,
     Close,
     External,
 }
@@ -793,6 +966,10 @@ impl Glyph {
                 "M4.6 19.6 H19.4",
             ],
             Glyph::Copy => &["M9 8.6 H19.4 V19.4 H9 Z", "M15.4 8.6 V4.6 H4.6 V15.4 H9"],
+            Glyph::Check => &["M5.2 12.6 L10 17.4 L18.8 7.2"],
+            Glyph::Frame => &["M4.4 4.4 H19.6 V19.6 H4.4 Z", "M9.2 9.2 H14.8 V14.8 H9.2 Z"],
+            Glyph::Minus => &["M6.2 12 H17.8"],
+            Glyph::Plus => &["M6.2 12 H17.8", "M12 6.2 V17.8"],
             Glyph::Close => &["M6.4 6.4 L17.6 17.6", "M17.6 6.4 L6.4 17.6"],
             Glyph::External => &[
                 "M14.2 4.6 H19.4 V9.8",

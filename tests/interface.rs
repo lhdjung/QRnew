@@ -197,11 +197,11 @@ fn a_swatch_recolors_the_code() {
     // The well opens the picker; the picker's swatch sets the colour.
     harness.click("[data-well=\"dark\"]");
     harness.pump();
-    harness.click("[data-swatch=\"#8B1A1A\"]");
+    harness.click("[data-swatch=\"#8b1a1a\"]");
     harness.pump();
 
     let svg = preview(&harness).expect("recolouring keeps the code");
-    assert!(svg.contains("#8B1A1A"), "the dark modules take the swatch");
+    assert!(svg.contains("#8b1a1a"), "the dark modules take the swatch");
     assert!(
         !svg.contains("#000000"),
         "and nothing is left painted black"
@@ -224,7 +224,7 @@ fn the_hex_field_recolors_the_code() {
         "clicking the hex field gives it the keyboard"
     );
 
-    // The field opens holding `#FFFFFF`, and it is cleared the way a person
+    // The field opens holding `#ffffff`, and it is cleared the way a person
     // would clear it — except with Home and Delete rather than Backspace.
     // **Backspace is deliberate**: `blitz-dom` handles it on macOS only
     // through AppKit's standard key bindings, which arrive from the window
@@ -232,10 +232,14 @@ fn the_hex_field_recolors_the_code() {
     // no-op on one platform and works on the other two. Home and Delete go
     // through `apply_keypress_event` everywhere.
     harness.press(keyboard_types::Key::Home);
-    for _ in 0.."#FFFFFF".len() {
+    for _ in 0.."#ffffff".len() {
         harness.press(keyboard_types::Key::Delete);
     }
     assert_eq!(harness.attr("[data-hex]", "value").as_deref(), Some(""));
+    // Typed in capitals on purpose. Every hex the *app* writes is lower case —
+    // the wells, the field it fills in, the SVG — but what somebody pastes in
+    // is their business, so the draft keeps the case it was given and the
+    // colour it parses to comes back out in the app's own casing.
     harness.type_text("#F5F4F2");
     harness.pump();
     assert_eq!(
@@ -245,8 +249,8 @@ fn the_hex_field_recolors_the_code() {
 
     let svg = preview(&harness).expect("recolouring keeps the code");
     assert!(
-        svg.contains("#F5F4F2"),
-        "the background takes the typed hex"
+        svg.contains("#f5f4f2"),
+        "the background takes the typed hex, written the app's way"
     );
 }
 
@@ -327,7 +331,7 @@ fn the_square_and_the_strip_pick_a_color() {
     // picker are looking at one colour rather than two.
     assert_eq!(
         harness.attr("[data-hex]", "value"),
-        Some(format!("#{r:02X}{g:02X}{b:02X}"))
+        Some(format!("#{r:02x}{g:02x}{b:02x}"))
     );
 }
 
@@ -367,21 +371,21 @@ fn the_two_wells_hold_separate_colors() {
 
     harness.click("[data-well=\"dark\"]");
     harness.pump();
-    harness.click("[data-swatch=\"#1B3F8F\"]");
+    harness.click("[data-swatch=\"#1b3f8f\"]");
     harness.pump();
 
     harness.click("[data-well=\"light\"]");
     harness.pump();
-    harness.click("[data-swatch=\"#F5F4F2\"]");
+    harness.click("[data-swatch=\"#f5f4f2\"]");
     harness.pump();
 
     let svg = preview(&harness).expect("recolouring keeps the code");
     assert!(
-        svg.contains("#1B3F8F"),
+        svg.contains("#1b3f8f"),
         "the foreground kept its own colour"
     );
     assert!(
-        svg.contains("#F5F4F2"),
+        svg.contains("#f5f4f2"),
         "and the background took the second"
     );
 }
@@ -395,20 +399,20 @@ fn reset_puts_black_and_white_back() {
 
     harness.click("[data-well=\"dark\"]");
     harness.pump();
-    harness.click("[data-swatch=\"#8B1A1A\"]");
+    harness.click("[data-swatch=\"#8b1a1a\"]");
     harness.pump();
-    assert!(preview(&harness).unwrap().contains("#8B1A1A"));
+    assert!(preview(&harness).unwrap().contains("#8b1a1a"));
 
     harness.click("[data-reset]");
     harness.pump();
 
     let svg = preview(&harness).expect("resetting keeps the code");
     assert!(svg.contains("#000000"));
-    assert!(svg.contains("#FFFFFF"));
+    assert!(svg.contains("#ffffff"));
 
     // And the picker followed it. It did not before: the hex field kept its
     // own copy of the colour and only ever wrote to it, so resetting turned
-    // the code black while the field went on reading `#8B1A1A`.
+    // the code black while the field went on reading `#8b1a1a`.
     assert_eq!(
         harness.attr("[data-hex]", "value").as_deref(),
         Some("#000000"),
@@ -456,7 +460,13 @@ fn composed_text_reaches_the_field() {
     let expected = qrnew_core::Qr::new(
         "日本語",
         qrnew_core::ErrorCorrection::Medium,
-        &qrnew_core::QrStyle::default(),
+        &qrnew_core::QrStyle {
+            // Not `QrStyle::default()`: the core's default margin is the four
+            // modules the standard asks for, and the app opens on a narrower
+            // one of its own.
+            quiet_zone: qrnew::ui::DEFAULT_MARGIN,
+            ..qrnew_core::QrStyle::default()
+        },
     )
     .expect("three characters fit in a code")
     .into_svg();
@@ -471,8 +481,10 @@ fn composed_text_reaches_the_field() {
 /// recorded rather than worked around, because for QRnew it is also what a
 /// browser does: click a button, and the field you were typing in blurs.
 ///
-/// It matters here only for the one place the app used to call
-/// `text_input::focus` by hand — after reading a code out of a file. **If this
+/// It used to matter for one place in particular: reading a code out of a
+/// file put the text in the field, so the app had to hand the keyboard back
+/// afterwards. It does not any more — what an image says is shown beside the
+/// button that read it — so nothing in QRnew now depends on this. **If this
 /// test starts failing, upstream has changed the rule** and the note in
 /// `dioxus-assessment.md` about handing the keyboard back can be dropped.
 #[test]
@@ -580,7 +592,7 @@ fn working_the_picker_does_not_move_the_code() {
 
     harness.click("[data-well=\"light\"]");
     harness.pump();
-    harness.click("[data-swatch=\"#8B1A1A\"]");
+    harness.click("[data-swatch=\"#8b1a1a\"]");
     harness.pump();
     let after = harness.layout_rect(".preview");
 
@@ -751,7 +763,7 @@ fn the_wells_choose_what_the_picker_edits() {
     harness.pump();
     assert_eq!(
         harness.attr("[data-hex]", "value").as_deref(),
-        Some("#FFFFFF"),
+        Some("#ffffff"),
         "and follows the well that was clicked"
     );
 
@@ -760,5 +772,200 @@ fn the_wells_choose_what_the_picker_edits() {
     harness.click("[data-well=\"light\"]");
     harness.pump();
     assert!(harness.query("[data-square]").is_some());
-    assert_eq!(harness.attr("[data-hex]", "value").as_deref(), Some("#FFFFFF"));
+    assert_eq!(harness.attr("[data-hex]", "value").as_deref(), Some("#ffffff"));
+}
+
+/// The margin control widens and narrows the blank border.
+///
+/// `modules_across` reads the SVG's own `viewBox`, and the quiet zone is part
+/// of that box on both sides — so a margin one module wider is a document two
+/// modules wider, which is what makes this measurable from the outside at all.
+#[test]
+fn the_stepper_resizes_the_margin() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("hello");
+    harness.pump();
+
+    // Five characters fit in the smallest code there is: 21 modules, plus the
+    // app's own margin on either side.
+    let opened = modules_across(&preview(&harness).unwrap());
+    assert_eq!(opened, 21 + 2 * qrnew::ui::DEFAULT_MARGIN);
+    assert_eq!(
+        harness.attr("[data-margin]", "value").as_deref(),
+        Some(qrnew::ui::DEFAULT_MARGIN.to_string().as_str()),
+        "and the field says the same number the code was drawn with"
+    );
+
+    harness.click("[data-margin-more]");
+    harness.pump();
+    assert_eq!(modules_across(&preview(&harness).unwrap()), opened + 2);
+    assert_eq!(harness.attr("[data-margin]", "value").as_deref(), Some("3"));
+
+    harness.click("[data-margin-less]");
+    harness.click("[data-margin-less]");
+    harness.click("[data-margin-less]");
+    harness.pump();
+    assert_eq!(
+        modules_across(&preview(&harness).unwrap()),
+        21,
+        "a margin of nothing is the bare code"
+    );
+
+    // And it stops there rather than wrapping around, which is the one thing
+    // an unsigned counter does wrong when nobody is looking.
+    harness.click("[data-margin-less]");
+    harness.pump();
+    assert_eq!(harness.attr("[data-margin]", "value").as_deref(), Some("0"));
+    assert_eq!(modules_across(&preview(&harness).unwrap()), 21);
+}
+
+/// The field takes a number, and refuses to take a silly one.
+#[test]
+fn the_margin_field_clamps_what_it_is_given() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("hello");
+    harness.pump();
+
+    harness.click("[data-margin]");
+    harness.press(keyboard_types::Key::Home);
+    for _ in 0..4 {
+        harness.press(keyboard_types::Key::Delete);
+    }
+    harness.type_text("6");
+    harness.pump();
+    assert_eq!(modules_across(&preview(&harness).unwrap()), 21 + 12);
+
+    // Past the maximum the field corrects itself to it, rather than refusing
+    // the keystroke and leaving somebody wondering which one did not land.
+    harness.type_text("00");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-margin]", "value").as_deref(),
+        Some(qrnew::ui::MAX_MARGIN.to_string().as_str())
+    );
+    assert_eq!(
+        modules_across(&preview(&harness).unwrap()),
+        21 + 2 * qrnew::ui::MAX_MARGIN
+    );
+}
+
+/// The caution about narrow margins is there when it applies and not before.
+///
+/// It used to be the second half of the sentence under the card, printed
+/// whether or not it was true of the value on screen — which is the shape of
+/// warning that gets read once and then stops being read. It is now beside the
+/// number, and it appears the moment somebody goes under two.
+#[test]
+fn the_margin_warning_only_appears_below_two() {
+    let mut harness = app();
+    assert!(
+        harness.query("[data-margin-warning]").is_none(),
+        "nothing to warn about at the margin the app opens with"
+    );
+
+    harness.click("[data-margin-less]");
+    harness.pump();
+    assert_eq!(harness.attr("[data-margin]", "value").as_deref(), Some("1"));
+    let warning = harness.text_content("[data-margin-warning]");
+    assert!(
+        warning.contains("scanners"),
+        "the caution is on screen, not {warning:?}"
+    );
+
+    harness.click("[data-margin-more]");
+    harness.pump();
+    assert!(
+        harness.query("[data-margin-warning]").is_none(),
+        "and it goes away again with the value that caused it"
+    );
+}
+
+/// An emptied margin field fills itself back in when the keyboard leaves it.
+///
+/// A half-typed number is allowed to sit in the field — that is the only way
+/// to replace a value by typing — but the code goes on being drawn at the last
+/// number that parsed. So an empty field left behind is the app showing one
+/// margin and the field claiming another, and whatever is applied is what has
+/// to come back.
+#[test]
+fn an_emptied_margin_field_restores_what_is_applied() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("hello");
+    harness.pump();
+
+    harness.click("[data-margin]");
+    harness.press(keyboard_types::Key::Home);
+    for _ in 0..4 {
+        harness.press(keyboard_types::Key::Delete);
+    }
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-margin]", "value").as_deref(),
+        Some(""),
+        "the field can be emptied on the way to a new number"
+    );
+    assert_eq!(
+        modules_across(&preview(&harness).unwrap()),
+        21 + 2 * qrnew::ui::DEFAULT_MARGIN,
+        "and the code is still drawn at the margin that was applied"
+    );
+
+    // Anywhere else will do; the field simply has to lose the keyboard.
+    harness.click(".field");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-margin]", "value").as_deref(),
+        Some(qrnew::ui::DEFAULT_MARGIN.to_string().as_str())
+    );
+}
+
+/// The code starts at the height the controls start at.
+///
+/// Centring the stage put the one thing the window is about lower than
+/// everything beside it. This is a layout claim rather than a taste one: the
+/// three columns share a top edge.
+#[test]
+fn the_code_is_level_with_the_controls() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("https://example.org");
+    harness.pump();
+
+    let card = harness.layout_rect(".rail-main .card:first-child");
+    let preview = harness.layout_rect(".preview");
+    assert!(
+        (preview.y - card.y).abs() < 2.0,
+        "the code and the first card begin together: {} against {}",
+        preview.y,
+        card.y
+    );
+}
+
+/// **Every hex the app writes is lower case.**
+///
+/// It is one string built in one place — `Rgb::to_hex` — and this is the test
+/// that says so from the outside: the tile somebody reads the colour off, the
+/// field they edit it in, and the document that gets saved.
+#[test]
+fn the_app_writes_hex_in_lower_case() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("hello");
+    harness.pump();
+
+    harness.click("[data-well=\"dark\"]");
+    harness.pump();
+    harness.click("[data-swatch=\"#8b1a1a\"]");
+    harness.pump();
+
+    let well = harness.text_content("[data-well=\"dark\"]");
+    assert!(well.ends_with("#8b1a1a"), "the tile reads {well:?}");
+    assert_eq!(
+        harness.attr("[data-hex]", "value").as_deref(),
+        Some("#8b1a1a")
+    );
+    assert!(preview(&harness).unwrap().contains("#8b1a1a"));
 }
