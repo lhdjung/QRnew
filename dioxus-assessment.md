@@ -413,3 +413,126 @@ wrong; see the note on RSS in `tauri-assessment.md`.
 - [the Blitz repository](https://github.com/DioxusLabs/blitz) and
   [roadmap #119](https://github.com/DioxusLabs/blitz/issues/119)
 - [vello_hybrid](https://docs.rs/vello_hybrid)
+
+---
+
+# Addendum: the branch exists
+
+Written 2026-08-31, same day, after building it. Branch `dioxus-native`, off
+`core-crate`. Blitz at `c6dec888` (2026-08-30), one commit past the revision
+this document was written against.
+
+**The port is done and it is smaller than the estimate.** `src/app.rs` is gone;
+`src/ui.rs` and `src/ui.css` stand in its place, i18n and all, with the file
+reader, both exports, the clipboard, an About panel and a colour picker that
+has the saturation/value square this document budgeted most of the work for.
+`qrnew-core` was not touched. Fifteen interface tests run headlessly in half a
+second, and QRnew had none before.
+
+Five things this document got wrong or could not know.
+
+## 1. IME exists now, and the blocker is gone
+
+This was named "the one honest blocker," and it is void. `blitz-dom` has
+`events/ime.rs`, which applies preedit and commit to the focused text input
+through Parley; `blitz-shell` enables IME on the window and reports the cursor
+area back to the compositor. `composed_text_reaches_the_field` types 日本語
+into the field by composition and asserts the code that comes out is the code
+`qrnew-core` makes from those three characters.
+
+One sharp edge, and it is winit's contract rather than a fault:
+`BlitzImeEvent::Commit` inserts at the selection **without clearing the
+composing region first**, because winit sends an empty `Preedit` immediately
+before every `Commit`. A test that leaves that line out gets "にほん日本語",
+which is what the first draft of this one did.
+
+## 2. A published release is not enough, and it does not matter
+
+Step 1 was "check whether a published `dioxus-native` release works." It does
+not, and the reason is not the one expected: `blitz-test-harness` is
+`publish = false` in upstream's own manifest, so the test suite this migration
+is worth having can never come from crates.io. Everything else is published as
+`0.3.0-beta.2`.
+
+**A git dependency pinned to a revision answers it completely**, and it is
+better than the clone this document assumed: `cargo build` works on a fresh
+checkout with nothing beside it. The clone at `~/rust_projects/blitz` the spike
+used is gone from this machine, and nothing missed it.
+
+## 3. The memory is what was measured, and the renderer is why
+
+Same machine, same 1019×762 window, release build, three runs, a code on
+screen, `vmmap --summary` at ten seconds:
+
+| | QRnew (libcosmic) | QRnew (this branch) |
+| --- | ---: | ---: |
+| Physical footprint, settled | 160.7 MB | **65.5 MB** |
+| Physical footprint, peak | 190.3 MB | 186.0 MB |
+| Swapchain (IOSurface) | 24.0 MB | 24.4 MB |
+| Graphics region, resident | 47.0 MB | 1.5 MB |
+| CPU over 10 s idle | 0.03 s | **0.00 s** |
+| Binary (stripped, `opt-level = "z"`, LTO) | 8.7 MB | 8.4 MB |
+| Crates in `Cargo.lock` | 634 | 623 |
+
+Run-to-run spread was 65.5 MB three times over. The libcosmic column is this
+document's own, unchanged.
+
+Two rows deserve a second look. The **graphics region** is 1.5 MB against the
+spike's 14.3 MB, because this build is on `vello_hybrid` and nothing else.
+And the **binary and crate rows are now a genuine win rather than a wash**:
+this is the whole app — i18n, `rfd`, `arboard`, `open`, the reader, both
+exports — and it is *smaller* than the libcosmic build on both counts. The
+spike's caveat about twenty missing crates was paid and there was change left
+over.
+
+The peak is still unattributed and still does not improve. `net` is still off,
+and `reqwest`, `hyper`, `rustls`, `native-tls` and `openssl` are all absent
+from `Cargo.lock`.
+
+## 4. The colour picker was a day, not most of the work
+
+Square, hue strip, sixteen swatches and a hex field, in about 150 lines. The
+square is four CSS background layers on one `div`: a hard-stopped
+`radial-gradient` for the thumb, black upward, white rightward, the pure hue
+underneath. Blitz paints layered backgrounds and linear, radial and conic
+gradients, so the browser recipe works unchanged.
+
+**The thumbs are background layers rather than child elements**, which is the
+one thing worth carrying to another Blitz app. A child on top of the square is
+what the pointer hits, so `element_coordinates()` would come back relative to
+the thumb; `pointer-events: none` is not implemented in Blitz. A gradient has
+no hit box. Two costs: a background layer is clipped to its element, so the
+thumb is held a ring's width inside the box rather than overhanging the way a
+browser's does; and the square's size lives twice, in `ui.rs` and in `ui.css`,
+because `get_client_rect` panics from inside an event handler. A test asserts
+the two agree.
+
+## 5. The focus handback is not needed, and the one place it was is solved
+
+`clicking_a_chip_blurs_the_field` records upstream's behaviour rather than
+working around it, because for QRnew it is also what a browser does: click a
+button and the field you were typing in blurs. Nobody is surprised.
+
+The one place the libcosmic build reached for `text_input::focus` was after
+reading a code out of a file, and that is answered without touching the shell:
+the field carries a `key` that is bumped when the *app* changes the text, so
+the element is rebuilt rather than updated, and rebuilding re-runs `autofocus`.
+No `MountedData::set_focus`, no `RefCell already borrowed`, no custom
+`ApplicationHandler` — which matters, because `DioxusNativeApplication` keeps
+its `inner` private and wrapping it is not the small job the reference tree's
+shell makes it look.
+
+## What is still open
+
+- **Linux and Windows.** Still unrun. The existing `build.yml` already does
+  `cargo test --workspace` on all three, so the first push to this branch is
+  the answer; its apt list may need widening.
+- **Two copies of `usvg`.** `qrnew-core` is on `resvg 0.45`, `blitz-dom` on
+  `usvg 0.48`. The preview and the export still go through the same *code*,
+  but not the same *build* of it. Bumping the core dedupes them.
+- **Backspace cannot be tested on macOS.** `blitz-dom` routes it through
+  AppKit's standard key bindings, which arrive from a window; the headless
+  harness cannot produce one. The hex field's test clears with Home and Delete
+  and says so.
+- **Packaging, and the COSMIC identity.** Exactly as this document described.
+  Nothing here helps with either.

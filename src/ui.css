@@ -1,0 +1,353 @@
+/* SPDX-License-Identifier: MPL-2.0 */
+
+/* QRnew's whole appearance.
+ *
+ * Everything is a token on `:root` and redefined once under
+ * `prefers-color-scheme: dark`, which Blitz drives off winit's window theme —
+ * so the app follows the system without asking anybody anything, the way the
+ * libcosmic build did through COSMIC's theme.
+ *
+ * There is no dark-mode-only colour anywhere below. A colour whose only
+ * definition lives inside the media query is a colour the light theme does not
+ * have. */
+
+:root {
+  --bg: #fafaf9;
+  --panel: #ffffff;
+  --ink: #1c1b1a;
+  --ink-dim: #6b6a68;
+  --line: #dcdad7;
+  --accent: #2f6f4f;
+  --accent-ink: #ffffff;
+  --danger: #a8321f;
+  --hover: #f0efed;
+  --shadow: rgba(0, 0, 0, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a19;
+    --panel: #242322;
+    --ink: #ebe9e6;
+    --ink-dim: #9a9793;
+    --line: #3a3836;
+    --accent: #5fb98c;
+    --accent-ink: #10231a;
+    --danger: #f08a76;
+    --hover: #2f2e2c;
+    --shadow: rgba(0, 0, 0, 0.5);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", "Cantarell", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 28px 24px 40px;
+  min-height: 100%;
+}
+
+.title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* The input. It is the whole app: everything else only decorates what is
+ * typed here, which is why it is the one thing that gets the keyboard on
+ * startup. */
+.field {
+  width: 400px;
+  max-width: 100%;
+  padding: 9px 12px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.field:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.label {
+  color: var(--ink-dim);
+}
+
+.btn {
+  padding: 6px 12px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.btn:hover {
+  background: var(--hover);
+}
+
+.chip {
+  padding: 5px 14px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.chip:hover {
+  background: var(--hover);
+}
+
+.chip.on {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.error {
+  margin: 0;
+  width: 400px;
+  max-width: 100%;
+  color: var(--danger);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* The tooltip on the error-correction row. `title` is not a tooltip in Blitz
+ * and there is no widget for one, so it is a hidden sibling shown on hover —
+ * which is all COSMIC's was, one layer down. */
+.tip {
+  position: relative;
+  color: var(--ink-dim);
+}
+
+.tip-body {
+  display: none;
+}
+
+.tip:hover .tip-body {
+  display: block;
+  position: absolute;
+  top: 22px;
+  left: 0;
+  z-index: 5;
+  width: 260px;
+  padding: 8px 10px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px var(--shadow);
+  font-size: 13px;
+}
+
+/* The colour buttons. A round well showing the colour it holds, which is what
+ * `widget::ColorPickerModel::picker_button` drew. */
+.well {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+
+.well.on {
+  border-color: var(--accent);
+  border-width: 2px;
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 4px 14px var(--shadow);
+}
+
+/* The saturation/value square and the hue strip.
+ *
+ * These two sizes are also written in `ui.rs` as `SQUARE_W`, `SQUARE_H` and
+ * `STRIP_H`, because a pointer's position has to be turned into a fraction and
+ * the element cannot be measured from inside an event handler. A test asserts
+ * the two agree. */
+.sv {
+  width: 234px;
+  height: 140px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.strip {
+  width: 234px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+}
+
+.palette {
+  display: grid;
+  grid-template-columns: repeat(8, 24px);
+  gap: 6px;
+}
+
+.swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.swatch.on {
+  border-color: var(--accent);
+  border-width: 2px;
+}
+
+.hex {
+  width: 110px;
+  padding: 5px 8px;
+  font: inherit;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", monospace;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.hex.bad {
+  border-color: var(--danger);
+}
+
+/* The preview area is a fixed square so the layout does not jump as the code
+ * grows a version. Same reason `PREVIEW_SIZE` was fixed in the iced build. */
+.preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 300px;
+  height: 300px;
+}
+
+.preview img {
+  width: 300px;
+  height: 300px;
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 300px;
+  height: 300px;
+  color: var(--ink-dim);
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+}
+
+/* About. A plain overlay, because `widget::about::About` and the context
+ * drawer it lived in are libcosmic's and have no counterpart here. */
+.about-open {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font: inherit;
+  color: var(--ink-dim);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+
+.about-open:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+
+.scrim {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.about {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 360px;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px var(--shadow);
+  text-align: center;
+}
+
+.about h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.about p {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.link {
+  padding: 0;
+  color: var(--accent);
+  background: none;
+  border: none;
+  font: inherit;
+  text-decoration: underline;
+}

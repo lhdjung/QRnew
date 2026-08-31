@@ -31,7 +31,15 @@ The QR pipeline lives in the `qrnew-core` crate and is tested on its own, withou
 cargo test -p qrnew-core
 ```
 
-Those tests render each style and read it back with a real decoder, so a change that quietly breaks scannability fails rather than merely looking odd. To look at the styles instead, this writes one PNG per combination:
+Those tests render each style and read it back with a real decoder, so a change that quietly breaks scannability fails rather than merely looking odd.
+
+The interface is tested too, and also without a window — `tests/interface.rs` builds the real component, lays it out, and clicks and types into it through upstream's headless harness:
+
+```sh
+cargo test --test interface
+```
+
+To look at the styles instead, this writes one PNG per combination:
 
 ```sh
 cargo run -p qrnew-core --example gallery -- some/directory
@@ -41,11 +49,13 @@ Packaging is `just bundle-macos`, `just bundle-linux` or `just bundle-windows`, 
 
 ## Acknowledgements
 
-QRnew is based on [libcosmic] and the [qrcode] crate. It was inspired by [qrrs], a CLI frontend for qrcode.
+QRnew is built with [Dioxus] rendered by [Blitz] — HTML and CSS through Servo's style engine, painted straight onto the GPU, with no webview and no JavaScript — and the [qrcode] crate. It was inspired by [qrrs], a CLI frontend for qrcode. Earlier versions were built with [libcosmic].
 
 [releases]: https://github.com/lhdjung/QRnew/releases
 [Rust]: https://rustup.rs
 [just]: https://github.com/casey/just
+[Dioxus]: https://dioxuslabs.com
+[Blitz]: https://github.com/DioxusLabs/blitz
 [libcosmic]: https://github.com/pop-os/libcosmic
 [qrcode]: https://crates.io/crates/qrcode
 [qrrs]: https://github.com/Lenivaya/qrrs
