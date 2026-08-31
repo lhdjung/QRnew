@@ -14,6 +14,26 @@
 //! through the same code, and the documented Blitz gap where CSS cannot reach
 //! inside an SVG never applies: `draw.rs` writes every colour as a
 //! presentation attribute so that an exported file stands on its own.
+//!
+//! # The shape of the window
+//!
+//! **Three columns, and that is the whole layout argument.** Two fixed-width
+//! rails of controls, then a stage on the right that the code sits on. Nothing
+//! in a rail can move the code, which is what the original single-column stack
+//! got wrong — opening the colour picker there pushed the preview under the
+//! bottom of the window, so the one thing somebody was adjusting the colour of
+//! was the one thing they could no longer see.
+//!
+//! The second rail is what stops the first one scrolling. One column of
+//! controls only fitted a window this tall with the picker collapsed, so the
+//! picker had to be something you opened — and the moment it was, half the
+//! form was below the fold. Split in two, everything is on screen at once, the
+//! picker is simply *there*, and the wells above it choose which of the two
+//! colours it is editing rather than whether it exists.
+//!
+//! The three export buttons are drawn from the first frame rather than
+//! appearing with the first character, dimmed until there is something to
+//! export, so the stage never rearranges itself while it is being looked at.
 
 use dioxus::prelude::*;
 use qrnew_core::{ErrorCorrection, Qr, QrStyle, ReadError, Rgb};
@@ -57,7 +77,11 @@ const PALETTE: [Rgb; 16] = [
 #[derive(Clone)]
 pub struct Fill(pub String);
 
-/// Which of the two colour wells has its picker open, if either.
+/// Which of the two colours the picker is pointed at.
+///
+/// Not an `Option`: the picker is always on screen, and the wells choose what
+/// it edits. It used to be one, back when opening the picker was a thing you
+/// did and closing it again was how you got the rest of the form back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Well {
     Dark,
@@ -86,7 +110,7 @@ pub fn App() -> Element {
     let mut dark = use_signal(|| Rgb::BLACK);
     let mut light = use_signal(|| Rgb::WHITE);
     let mut read_error = use_signal(|| None::<ReadError>);
-    let mut open_well = use_signal(|| None::<Well>);
+    let mut editing = use_signal(|| Well::Dark);
     let mut about = use_signal(|| false);
 
     // The one generated code, which everything downstream is a view of. A memo
@@ -181,124 +205,213 @@ pub fn App() -> Element {
         }
     };
 
+    // Whether there is anything to save, copy or look at. It decides both the
+    // stage's content and how the three export buttons are drawn.
+    let ready = preview().is_some();
+
+    // The line under the field. It always says something, which is why it can
+    // hold its height without leaving a gap: the prompt while the field is
+    // empty, how much has been typed once it is not, and — the one failure the
+    // app could not report before — text past what the densest code can hold,
+    // which used to leave the placeholder on screen and explain nothing.
+    let (note, note_class) = if input().is_empty() {
+        (fl!("input-placeholder"), "note")
+    } else if ready {
+        (
+            fl!("input-count", count = input().chars().count()),
+            "note",
+        )
+    } else {
+        (fl!("input-too-long"), "note bad")
+    };
+    let export_ink = if ready { Ink::Plain } else { Ink::Faint };
+    let export_class = if ready { "btn" } else { "btn off" };
+
     rsx! {
         style { {include_str!("ui.css")} }
 
-        button {
-            class: "about-open",
-            aria_label: fl!("about"),
-            onclick: move |_| about.toggle(),
-            "?"
-        }
+        div { class: "app",
 
-        main { class: "shell",
-            h1 { class: "title", {fl!("app-title")} }
-
-            input {
-                key: "{revision}",
-                class: "field",
-                r#type: "text",
-                // The field is the app, so it holds the keyboard from the
-                // moment the window opens.
-                autofocus: true,
-                placeholder: fl!("input-placeholder"),
-                value: "{input}",
-                oninput: move |event| {
-                    read_error.set(None);
-                    input.set(event.value());
-                },
+            header { class: "topbar",
+                div { class: "brand",
+                    {glyph(Glyph::Code, Ink::Accent, "glyph-brand")}
+                    span { {fl!("app-title")} }
+                }
+                div { class: "spacer" }
+                button {
+                    class: "about-open",
+                    onclick: move |_| about.toggle(),
+                    {glyph(Glyph::Info, Ink::Faint, "glyph")}
+                    span { {fl!("about")} }
+                }
             }
 
-            div { class: "stack",
-                button { class: "btn", "data-read": "true", onclick: read_file, {fl!("read-file")} }
-                if let Some(error) = read_error() {
-                    p { class: "error",
-                        {
-                            match error {
-                                ReadError::NotAnImage => fl!("read-error-not-an-image"),
-                                ReadError::Damaged(_) => fl!("read-error-damaged"),
-                                ReadError::NoCode => fl!("read-error-no-code"),
-                                ReadError::Unreadable(_) => fl!("read-error-unreadable"),
+            div { class: "body",
+
+                section { class: "rail rail-main",
+
+                    div { class: "card",
+                        div { class: "card-head",
+                            {glyph(Glyph::Type, Ink::Accent, "glyph")}
+                            span { {fl!("section-content")} }
+                        }
+                        input {
+                            key: "{revision}",
+                            class: "field",
+                            r#type: "text",
+                            // The field is the app, so it holds the keyboard
+                            // from the moment the window opens.
+                            autofocus: true,
+                            value: "{input}",
+                            oninput: move |event| {
+                                read_error.set(None);
+                                input.set(event.value());
+                            },
+                        }
+                        // **Blitz has no `placeholder`.** There is no such
+                        // attribute in `blitz-dom` at all, so setting one — as
+                        // this app did until now — left the field simply
+                        // blank. The prompt is a sibling instead, and it is a
+                        // sibling rather than an overlay because
+                        // `pointer-events: none` is also missing, so anything
+                        // laid over the field would eat the click that is
+                        // supposed to focus it.
+                        //
+                        // The line keeps its height when it has nothing to
+                        // say, so the button below it never moves.
+                        p { class: "{note_class}", "{note}" }
+                        button {
+                            class: "btn wide",
+                            "data-read": "true",
+                            onclick: read_file,
+                            {glyph(Glyph::Image, Ink::Plain, "glyph")}
+                            span { {fl!("read-file")} }
+                        }
+                        if let Some(error) = read_error() {
+                            p { class: "error",
+                                {
+                                    match error {
+                                        ReadError::NotAnImage => fl!("read-error-not-an-image"),
+                                        ReadError::Damaged(_) => fl!("read-error-damaged"),
+                                        ReadError::NoCode => fl!("read-error-no-code"),
+                                        ReadError::Unreadable(_) => fl!("read-error-unreadable"),
+                                    }
+                                }
                             }
                         }
                     }
-                }
-            }
 
-            div { class: "row",
-                span { class: "tip",
-                    {fl!("ec-label")}
-                    span { class: "tip-body", {fl!("ec-tooltip")} }
-                }
-                // `data-ec` is the level's own name rather than its label,
-                // because the label is a translation and a test that selected
-                // on it would pass in English and nowhere else.
-                for (level , name , label) in [
-                    (ErrorCorrection::Low, "low", fl!("ec-low")),
-                    (ErrorCorrection::Medium, "medium", fl!("ec-medium")),
-                    (ErrorCorrection::Quartile, "quartile", fl!("ec-quartile")),
-                    (ErrorCorrection::High, "high", fl!("ec-high")),
-                ] {
-                    button {
-                        key: "{name}",
-                        class: if ec() == level { "chip on" } else { "chip" },
-                        "data-ec": "{name}",
-                        aria_pressed: if ec() == level { "true" } else { "false" },
-                        onclick: move |_| ec.set(level),
-                        {label.clone()}
+                    div { class: "card",
+                        div { class: "card-head",
+                            {glyph(Glyph::Shield, Ink::Accent, "glyph")}
+                            span { {fl!("section-correction")} }
+                        }
+                        div { class: "segments",
+                            // `data-ec` is the level's own name rather than its
+                            // label, because the label is a translation and a
+                            // test that selected on it would pass in English
+                            // and nowhere else.
+                            for (level , name , label) in [
+                                (ErrorCorrection::Low, "low", fl!("ec-low")),
+                                (ErrorCorrection::Medium, "medium", fl!("ec-medium")),
+                                (ErrorCorrection::Quartile, "quartile", fl!("ec-quartile")),
+                                (ErrorCorrection::High, "high", fl!("ec-high")),
+                            ] {
+                                button {
+                                    key: "{name}",
+                                    class: if ec() == level { "chip on" } else { "chip" },
+                                    "data-ec": "{name}",
+                                    aria_pressed: if ec() == level { "true" } else { "false" },
+                                    onclick: move |_| ec.set(level),
+                                    {label.clone()}
+                                }
+                            }
+                        }
+                        // What the previous build hid behind a hover tooltip.
+                        // There is room for it here, and a sentence somebody
+                        // can read is worth more than one they have to find.
+                        p { class: "hint", {fl!("ec-hint")} }
                     }
                 }
-            }
 
-            div { class: "row",
-                span { class: "label", {fl!("color-dark-label")} }
-                button {
-                    class: if open_well() == Some(Well::Dark) { "well on" } else { "well" },
-                    "data-well": "dark",
-                    aria_label: fl!("color-dark-label"),
-                    style: "background: {dark().to_hex()}",
-                    onclick: move |_| open_well.set(toggled(open_well(), Well::Dark)),
-                }
-                span { class: "label", {fl!("color-light-label")} }
-                button {
-                    class: if open_well() == Some(Well::Light) { "well on" } else { "well" },
-                    "data-well": "light",
-                    aria_label: fl!("color-light-label"),
-                    style: "background: {light().to_hex()}",
-                    onclick: move |_| open_well.set(toggled(open_well(), Well::Light)),
-                }
-                button {
-                    class: "btn",
-                    "data-reset": "true",
-                    onclick: move |_| {
-                        dark.set(Rgb::BLACK);
-                        light.set(Rgb::WHITE);
-                    },
-                    {fl!("color-reset")}
-                }
-            }
+                section { class: "rail rail-colors",
 
-            if let Some(well) = open_well() {
-                Picker {
-                    // Keyed on the well, so that switching from one to the
-                    // other builds a fresh picker rather than reusing the
-                    // first one's half-typed hex.
-                    key: "{well:?}",
-                    color: if well == Well::Dark { dark } else { light },
+                    div { class: "card",
+                        div { class: "card-head",
+                            {glyph(Glyph::Drop, Ink::Accent, "glyph")}
+                            span { {fl!("section-colors")} }
+                        }
+                        div { class: "wells",
+                            ColorWell {
+                                which: Well::Dark,
+                                name: fl!("color-dark-label"),
+                                color: dark(),
+                                editing: editing() == Well::Dark,
+                                onpick: move |_| editing.set(Well::Dark),
+                            }
+                            ColorWell {
+                                which: Well::Light,
+                                name: fl!("color-light-label"),
+                                color: light(),
+                                editing: editing() == Well::Light,
+                                onpick: move |_| editing.set(Well::Light),
+                            }
+                        }
+                        // Two branches rather than one call with a signal
+                        // chosen inside it, because switching wells has to
+                        // *rebuild* the picker: its draft hex and its hue are
+                        // its own state, and a picker handed a different
+                        // colour would carry the first one's over. A `key`
+                        // does not do it — Dioxus diffs a lone child by
+                        // position — but two arms of an `if` are two different
+                        // nodes, and swapping them mounts a fresh one.
+                        if editing() == Well::Dark {
+                            Picker { color: dark }
+                        } else {
+                            Picker { color: light }
+                        }
+                        button {
+                            class: "btn wide",
+                            "data-reset": "true",
+                            onclick: move |_| {
+                                dark.set(Rgb::BLACK);
+                                light.set(Rgb::WHITE);
+                            },
+                            {glyph(Glyph::Undo, Ink::Plain, "glyph")}
+                            span { {fl!("color-reset")} }
+                        }
+                    }
                 }
-            }
 
-            if let Some(src) = preview() {
-                div { class: "row",
-                    button { class: "btn", onclick: save_png, {fl!("save-png")} }
-                    button { class: "btn", onclick: save_svg, {fl!("save-svg")} }
-                    button { class: "btn", onclick: copy, {fl!("copy")} }
+                section { class: "stage",
+                    if let Some(src) = preview() {
+                        // The mat is painted in the code's own background
+                        // colour, so the rounded corners belong to the mat and
+                        // the image never has to be clipped to them.
+                        div { class: "preview", style: "background: {light().to_hex()}",
+                            img { src: "{src}", alt: fl!("app-title") }
+                        }
+                    } else {
+                        div { class: "placeholder",
+                            {glyph(Glyph::Code, Ink::Faint, "glyph-empty")}
+                            span { {fl!("qr-placeholder")} }
+                        }
+                    }
+                    div { class: "exports",
+                        button { class: "{export_class}", onclick: save_png,
+                            {glyph(Glyph::Download, export_ink, "glyph")}
+                            span { {fl!("save-png")} }
+                        }
+                        button { class: "{export_class}", onclick: save_svg,
+                            {glyph(Glyph::Download, export_ink, "glyph")}
+                            span { {fl!("save-svg")} }
+                        }
+                        button { class: "{export_class}", onclick: copy,
+                            {glyph(Glyph::Copy, export_ink, "glyph")}
+                            span { {fl!("copy")} }
+                        }
+                    }
                 }
-                div { class: "preview",
-                    img { src: "{src}", alt: fl!("app-title") }
-                }
-            } else {
-                div { class: "placeholder", {fl!("qr-placeholder")} }
             }
         }
 
@@ -308,22 +421,63 @@ pub fn App() -> Element {
                     class: "about",
                     // The scrim closes on a click; the panel is not the scrim.
                     onclick: move |event| event.stop_propagation(),
-                    h2 { {fl!("app-title")} }
-                    p { {fl!("app-description")} }
-                    p { {format!("Version {}", env!("CARGO_PKG_VERSION"))} }
-                    button {
-                        class: "link",
-                        onclick: move |_| {
-                            let _ = open::that(env!("CARGO_PKG_REPOSITORY"));
-                        },
-                        {fl!("repository")}
+                    h2 {
+                        {glyph(Glyph::Code, Ink::Accent, "glyph-brand")}
+                        span { {fl!("app-title")} }
                     }
-                    button {
-                        class: "btn about-close",
-                        onclick: move |_| about.set(false),
-                        {fl!("close")}
+                    p { {fl!("app-description")} }
+                    p { class: "version", {format!("Version {}", env!("CARGO_PKG_VERSION"))} }
+                    div { class: "about-actions",
+                        button {
+                            class: "btn",
+                            onclick: move |_| {
+                                let _ = open::that(env!("CARGO_PKG_REPOSITORY"));
+                            },
+                            {glyph(Glyph::External, Ink::Plain, "glyph")}
+                            span { {fl!("repository")} }
+                        }
+                        button {
+                            class: "btn about-close",
+                            onclick: move |_| about.set(false),
+                            {glyph(Glyph::Close, Ink::Plain, "glyph")}
+                            span { {fl!("close")} }
+                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// One of the two colour tiles: the swatch, what it paints, and its hex.
+///
+/// A tile rather than the bare circle the libcosmic build drew, because a
+/// circle of colour beside the word "Foreground" is two things to look at for
+/// one fact. This is one thing to look at, and it is also the click target
+/// that points the picker below at this colour.
+#[component]
+fn ColorWell(
+    which: Well,
+    name: String,
+    color: Rgb,
+    editing: bool,
+    onpick: EventHandler<MouseEvent>,
+) -> Element {
+    let slug = match which {
+        Well::Dark => "dark",
+        Well::Light => "light",
+    };
+    rsx! {
+        button {
+            class: if editing { "well on" } else { "well" },
+            "data-well": "{slug}",
+            aria_label: "{name}",
+            aria_pressed: if editing { "true" } else { "false" },
+            onclick: move |event| onpick.call(event),
+            span { class: "chipdot", style: "background: {color.to_hex()}" }
+            span { class: "well-text",
+                span { class: "well-name", "{name}" }
+                span { class: "well-hex", "{color.to_hex()}" }
             }
         }
     }
@@ -338,13 +492,13 @@ pub fn App() -> Element {
 /// element, and the square is drawn the way a browser would draw it: four
 /// stacked CSS background layers over a `div`.
 ///
-/// **The thumbs are background layers rather than child elements**, which is
+/// **The markers are background layers rather than child elements**, which is
 /// the one non-obvious decision in this file. A child sitting on top of the
-/// square is what the pointer hits, so `element_coordinates()` would come back
-/// relative to the thumb instead of the square, and `pointer-events: none` —
-/// the usual answer — is not implemented in Blitz. A hard-stopped
-/// `radial-gradient` has no hit box at all, so the square stays its own target
-/// no matter where the thumb is.
+/// square is what the pointer hits, and Blitz measures element coordinates
+/// once against the hit node — so `element_coordinates()` would come back
+/// relative to the marker instead of the square, and `pointer-events: none` —
+/// the usual answer — is not implemented. A background layer has no hit box at
+/// all, so the square stays its own target no matter where the marker is.
 #[component]
 fn Picker(color: Signal<Rgb>) -> Element {
     // The hex field keeps its own text, because half-typed hex is not a
@@ -361,13 +515,37 @@ fn Picker(color: Signal<Rgb>) -> Element {
     let mut hsv = use_signal(|| to_hsv(color()));
     let mut dragging = use_signal(|| false);
 
+    // The last colour this picker itself wrote, so that a colour arriving from
+    // anywhere else can be told apart from one of its own. "Reset to black &
+    // white" is the one place another colour comes from, and before this the
+    // square, the strip and the hex field all carried on showing whatever had
+    // been picked before it — the code went black and the picker did not.
+    //
+    // A round trip through HSV cannot stand in for this comparison: it is lossy
+    // for exactly the colours a picker is used on, so a half-typed hex would be
+    // mistaken for an outside change and overwritten mid-keystroke.
+    let mut written = use_signal(|| *color.peek());
+
     let mut apply = move |next: Hsv| {
         hsv.set(next);
         let rgb = from_hsv(next);
         color.set(rgb);
+        written.set(rgb);
         draft.set(rgb.to_hex());
         valid.set(true);
     };
+
+    use_effect(move || {
+        let outside = color();
+        // `peek` rather than a read: this effect must not subscribe to what it
+        // writes, or setting `written` below would schedule it to run again.
+        if outside != *written.peek() {
+            written.set(outside);
+            hsv.set(to_hsv(outside));
+            draft.set(outside.to_hex());
+            valid.set(true);
+        }
+    });
 
     let mut pick_in_square = move |event: Event<PointerData>| {
         let (x, y) = event.element_coordinates().to_tuple();
@@ -402,17 +580,20 @@ fn Picker(color: Signal<Rgb>) -> Element {
         value: 1.0,
     })
     .to_hex();
-    let square_thumb = thumb(
+    let picked = color();
+    let square_mark = marker(
         f64::from(saturation) * SQUARE_W,
         f64::from(1.0 - value) * SQUARE_H,
         SQUARE_W,
         SQUARE_H,
+        picked,
     );
-    let strip_thumb = thumb(
+    let strip_mark = marker(
         f64::from(hue) / 360.0 * SQUARE_W,
         STRIP_H / 2.0,
         SQUARE_W,
         STRIP_H,
+        from_hsv(Hsv { hue, saturation: 1.0, value: 1.0 }),
     );
 
     rsx! {
@@ -420,7 +601,18 @@ fn Picker(color: Signal<Rgb>) -> Element {
             div {
                 class: "sv",
                 "data-square": "true",
-                style: "background: {square_thumb}, linear-gradient(to top, #000000, rgba(0,0,0,0)), linear-gradient(to right, #FFFFFF, rgba(255,255,255,0)), {pure}",
+                // Four layers: the marker's three, then the white-to-hue wash,
+                // the black-to-nothing wash, and the hue itself as a gradient
+                // from one colour to the same colour — a flat fill, written
+                // this way so that every layer is an image and the three lists
+                // below line up entry for entry.
+                style: "background-image: {square_mark.image}, \
+                    linear-gradient(to top, #000000, rgba(0,0,0,0)), \
+                    linear-gradient(to right, #FFFFFF, rgba(255,255,255,0)), \
+                    linear-gradient({pure}, {pure}); \
+                    background-position: {square_mark.position}, 0px 0px, 0px 0px, 0px 0px; \
+                    background-size: {square_mark.size}, auto, auto, auto; \
+                    background-repeat: no-repeat",
                 onpointerdown: move |event| {
                     dragging.set(true);
                     pick_in_square(event);
@@ -436,7 +628,11 @@ fn Picker(color: Signal<Rgb>) -> Element {
             div {
                 class: "strip",
                 "data-strip": "true",
-                style: "background: {strip_thumb}, linear-gradient(to right, #FF0000, #FFFF00, #00FF00, #00FFFF, #0000FF, #FF00FF, #FF0000)",
+                style: "background-image: {strip_mark.image}, \
+                    linear-gradient(to right, #FF0000, #FFFF00, #00FF00, #00FFFF, #0000FF, #FF00FF, #FF0000); \
+                    background-position: {strip_mark.position}, 0px 0px; \
+                    background-size: {strip_mark.size}, auto; \
+                    background-repeat: no-repeat",
                 onpointerdown: move |event| {
                     dragging.set(true);
                     pick_in_strip(event);
@@ -461,23 +657,26 @@ fn Picker(color: Signal<Rgb>) -> Element {
                     }
                 }
             }
-            input {
-                class: if valid() { "hex" } else { "hex bad" },
-                r#type: "text",
-                "data-hex": "true",
-                value: "{draft}",
-                oninput: move |event| {
-                    let text = event.value();
-                    match parse_hex(&text) {
-                        Some(parsed) => {
-                            valid.set(true);
-                            hsv.set(to_hsv(parsed));
-                            color.set(parsed);
+            div { class: "hexrow",
+                input {
+                    class: if valid() { "hex" } else { "hex bad" },
+                    r#type: "text",
+                    "data-hex": "true",
+                    value: "{draft}",
+                    oninput: move |event| {
+                        let text = event.value();
+                        match parse_hex(&text) {
+                            Some(parsed) => {
+                                valid.set(true);
+                                hsv.set(to_hsv(parsed));
+                                color.set(parsed);
+                                written.set(parsed);
+                            }
+                            None => valid.set(false),
                         }
-                        None => valid.set(false),
-                    }
-                    draft.set(text);
-                },
+                        draft.set(text);
+                    },
+                }
             }
         }
     }
@@ -490,8 +689,12 @@ fn Picker(color: Signal<Rgb>) -> Element {
 /// already holding it, and panics. The stylesheet is told the same number, so
 /// the two cannot drift without `the_square_is_the_size_the_maths_assumes`
 /// saying so.
-const SQUARE_W: f64 = 234.0;
-const SQUARE_H: f64 = 140.0;
+///
+/// These are border-box sizes, which is what a pointer's element coordinates
+/// are measured against; `ui.css` sets `background-origin: border-box` so that
+/// the layers agree.
+const SQUARE_W: f64 = 310.0;
+const SQUARE_H: f64 = 200.0;
 const STRIP_H: f64 = 22.0;
 
 /// A colour as the picker holds it: hue in degrees, the rest in 0..=1.
@@ -502,27 +705,176 @@ struct Hsv {
     value: f32,
 }
 
-/// One thumb, as a `radial-gradient` background layer.
+/// The ink an icon is drawn in.
 ///
-/// Hard stops rather than a fade, so it reads as a ring: transparent inside,
-/// two pixels of white, transparent outside, with a dark hairline either side
-/// so that it stays visible on white and on black alike.
+/// It is a presentation attribute on the `<svg>` rather than a CSS colour,
+/// because **CSS does not reach inside an SVG in Blitz** — the element is
+/// handed to `usvg` as a document of its own. Which is also why the interface
+/// has one theme: see the note at the top of `ui.css`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ink {
+    /// Section marks and the brand, in the accent.
+    Accent,
+    /// Buttons somebody can press.
+    Plain,
+    /// Buttons that are not doing anything yet, and quiet furniture.
+    Faint,
+}
+
+impl Ink {
+    const fn stroke(self) -> &'static str {
+        match self {
+            Ink::Accent => "#4ECB8F",
+            Ink::Plain => "#D2D8E0",
+            Ink::Faint => "#8C949E",
+        }
+    }
+}
+
+/// The icons, as the paths that draw them on a 24×24 grid.
 ///
-/// The centre is held a ring's width inside the box. A background layer is
+/// Hand-drawn rather than pulled from an icon font, for the reason the whole
+/// app exists: a font is a file to ship and a licence to honour, and eleven
+/// icons is less of both. They are stroked, round-capped and unfilled, which
+/// is the one decision that keeps them looking like a set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Glyph {
+    /// Three finder squares and a scatter of modules: QRnew's own mark, and
+    /// the thing that stands in for the code before there is one.
+    Code,
+    Info,
+    Type,
+    Image,
+    Shield,
+    Drop,
+    Undo,
+    Download,
+    Copy,
+    Close,
+    External,
+}
+
+impl Glyph {
+    const fn paths(self) -> &'static [&'static str] {
+        match self {
+            Glyph::Code => &[
+                "M4 4 H9.5 V9.5 H4 Z",
+                "M14.5 4 H20 V9.5 H14.5 Z",
+                "M4 14.5 H9.5 V20 H4 Z",
+                "M14.6 15 h2.4",
+                "M19.6 15 h0.4",
+                "M14.6 20 h0.4",
+                "M17.4 20 h2.6",
+                "M17.4 17.5 h2.6",
+            ],
+            Glyph::Info => &[
+                "M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12",
+                "M12 11.2 V16.4",
+                "M12 7.7 h0.4",
+            ],
+            Glyph::Type => &["M4.6 7.2 V5 H19.4 V7.2", "M12 5 V19", "M8.8 19 H15.2"],
+            Glyph::Image => &[
+                "M4.6 4.8 H19.4 V19.2 H4.6 Z",
+                "M4.6 15.6 L9.4 10.8 L13.6 15 L16.2 12.4 L19.4 15.6",
+                "M15.4 8.6 h0.4",
+            ],
+            Glyph::Shield => &[
+                "M12 3.2 L19.8 6 V11.6 C19.8 16 16.6 19.7 12 20.8 C7.4 19.7 4.2 16 4.2 11.6 V6 Z",
+                "M9.2 12 L11.3 14.1 L15.2 10.2",
+            ],
+            Glyph::Drop => &[
+                "M12 3.4 C12 3.4 5.6 9.9 5.6 14.1 A6.4 6.4 0 0 0 18.4 14.1 C18.4 9.9 12 3.4 12 3.4 Z",
+                "M9.3 14.7 A2.7 2.7 0 0 0 12 17.4",
+            ],
+            Glyph::Undo => &["M3.5 12 A8.5 8.5 0 1 0 6.4 5.7 L3.5 8.7", "M3.5 3.7 V8.7 H8.5"],
+            Glyph::Download => &[
+                "M12 3.6 V15.4",
+                "M7.4 10.9 L12 15.5 L16.6 10.9",
+                "M4.6 19.6 H19.4",
+            ],
+            Glyph::Copy => &["M9 8.6 H19.4 V19.4 H9 Z", "M15.4 8.6 V4.6 H4.6 V15.4 H9"],
+            Glyph::Close => &["M6.4 6.4 L17.6 17.6", "M17.6 6.4 L6.4 17.6"],
+            Glyph::External => &[
+                "M14.2 4.6 H19.4 V9.8",
+                "M19.4 4.6 L11.2 12.8",
+                "M17 13.8 V19.4 H4.6 V7 H10.2",
+            ],
+        }
+    }
+}
+
+/// One icon, as an inline `<svg>` sized by `class`.
+///
+/// Blitz serializes the element back to markup and parses it with `usvg`, the
+/// same route the preview takes — so an icon here is a real document, not a
+/// glyph in a font and not a rasterized image.
+fn glyph(kind: Glyph, ink: Ink, class: &'static str) -> Element {
+    rsx! {
+        svg {
+            class: "{class}",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: ink.stroke(),
+            stroke_width: "1.7",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            for (index , outline) in kind.paths().iter().enumerate() {
+                path { key: "{index}", d: "{outline}" }
+            }
+        }
+    }
+}
+
+/// The three `background` lists that draw one position marker.
+///
+/// Kept together because they are only correct together: the images, their
+/// sizes and their positions are three parallel lists and a layer is the same
+/// index in each of them.
+struct Marker {
+    image: String,
+    position: String,
+    size: String,
+}
+
+/// A marker on the square or the strip, as three stacked background layers.
+///
+/// It is a dark outline, a white ring inside it and the picked colour in the
+/// middle — three filled squares, largest at the bottom, so that it reads on a
+/// white corner and a black one alike and says what has been picked while it
+/// is at it.
+///
+/// **Not a `radial-gradient`, which is what drew it before.** Blitz resolves a
+/// radial gradient's centre in CSS pixels and then adds it to a rectangle it
+/// has already measured in device pixels, so on a 2× display the ring landed
+/// at half the offset it was given: the colour under the pointer was right and
+/// the mark was somewhere else entirely. `background-position` and
+/// `background-size` are both multiplied by the scale before they are used,
+/// and `linear-gradient(c, c)` is a flat fill of `c`, so a marker built out of
+/// those is drawn where it was put at any scale.
+///
+/// The centre is held half a marker inside the box. A background layer is
 /// clipped to its element — unlike the child element a browser would use,
-/// which is free to overhang — so an unclamped thumb on a fully black or fully
-/// red colour would be a sliver against the edge, which is exactly when
-/// somebody is looking for it.
-fn thumb(x: f64, y: f64, width: f64, height: f64) -> String {
-    const RING: f64 = 9.0;
-    let x = x.clamp(RING, width - RING);
-    let y = y.clamp(RING, height - RING);
-    format!(
-        "radial-gradient(circle at {x:.1}px {y:.1}px, \
-         rgba(0,0,0,0) 5px, rgba(0,0,0,0.45) 5px, rgba(0,0,0,0.45) 6px, \
-         #FFFFFF 6px, #FFFFFF 8px, rgba(0,0,0,0.45) 8px, rgba(0,0,0,0.45) 9px, \
-         rgba(0,0,0,0) 9px)"
-    )
+/// which is free to overhang — so an unclamped marker on a fully black or
+/// fully saturated colour would be a sliver against the edge, which is exactly
+/// when somebody is looking for it.
+fn marker(x: f64, y: f64, width: f64, height: f64, fill: Rgb) -> Marker {
+    /// Half the outermost square, which is how far in the centre is held.
+    const REACH: f64 = 10.0;
+
+    let x = x.clamp(REACH, width - REACH);
+    let y = y.clamp(REACH, height - REACH);
+    let fill = fill.to_hex();
+    let corner = |inset: f64| format!("{:.1}px {:.1}px", x - inset, y - inset);
+
+    Marker {
+        image: format!(
+            "linear-gradient({fill}, {fill}), \
+             linear-gradient(#FFFFFF, #FFFFFF), \
+             linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55))"
+        ),
+        position: format!("{}, {}, {}", corner(5.0), corner(8.0), corner(REACH)),
+        size: "10px 10px, 16px 16px, 20px 20px".to_string(),
+    }
 }
 
 fn to_hsv(rgb: Rgb) -> Hsv {
@@ -574,15 +926,6 @@ fn from_hsv(hsv: Hsv) -> Rgb {
 
     let channel = |value: f32| ((value + base) * 255.0).round().clamp(0.0, 255.0) as u8;
     Rgb::new(channel(r), channel(g), channel(b))
-}
-
-/// Clicking the well that is already open closes it.
-fn toggled(current: Option<Well>, clicked: Well) -> Option<Well> {
-    if current == Some(clicked) {
-        None
-    } else {
-        Some(clicked)
-    }
 }
 
 /// `#rrggbb`, `rrggbb`, `#rgb` or `rgb`, in either case.

@@ -12,7 +12,9 @@
 //! swapchain is sized in pixels, so comparing this build's memory against the
 //! libcosmic build is only honest at the same window size. `--quit N` ends the
 //! run after N seconds so the settled figure can be read off `vmmap` before
-//! the process goes away. Neither flag is meant for anybody using the app.
+//! the process goes away. Neither flag is meant for anybody using the app —
+//! and passing either of them is also what turns the maximized default off,
+//! since a window the compositor sized is not a window you can compare.
 
 use dioxus_native::{LogicalSize, WindowAttributes};
 use qrnew::{i18n, ui};
@@ -35,8 +37,7 @@ fn main() {
         .and_then(|at| args.get(at + 1))
         .cloned()
         .unwrap_or_default();
-    let width = flag("--width").unwrap_or(900.0);
-    let height = flag("--height").unwrap_or(720.0);
+    let measured = flag("--width").or_else(|| flag("--height"));
 
     if let Some(seconds) = flag("--quit") {
         std::thread::spawn(move || {
@@ -45,9 +46,18 @@ fn main() {
         });
     }
 
+    // The interface is three columns wide and wants the room: it opens
+    // maximized, and the surface size below is only what the window falls back
+    // to when it is un-maximized. The minimum is the width at which the two
+    // 356-pixel control rails still leave the code a square worth looking at.
     let attributes = WindowAttributes::default()
         .with_title(qrnew::fl!("app-title"))
-        .with_surface_size(LogicalSize::new(width, height));
+        .with_min_surface_size(LogicalSize::new(1160.0, 700.0))
+        .with_surface_size(LogicalSize::new(
+            flag("--width").unwrap_or(1280.0),
+            flag("--height").unwrap_or(860.0),
+        ))
+        .with_maximized(measured.is_none());
 
     dioxus_native::launch_cfg(
         ui::App,

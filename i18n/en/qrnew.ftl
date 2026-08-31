@@ -1,26 +1,33 @@
 app-title = QRnew
 app-description = Small and simple QR code generator. Local-only, no telemetry. Your data are safe.
 about = About
-repository = Github repository
+repository = View on GitHub
 view = View
-input-placeholder = Enter text or URL…
-ec-label = Error correction level:
-ec-tooltip = How much of the QR code can be damaged or obscured while still scanning correctly. Higher levels are more robust but can make the image larger.
+input-placeholder = Enter text or a link, and the code appears.
+input-count = {$count ->
+    [one] 1 character
+   *[other] {$count} characters
+}
+input-too-long = That is more text than a single QR code can hold.
+section-content = Content
+read-file = Read from an image…
+section-correction = Error correction
+ec-hint = How much of the code can be damaged or covered and still scan. Sturdier codes are a little denser.
 ec-low = 7%
 ec-medium = 15%
 ec-quartile = 25%
 ec-high = 30%
-qr-placeholder = Type or paste text to create a QR code
-read-file = Read a QR code…
+qr-placeholder = Your QR code appears here as you type
 read-error-not-an-image = That file is not an image QRnew can read.
 read-error-damaged = That image could not be opened.
 read-error-no-code = No QR code found in that image.
 read-error-unreadable = Found a QR code, but could not read it. A sharper or larger image may work.
-save-png = Save as PNG…
-save-svg = Save as SVG…
-copy = Copy to Clipboard
-color-dark-label = Foreground:
-color-light-label = Background:
+save-png = Save PNG…
+save-svg = Save SVG…
+copy = Copy image
+section-colors = Colors
+color-dark-label = Foreground
+color-light-label = Background
 color-recent = Recent colors
 color-copy = Copy to clipboard
 color-copied = Copied!

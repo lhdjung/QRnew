@@ -2,45 +2,80 @@
 
 /* QRnew's whole appearance.
  *
- * Everything is a token on `:root` and redefined once under
- * `prefers-color-scheme: dark`, which Blitz drives off winit's window theme —
- * so the app follows the system without asking anybody anything, the way the
- * libcosmic build did through COSMIC's theme.
+ * One theme, and it is dark. That is a deliberate narrowing from the previous
+ * build's `prefers-color-scheme` pair, for two reasons: a dark surround is what
+ * makes a mostly-white QR code read as an object rather than as a hole in the
+ * window, and — the practical half — **CSS does not reach inside an SVG in
+ * Blitz**, so every icon in `ui.rs` carries its ink as a presentation
+ * attribute. A second theme would mean a second set of icons. If light mode is
+ * wanted back, the cheap route is `filter: invert(1)` on `.glyph`, because
+ * every icon here is monochrome by construction.
  *
- * There is no dark-mode-only colour anywhere below. A colour whose only
- * definition lives inside the media query is a colour the light theme does not
- * have. */
+ * Two things this file deliberately does without, both because Blitz at the
+ * pinned revision does them wrong rather than because they are unwanted:
+ *
+ *   * **`transition`.** A transition is resolved against an animation clock
+ *     that only advances while frames are being asked for, and a frame is not
+ *     asked for while an image is still loading — which, in this app, is every
+ *     time the preview is re-encoded. A colour part-way through a 130ms fade
+ *     then stays part-way through it: the interface reported this as an error
+ *     correction button whose text had drifted towards the selected ink while
+ *     its background had not, leaving unreadable text on an unchanged button.
+ *     Instant state changes are always right; half-finished ones are not.
+ *
+ *   * **`radial-gradient` anywhere its position matters.** See `marker` in
+ *     `ui.rs`: Blitz resolves the centre in CSS pixels and adds it to a
+ *     rectangle in device pixels, so it lands at half the offset on a 2×
+ *     display. `background-position` is scaled correctly, so anything that has
+ *     to be somewhere in particular is placed with that instead.
+ *
+ * Everything else is a token on `:root`, so the palette is one block. */
 
 :root {
-  --bg: #fafaf9;
-  --panel: #ffffff;
-  --ink: #1c1b1a;
-  --ink-dim: #6b6a68;
-  --line: #dcdad7;
-  --accent: #2f6f4f;
-  --accent-ink: #ffffff;
-  --danger: #a8321f;
-  --hover: #f0efed;
-  --shadow: rgba(0, 0, 0, 0.12);
-}
+  /* Surfaces, warm-neutral graphite rather than blue-black. */
+  --bg: #131417;
+  --card: #1c1e22;
+  --card-top: #212429;
+  --sunken: #17191c;
+  --raised: #272b31;
+  --raised-hi: #313640;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1a1a19;
-    --panel: #242322;
-    --ink: #ebe9e6;
-    --ink-dim: #9a9793;
-    --line: #3a3836;
-    --accent: #5fb98c;
-    --accent-ink: #10231a;
-    --danger: #f08a76;
-    --hover: #2f2e2c;
-    --shadow: rgba(0, 0, 0, 0.5);
-  }
+  /* Ink. Three steps is all the interface needs. */
+  --ink: #edeff2;
+  --ink-2: #aab2bc;
+  --ink-3: #7b838e;
+
+  /* Lines. */
+  --line: #2b2f36;
+  --line-2: #3a4049;
+
+  /* The one accent: a fresh leaf green, used for state and for section marks
+   * and for nothing else. `--accent-ink` is what goes *on* the accent, and it
+   * is a near-black rather than a dark green so that a filled button reads as
+   * text on a colour rather than as a colour on a colour. */
+  --accent: #4ecb8f;
+  --accent-ink: #0a1a13;
+  --accent-dim: rgba(78, 203, 143, 0.13);
+  --accent-line: rgba(78, 203, 143, 0.45);
+
+  --danger: #ff9585;
+  --shadow-deep: rgba(0, 0, 0, 0.6);
 }
 
 * {
   box-sizing: border-box;
+  /* **This is what makes the buttons work**, not a nicety.
+   *
+   * Blitz turns a press that drifts more than two pixels before it comes up
+   * into a text-selection drag, and a pointer-up that ends a drag *does not
+   * dispatch a click* — so a slow press on any button, or on the scrim behind
+   * the About panel, did nothing at all and selected the label instead.
+   *
+   * It has to be the universal selector: `user-select` does not reach a
+   * `<button>` by inheritance here, so setting it on an ancestor leaves every
+   * hit target still computing `auto`. Text worth selecting asks for it back,
+   * and a class selector outranks this one. */
+  user-select: none;
 }
 
 html,
@@ -51,191 +86,377 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: system-ui, -apple-system, "Segoe UI", "Cantarell", sans-serif;
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: 15px;
+  line-height: 1.5;
 }
 
-.shell {
+/* dioxus-native mounts the component inside a `<main>` of its own, and that
+ * wrapper has no height — so a `height: 100%` here would resolve against auto
+ * and the stage would pack to the top of the window with the bottom third
+ * empty. `100vh` is measured against the viewport and skips the question. */
+#main {
+  height: 100%;
+}
+
+/* The whole window: a slim header over a three-column body. */
+.app {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  padding: 28px 24px 40px;
-  min-height: 100%;
+  height: 100vh;
+  /* A soft wash off the top-left, so a dark window is not a flat one. Linear
+   * rather than radial because a radial gradient's geometry is measured wrong
+   * on a HiDPI display; at these opacities nobody can tell the difference. */
+  background: linear-gradient(
+      152deg,
+      rgba(78, 203, 143, 0.075),
+      rgba(0, 0, 0, 0) 46%
+    ),
+    var(--bg);
 }
 
-.title {
-  margin: 0;
-  font-size: 26px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
+/* ---------------------------------------------------------------- header */
 
-/* The input. It is the whole app: everything else only decorates what is
- * typed here, which is why it is the one thing that gets the keyboard on
- * startup. */
-.field {
-  width: 400px;
-  max-width: 100%;
-  padding: 9px 12px;
-  font: inherit;
-  color: var(--ink);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-
-.field:focus {
-  border-color: var(--accent);
-  outline: none;
-}
-
-.stack {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-.row {
+.topbar {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 1500px;
+  margin: 0 auto;
+  height: 62px;
+  padding: 0 30px;
 }
 
-.label {
-  color: var(--ink-dim);
+.brand {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
 }
 
-.btn {
-  padding: 6px 12px;
-  font: inherit;
-  color: var(--ink);
-  background: var(--panel);
+.spacer {
+  flex: 1 1 auto;
+}
+
+/* ------------------------------------------------------------------ body */
+
+.body {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 24px;
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 4px 30px 30px;
+  min-height: 0;
+}
+
+/* The two control columns. Fixed width, because a form that reflows while it
+ * is being read is worse than one that scrolls — and because the widths here
+ * are load-bearing: see `.sv` below.
+ *
+ * 348 of card and 8 of gutter. Blitz draws overlay scrollbars — they take no
+ * layout width — so without the gutter a thumb would sit on top of the cards
+ * in the rare case that a rail is long enough to scroll at all. Splitting the
+ * controls across two columns is what made that case rare: everything fits at
+ * the size the window opens at, which is what the single column did not. */
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 0 0 356px;
+  min-height: 0;
+  padding-right: 8px;
+  padding-bottom: 4px;
+  overflow-y: auto;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 18px;
+  background: linear-gradient(180deg, var(--card-top), var(--card));
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 16px;
+}
+
+.card-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hint {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* The line under the text field. `min-height` rather than `height`, so a long
+ * sentence still wraps, and so an empty one still holds its place. */
+.note {
+  margin: -4px 0 0;
+  min-height: 18px;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.note.bad {
+  color: var(--danger);
+}
+
+/* The preview column. */
+.stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* --------------------------------------------------------------- controls */
+
+/* The input. It is the whole app: everything else only decorates what is
+ * typed here, which is why it is the one thing that gets the keyboard on
+ * startup, and one of the two places worth selecting text in. */
+.field {
+  width: 100%;
+  padding: 12px 14px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--sunken);
+  border: 1px solid var(--line-2);
+  border-radius: 11px;
+  user-select: text;
+}
+
+.field:hover {
+  border-color: var(--raised-hi);
+}
+
+.field:focus {
+  background: #14171a;
+  border-color: var(--accent-line);
+  outline: none;
+}
+
+/* Buttons carry an icon *and* a word. Neither alone: an icon on its own is a
+ * puzzle, and a row of bare words is a form. */
+.btn {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--raised);
+  border: 1px solid var(--line-2);
+  border-radius: 11px;
 }
 
 .btn:hover {
-  background: var(--hover);
+  background: var(--raised-hi);
+  border-color: #464d57;
+}
+
+.btn.wide {
+  width: 100%;
+}
+
+/* Dimmed rather than removed. The three export buttons live under the code and
+ * are drawn from the first frame, so the stage does not rearrange itself the
+ * moment somebody starts typing. */
+.btn.off {
+  color: var(--ink-3);
+  background: rgba(39, 43, 49, 0.45);
+  border-color: var(--line);
+}
+
+.btn.off:hover {
+  background: rgba(39, 43, 49, 0.45);
+  border-color: var(--line);
+}
+
+/* The error-correction segments: four buttons in one track, each of them a
+ * button all the way through.
+ *
+ * They used to be transparent pills in a sunken well, which left the three
+ * unselected ones as bare text on a dark trough — legible in theory and, with
+ * a half-finished transition on top of it, not in practice. Every segment now
+ * carries the same raised surface as every other button in the window, and
+ * being selected is a fill rather than the absence of one. */
+.segments {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
 }
 
 .chip {
-  padding: 5px 14px;
+  padding: 9px 0;
   font: inherit;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--ink);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  background: var(--raised);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
 }
 
 .chip:hover {
-  background: var(--hover);
+  background: var(--raised-hi);
+  border-color: #464d57;
 }
 
 .chip.on {
   color: var(--accent-ink);
   background: var(--accent);
   border-color: var(--accent);
+  font-weight: 600;
+}
+
+.chip.on:hover {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The two colour tiles, which choose what the picker underneath them edits:
+ * a swatch, the word for what it paints, and the hex it is currently set to. */
+.wells {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.well {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--sunken);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+}
+
+.well:hover {
+  background: var(--raised);
+}
+
+.well.on {
+  background: var(--accent-dim);
+  border-color: var(--accent-line);
+}
+
+.chipdot {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+}
+
+.well-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.well-name {
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.well-hex {
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", monospace;
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--ink-3);
 }
 
 .error {
   margin: 0;
-  width: 400px;
-  max-width: 100%;
   color: var(--danger);
   font-size: 13px;
-  text-align: center;
 }
 
-/* The tooltip on the error-correction row. `title` is not a tooltip in Blitz
- * and there is no widget for one, so it is a hidden sibling shown on hover —
- * which is all COSMIC's was, one layer down. */
-.tip {
-  position: relative;
-  color: var(--ink-dim);
-}
+/* ----------------------------------------------------------------- picker */
 
-.tip-body {
-  display: none;
-}
-
-.tip:hover .tip-body {
-  display: block;
-  position: absolute;
-  top: 22px;
-  left: 0;
-  z-index: 5;
-  width: 260px;
-  padding: 8px 10px;
-  color: var(--ink);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 4px 14px var(--shadow);
-  font-size: 13px;
-}
-
-/* The colour buttons. A round well showing the colour it holds, which is what
- * `widget::ColorPickerModel::picker_button` drew. */
-.well {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 50%;
-}
-
-.well.on {
-  border-color: var(--accent);
-  border-width: 2px;
-}
-
+/* No frame of its own: the picker is the second column's card, not a box
+ * inside it. That is also what makes the square as wide as the card. */
 .picker {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: 0 4px 14px var(--shadow);
+  gap: 12px;
 }
 
 /* The saturation/value square and the hue strip.
  *
- * These two sizes are also written in `ui.rs` as `SQUARE_W`, `SQUARE_H` and
+ * These sizes are also written in `ui.rs` as `SQUARE_W`, `SQUARE_H` and
  * `STRIP_H`, because a pointer's position has to be turned into a fraction and
  * the element cannot be measured from inside an event handler. A test asserts
- * the two agree. */
+ * the two agree.
+ *
+ * `background-origin: border-box` is what makes them agree about *where* zero
+ * is, too: a pointer's element coordinates are measured from the border box,
+ * so the gradients have to start there as well or everything sits a pixel out.
+ * The layers themselves are set from `ui.rs`, because the marker moves. */
 .sv {
-  width: 234px;
-  height: 140px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  width: 310px;
+  height: 200px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background-origin: border-box;
+  background-clip: border-box;
 }
 
 .strip {
-  width: 234px;
+  width: 310px;
   height: 22px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-2);
   border-radius: 11px;
+  background-origin: border-box;
+  background-clip: border-box;
 }
 
 .palette {
   display: grid;
-  grid-template-columns: repeat(8, 24px);
-  gap: 6px;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 7px;
 }
 
 .swatch {
-  width: 24px;
-  height: 24px;
+  height: 30px;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
 }
 
 .swatch.on {
@@ -243,67 +464,106 @@ body {
   border-width: 2px;
 }
 
+.hexrow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
 .hex {
-  width: 110px;
-  padding: 5px 8px;
+  width: 122px;
+  padding: 8px 10px;
   font: inherit;
   font-family: ui-monospace, "SF Mono", "Cascadia Mono", monospace;
+  font-size: 13px;
   color: var(--ink);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  background: var(--sunken);
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  user-select: text;
+}
+
+.hex:focus {
+  border-color: var(--accent-line);
+  outline: none;
 }
 
 .hex.bad {
   border-color: var(--danger);
 }
 
-/* The preview area is a fixed square so the layout does not jump as the code
- * grows a version. Same reason `PREVIEW_SIZE` was fixed in the iced build. */
+/* ------------------------------------------------------------------ stage */
+
+/* The code, matted in its own background colour. The mat is what turns a
+ * square bitmap into an object on the page, and painting it in `light` rather
+ * than in white means it still reads as one when the background is recoloured.
+ *
+ * It is also why the corners can be round without clipping the image: the
+ * radius is carried by the mat, and the image never reaches it.
+ *
+ * The cap came down from 620: with two columns of controls beside it, a code
+ * that filled the rest of the window stopped reading as one thing on a page
+ * and started reading as a wall. */
 .preview {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 300px;
-  height: 300px;
+  width: min(100%, 54vh, 470px);
+  aspect-ratio: 1 / 1;
+  padding: 18px;
+  border-radius: 20px;
+  box-shadow: 0 18px 46px var(--shadow-deep);
 }
 
 .preview img {
-  width: 300px;
-  height: 300px;
+  width: 100%;
+  height: 100%;
 }
 
 .placeholder {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 300px;
-  height: 300px;
-  color: var(--ink-dim);
+  gap: 14px;
+  width: min(100%, 54vh, 470px);
+  aspect-ratio: 1 / 1;
+  padding: 30px;
+  color: var(--ink-3);
+  font-size: 14px;
   text-align: center;
-  border: 1px dashed var(--line);
-  border-radius: 12px;
+  border: 1px dashed var(--line-2);
+  border-radius: 20px;
 }
 
-/* About. A plain overlay, because `widget::about::About` and the context
- * drawer it lived in are libcosmic's and have no counterpart here. */
+.exports {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+/* ------------------------------------------------------------------ about */
+
 .about-open {
-  position: absolute;
-  top: 12px;
-  right: 16px;
-  width: 28px;
-  height: 28px;
-  padding: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
   font: inherit;
-  color: var(--ink-dim);
-  background: var(--panel);
+  font-size: 14px;
+  color: var(--ink-2);
+  background: rgba(0, 0, 0, 0);
   border: 1px solid var(--line);
-  border-radius: 50%;
+  border-radius: 10px;
 }
 
 .about-open:hover {
   color: var(--ink);
-  background: var(--hover);
+  background: var(--raised);
 }
 
 .scrim {
@@ -316,38 +576,66 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(8, 9, 11, 0.62);
 }
 
 .about {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  width: 360px;
-  padding: 22px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  box-shadow: 0 10px 30px var(--shadow);
-  text-align: center;
+  gap: 14px;
+  width: 400px;
+  padding: 26px;
+  background: linear-gradient(180deg, var(--card-top), var(--card));
+  border: 1px solid var(--line-2);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px var(--shadow-deep);
 }
 
 .about h2 {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
   margin: 0;
-  font-size: 20px;
+  font-size: 19px;
+  font-weight: 600;
 }
 
 .about p {
   margin: 0;
-  color: var(--ink-dim);
+  color: var(--ink-2);
+  font-size: 14px;
+  user-select: text;
 }
 
-.link {
-  padding: 0;
-  color: var(--accent);
-  background: none;
-  border: none;
-  font: inherit;
-  text-decoration: underline;
+.about .version {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.about-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+/* Icons. Every one is a `<svg>` in `ui.rs`, painted through usvg — so this
+ * sizes them and nothing more; their colour is baked in at the call site. */
+.glyph {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+
+.glyph-brand {
+  flex: 0 0 auto;
+  width: 21px;
+  height: 21px;
+}
+
+.glyph-empty {
+  flex: 0 0 auto;
+  width: 68px;
+  height: 68px;
 }
