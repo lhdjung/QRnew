@@ -1,0 +1,415 @@
+# Should QRnew become a Dioxus Native app?
+
+Assessment written 2026-08-31, against commit `d00b41a` (branch `core-crate`).
+This one answers `tauri-assessment.md`, which asked a different question and
+got the answer "no, and here is why the memory instinct was aimed at the wrong
+layer." The instinct was right. **Dioxus Native is the layer it was aimed at.**
+
+The proposal is Dioxus rendered by **Blitz**: HTML and CSS parsed by Stylo,
+laid out by Taffy, text shaped by Parley, painted by Vello onto the GPU. No
+webview, no JavaScript, no second toolchain. Not Dioxus Desktop, which is a
+webview and would buy nothing Tauri would not.
+
+**Short version: this works, it is measured, and it is a much better fit for
+QRnew than it is for the app the reference documents describe.** A spike
+carrying QRnew's actual interface and its actual `qrnew-core` crate runs at
+**64 MB against the current 161 MB** in the same size window at **zero** idle
+CPU, and its interface is driven by four passing headless tests. The costs are
+real and they are about maturity, not about capability.
+
+---
+
+## What was built
+
+`qr-spike`, in this session's scratch directory: QRnew's interface — the title,
+the text field, the four error-correction chips, colour swatches, the preview,
+the three action buttons — as **129 lines of Rust including 20 lines of CSS**,
+against the 532 lines of `src/app.rs` it stands in for. It calls `qrnew-core`
+unmodified, by path dependency into this repository.
+
+It is not a port. It answers the three questions that cannot be reasoned about:
+
+1. Does Blitz render the SVG `qrnew-core` already emits?
+2. Does the text field take text? That is the app's entire input.
+3. Does it cost less than 161 MB?
+
+All three: yes. Blitz is at `0.3.0-beta.2` / `dioxus-native 0.7.0`, from the
+clone at `~/rust_projects/blitz` (`64eb2785`) that the HyloPDF experiment
+already builds against.
+
+It renders. The title, the field with its text, the chips with Medium
+highlighted, the swatches, a real code drawn from `qrnew-core`'s own SVG, and
+the three buttons — the whole layout, first build, no workarounds.
+
+## The numbers
+
+One machine, one sitting, macOS 26.5.2 on Apple silicon, release builds, three runs
+each, idle with a code on screen. **Both windows are 1019×762 logical points** —
+the spike's window is set to the size measured off a screenshot of QRnew,
+because a swapchain is sized in pixels and the comparison is worthless
+otherwise. That the two IOSurface figures come out at 24.0 MB and 24.4 MB is
+the check that the matching worked.
+
+Every memory figure is **physical footprint** — what Activity Monitor shows in
+its Memory column and what the kernel charges against a limit. RSS is the wrong
+unit for a GPU workload and cost the HyloPDF experiment a wrong conclusion once.
+
+| | QRnew today | the spike | change |
+| --- | ---: | ---: | --- |
+| Physical footprint, settled | 160.7 MB | **63.8 MB** | **−60%** |
+| Physical footprint, peak | 190.3 MB | 184.2 MB | −3% |
+| Swapchain (IOSurface) | 24.0 MB | 24.4 MB | *(matched)* |
+| Graphics region, resident | 47.0 MB | 14.3 MB | −70% |
+| CPU over 10 s idle | 0.03 s | **0.00 s** | — |
+| Binary (stripped, `opt-level = "z"`, LTO) | 8.7 MB | 7.4 MB | see below |
+| Crates in `Cargo.lock` | 634 | 583 | see below |
+| Helper processes | none | none | — |
+
+Run-to-run spread was 160.7–160.8 MB and 63.6–64.0 MB. This is not a noisy
+measurement.
+
+**Read the binary and crate rows carefully.** The spike does not carry i18n,
+the file reader, the exports or `open`; adding them back is about twenty crates
+and some hundreds of kilobytes. Call both rows a wash. The honest claim is that
+Dioxus Native costs QRnew **nothing** in binary size or dependency count, which
+is itself surprising — the reference document's app pays double for the same
+move, because there the trade was against pdf.js and pdfium rather than against
+another Rust GUI toolkit.
+
+### The peak does not improve, and that is worth saying
+
+184 MB against 190 MB is not a win. What changes is not the high-water mark but
+what the app *holds*: QRnew peaks at 190 MB and settles 30 MB below it; the
+spike peaks at 184 MB and settles 120 MB below it. The spike's peak is hit
+before its window is on screen — sampled from outside, the peak already reads
+164 MB while current reads 9.7 MB — and it is the same with no code drawn at
+all, so it belongs to the stack starting up and not to anything QRnew does.
+
+Unattributed, and I did not chase it. If a memory *limit* is what matters, this
+migration buys nothing. If the Memory column is what matters, it buys 97 MB.
+
+## Why the memory lands where it does
+
+`tauri-assessment.md` isolated 93 MB of "Metal driver" overhead in the current
+build and concluded it was "not fundamental." That was the right call and the
+attribution was half wrong. The HyloPDF experiment's layer-by-layer ablation,
+on this machine and this Blitz commit, is the evidence:
+
+| stage | footprint |
+| --- | ---: |
+| the process alone | 1.8 MB |
+| + a winit window | 15.7 MB |
+| + a wgpu instance, adapter and device | 16.4 MB |
+| + `vello`, resumed, one empty frame | **208.0 MB** |
+| + `vello_hybrid`, resumed, one empty frame | **18.8 MB** |
+
+A window with a GPU device and a swapchain behind it costs 16 MB. Nothing in
+Stylo, Parley, fontique's font enumeration or winit costs anything worth
+naming. **What costs money is the renderer's scene-independent scratch, and it
+costs the same whether the frame is empty or full.** `vello` allocates 173 MB
+of it from constants a comment in its own source says were "hand picked to
+accommodate the vello test scenes as well as paris-30k." `vello_hybrid`
+allocates none, and is upstream's default.
+
+QRnew's 47 MB resident graphics region is the same shape, and the same
+conclusion follows: not the Metal driver being expensive, but a renderer
+sizing its buffers for a workload QRnew does not have. `iced_wgpu` draws a few
+rectangles, one SVG and some text. *Which* of its allocations account for the
+47 MB I did not break down — that would need the same ablation run against
+`iced` — so treat the mechanism as inferred and the two region sizes as
+measured.
+
+**This is why plain `iced` is not an alternative here.** `tauri-assessment.md`
+names dropping `libcosmic` for `iced` as a smaller move that solves a different
+subset, and notes it "does nothing for memory, since the renderer is the same."
+Confirmed: the 47 MB is `iced_wgpu`'s, and it survives the move.
+
+**And it is why the `tiny-skia` experiment failed the way it did.** That
+experiment reached 67 MB — close to what the spike reaches — by dropping to a
+software renderer, and paid 23% idle CPU for it because it repainted
+continuously. Blitz reaches the same memory *and* draws nothing when nothing
+changes: 0.00 seconds of CPU across ten idle seconds, measured the same way.
+That combination was not on the table before. It is the whole reason this
+document exists.
+
+## Three things that fit QRnew unusually well
+
+### 1. The SVG goes through the same library it already goes through
+
+QRnew's preview is `widget::svg` fed by `Qr::svg()`, and `libcosmic` renders it
+through `resvg`. Blitz renders an SVG image through `usvg` — which is `resvg`'s
+own parser, the same crate `qrnew-core` already depends on. The generated
+document arrives as a `data:` URL on an `<img>` and is parsed by
+`blitz_dom::util::parse_svg_image`.
+
+So the preview is not reimplemented, approximated, or rasterized on the way in.
+It is the same bytes through the same parser. Blitz's documented SVG gap — that
+CSS does not reach inside an SVG, so `stroke: currentColor` paints nothing —
+does not touch QRnew at all, because `qrnew-core` already bakes every colour
+into presentation attributes. `draw.rs` writes `fill` on the paths because an
+exported file has to stand alone. That decision, made for a different reason,
+happens to be exactly what Blitz requires.
+
+### 2. The privacy claim survives intact, which I did not expect
+
+`tauri-assessment.md`'s sharpest objection to a webview was that "a statically
+linked Rust binary with no network crate in the tree makes that claim
+self-evidently," and a webview weakens it to "true, given this CSP config."
+
+Dioxus Native's `net` feature is **on by default** and pulls `blitz-net` →
+`reqwest` → `native-tls`. That would have been the same objection in a smaller
+font. But `net` is optional, and `blitz-shell` carries a feature whose own
+comment reads *"Enables a data-uri-only NetProvider. Only needed if you aren't
+using the regular NetProvider."* Built with `default-features = false`, `net`
+off and `data-uri` on, the spike's lockfile contains **no `reqwest`, no
+`hyper`, no `rustls`, no `native-tls`, no `openssl`** — and still renders the
+data-URL preview, because that provider is exactly and only what a data URL
+needs.
+
+The claim stays "look at the dependency list."
+
+### 3. `rfd` and `arboard` are already the answer
+
+Blitz's `file-dialog` feature is `rfd`. Its `clipboard` feature is `arboard`.
+Those are the two crates QRnew already uses, at the versions it already uses
+them. Reading a code from a file and copying a code to the clipboard port by
+moving the call, not by finding a replacement. `open` is unaffected. `i18n` is
+`i18n-embed` + `rust-embed` + Fluent, which knows nothing about any GUI
+toolkit; `fl!()` moves into `rsx!` and the `i18n/` directory does not change.
+
+### And `qrnew-core` does not move at all
+
+1,722 lines — the styled-SVG generator, the shapes, the finder-radius rules,
+the logo budget, the reader, and the round-trip tests that hold all of it — are
+already behind an API with no GUI in it. The spike depends on it by path and
+changed nothing. This is the extraction from `tauri-assessment.md` paying off
+exactly as that document said it would: *"the rewrite shrinks to swapping a UI
+layer over a stable core."* It does. The UI layer is `src/app.rs`, and it is
+532 lines.
+
+## The interface works, and it is tested
+
+The window says the layout is right and the code draws. It cannot say whether
+the field takes typing — driving a real window needs accessibility permissions
+this machine has not granted to `osascript`. `blitz-test-harness` answers it
+without a window, a GPU or a compositor:
+
+```
+running 4 tests
+test typing_generates_a_code ... ok
+test error_correction_changes_the_code ... ok
+test a_swatch_recolors_the_code ... ok
+test high_correction_makes_a_denser_code ... ok
+
+test result: ok. 4 passed; 0 failed; finished in 0.23s
+```
+
+Those click the field, type into it, click the chips and the swatches, and
+assert on the `src` of the rendered `<img>` — that a code appears only after
+typing, that High produces a different and larger code than Medium and Low, and
+that a swatch recolours it. It is the full interaction model of the app, driven
+end to end, in a quarter of a second.
+
+**QRnew has no UI tests today.** `qrnew-core` is well covered and `src/app.rs`
+is covered by nothing, because testing it means opening a `libcosmic` window.
+This is not a consolation prize; it is a capability the current architecture
+does not offer and this one does for free.
+
+## What it costs
+
+### There is no colour picker
+
+Blitz has no `<input type="color">` — it has an accessibility role mapping for
+one and no widget behind it. QRnew spends two `widget::ColorPickerModel`s, a
+hex/RGB entry, a recents list and a copy button on this, and all of it is
+`libcosmic`'s. Under Blitz it is hand-built: a swatch grid is twenty lines (the
+spike has one), a hex field is a text input and a parser, and a real
+saturation/value square with a hue strip is a few hundred lines of CSS
+gradients and pointer maths.
+
+This is the single largest piece of UI work in the migration and it is the one
+place where the current app is unambiguously ahead.
+
+### The COSMIC identity goes
+
+The header bar with its `header_end` button, the context drawer that shows the
+About panel, `widget::about::About`, `cosmic::theme::spacing()`, the tooltip on
+the error-correction row, and COSMIC's theming — all of that is `libcosmic`'s
+and none of it exists in Blitz. `app.desktop` and `app.metainfo.xml` still
+install fine; the app inside them stops looking like a COSMIC app. Same cost
+the Tauri option carried, for the same reason.
+
+System dark mode is *not* on this list: Blitz maps winit's theme onto
+`prefers-color-scheme`, so a CSS media query handles it. The spike simply did
+not use one, which is why its screenshot is light against QRnew's dark.
+
+### Blitz is alpha, and it is a path dependency
+
+`dioxus-native 0.7.0` here is a clone of `main`, not a crates.io release. The
+published version predates pieces the HyloPDF experiment depends on. QRnew's
+spike does not use the Custom Widget API and might build against a published
+release — I did not check, and it is the first thing to check before committing
+to this. Until it does, "build QRnew" means "and clone Blitz beside it," which
+is a real cost for a project whose README currently says `cargo build`.
+
+The API moves underneath you. The spike hit one instance in an afternoon:
+`WindowAttributes::with_inner_size` is `with_surface_size` on
+`winit 0.31.0-beta.2`. That is the shape to expect — small, frequent, and paid
+in the shell.
+
+Blitz's own status page scores 48% on the WPT `css` subsuite and its
+production-readiness estimate is "sometime in 2026."
+
+### The known upstream faults, and which ones QRnew would meet
+
+The HyloPDF experiment found four and worked around all four. Two reach QRnew:
+
+- **A click clears the focus.** Blitz walks up from the click target looking for
+  a text input, checkbox, radio, summary, label or link; a plain `<button>` is
+  on none of those lists, so the focus goes to `<html>`. And the page cannot
+  take it back — `MountedData::set_focus` takes `doc_mut()` from inside a borrow
+  that is already held and panics with `RefCell already borrowed`. For QRnew
+  this means click "High", then type, and the typing goes nowhere. The fix is
+  the one that tree already uses: the element that wants the keyboard says so
+  with an attribute and the shell hands it back after a click. QRnew already
+  cares about this — it calls `text_input::focus` after reading a file.
+- **IME does not exist.** No composition events, so CJK, Vietnamese and accent
+  composition cannot be typed into the field. For a PDF reader's search box that
+  is a regression for a class of readers. **For QRnew it is worse**, because the
+  field is not a search box — it is the entire app. A QR code containing
+  Japanese text is an ordinary thing to want, and under Blitz today it could
+  only arrive by paste or by reading it out of an image. Pasting works and the
+  file reader works, so it is not a wall, but it is the one honest blocker on
+  this list and it has no local workaround.
+
+The other two — hit-testing not clipping on `overflow: hidden`, and chords
+leaking into a focused field as typed characters — need a scrolling container
+and keyboard shortcuts respectively, and QRnew has neither.
+
+### No packaging story
+
+This is where Tauri genuinely beat both options and still does. `tauri build`
+produces signed installers and automates notarization. Dioxus Native produces a
+binary, and the hand-rolled `bundle-macos` recipe in the `justfile` with its
+ad-hoc `codesign --deep --sign -` stays exactly as it is, README warning and
+all. Nothing here helps.
+
+## Against the Tauri option
+
+For completeness, since this document answers that one.
+
+| | Tauri | Dioxus Native |
+| --- | --- | --- |
+| memory vs today | a wash at best (120–200 MB across 3–4 processes) | **−60%, one process** |
+| JavaScript | required | none |
+| toolchains | Rust + Node | Rust |
+| privacy claim | "true, given this CSP" | unchanged: no network crate |
+| `qrnew-core` | called over `#[tauri::command]` | called as a function |
+| Linux | WebKitGTK, the heaviest webview | same Rust binary |
+| styling ecosystem | `qr-code-styling` and friends | none — but the rules are already derived and in `qrnew-core` |
+| packaging | signed installers, notarization, updater | nothing |
+| maturity | production, large user base | alpha turning beta |
+| UI iteration | CSS and DOM | **CSS and DOM** |
+
+The row that decides it is the last one. The strongest argument for Tauri in
+`tauri-assessment.md` was frontend iteration speed for a design-heavy styling
+studio — "CSS and DOM beat `iced`'s layout model." Blitz *is* CSS and DOM,
+through Servo's own style engine. It delivers that argument without the
+webview, without JavaScript, and without the memory being a wash.
+
+What Tauri still wins is packaging and maturity. Those are real and they are
+not nothing.
+
+## What is not measured
+
+- **Linux and Windows.** Nothing here has run on either. This is the same gap
+  the HyloPDF experiment records, and for QRnew it matters more, because Linux
+  is the platform the app currently fits best and Vello on common Linux
+  hardware is untested. `vello_hybrid` splits work CPU/GPU and `vello_cpu`
+  exists as a fallback, but choosing between them per machine is new work.
+- **Whether a published Blitz release suffices.** The spike used a `main`
+  clone because one was already on this machine.
+- **Long inputs.** Measured with one URL. A 2,331-character input produces a
+  much larger matrix and a much larger SVG document; nothing suggests a problem,
+  but nothing measured one either.
+- **Startup time.** Not instrumented on either side.
+
+## Recommendation
+
+**Build it on a branch. Do not merge until Blitz ships a release that carries
+what this needs.**
+
+The case is stronger for QRnew than the reference document's case is for
+HyloPDF, and for a structural reason: there, the migration is three to five
+months because `viewer.ts` is 3,674 lines and the whole test apparatus is
+thrown away. Here the core is already extracted, already tested, and already
+emits exactly what the new renderer consumes. **The entire migration is
+`src/app.rs` — 532 lines, of which the colour picker is the only hard part —
+and it comes with a test suite the app does not currently have.** A week or
+two, honestly, not a month.
+
+In order:
+
+1. **Check whether a published `dioxus-native` release works**, without the
+   `main` clone. If it does, the largest practical objection disappears. If it
+   does not, this stays a branch until it does.
+2. **Port the interface for real**, on a branch: i18n back in, the file reader
+   and the three exports wired to `rfd` and `arboard`, the About panel rebuilt
+   as a plain overlay, `prefers-color-scheme` for dark mode.
+3. **Build the colour picker.** Budget for this properly; it is most of the
+   work and it is the one thing that comes out worse before it comes out better.
+4. **Solve the focus handback once**, the way the reference tree does, with a
+   test that fails the day upstream fixes it.
+5. **Run the harness on Linux and Windows in CI.** `cargo test` needs no GPU
+   and no screen, which makes this cheap, and it is the only thing that will
+   tell you whether Stylo, Parley and fontique behave on the platform QRnew
+   most cares about.
+6. **Decide, with the branch in front of you.** A parked branch with its
+   reasoning intact is a perfectly good outcome.
+
+**What would kill it:** Vello unusable on ordinary Linux hardware, since that
+is the platform QRnew is for. Or IME mattering more than 97 MB does — if QRnew
+is meant for people typing CJK directly into the field, this migration takes
+something away from them that nothing else here gives back.
+
+**What would not kill it, and used to:** memory. That question is now settled
+in the direction the original instinct pointed, and by a route neither
+`tauri-assessment.md` nor its `tiny-skia` experiment found.
+
+## Reproducing
+
+The spike is in this session's scratch directory rather than in the repository,
+since the ask was an assessment. It is worth keeping — the HyloPDF tree keeps
+its equivalent at `experiments/dioxus-spike/` — and moving it in is a `cp`.
+
+```
+qr-spike/
+  Cargo.toml          # dioxus-native by path; net OFF, data-uri ON
+  src/ui.rs           # QRnew's interface, 129 lines including CSS
+  src/main.rs         # launch, window sized to QRnew's, --quit and --fill
+  tests/interface.rs  # the four tests above, via blitz-test-harness
+
+cargo test                                        # 4 tests, 0.23s
+cargo run --release -- --fill "https://…"         # the window
+cargo run --release -- --fill "…" --quit 10       # …and what it cost
+```
+
+Blitz comes from the clone at `~/rust_projects/blitz` at `64eb2785`, the same
+one the HyloPDF experiment builds against.
+
+QRnew's own figures: `cargo build --release`, run `target/release/QRnew`, and
+read `vmmap --summary <pid>` after ten seconds. `ps -o rss` disagrees and is
+wrong; see the note on RSS in `tauri-assessment.md`.
+
+## Sources
+
+- `tauri-assessment.md` and `macOS-compat.md` in this repository
+- `~/rust_projects/HyloPDF/experiments/dioxus-assessment.md` — the plan
+- `~/rust_projects/HyloPDF/experiments/PROGRESS.md` — the measurements, and the
+  source of the ablation table and every upstream fault named above
+- [Blitz status: CSS](https://blitz.is/status/css),
+  [elements](https://blitz.is/status/elements),
+  [events](https://blitz.is/status/events)
+- [the Blitz repository](https://github.com/DioxusLabs/blitz) and
+  [roadmap #119](https://github.com/DioxusLabs/blitz/issues/119)
+- [vello_hybrid](https://docs.rs/vello_hybrid)
