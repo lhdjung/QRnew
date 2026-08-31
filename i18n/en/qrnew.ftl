@@ -4,11 +4,8 @@ about = About
 repository = View on GitHub
 view = View
 input-placeholder = Enter text or a link, and the code appears.
-input-count = {$count ->
-    [one] 1 character
-   *[other] {$count} characters
-}
 input-too-long = That is more text than a single QR code can hold.
+input-too-long-inset = That is more text than a code with an inset can hold. Shorten it, or take the inset out.
 section-content = Content
 read-file = Read from an image…
 section-correction = Error correction
@@ -17,6 +14,7 @@ ec-low = 7%
 ec-medium = 15%
 ec-quartile = 25%
 ec-high = 30%
+ec-locked = An inset holds this at 30%, which is what pays for the modules the picture covers.
 qr-placeholder = Your QR code appears here as you type
 read-error-not-an-image = That file is not an image QRnew can read.
 read-error-damaged = That image could not be opened.
@@ -34,6 +32,12 @@ save-png = Save PNG…
 save-svg = Save SVG…
 copy = Copy image
 copy-copied = Copied.
+section-inset = Inset
+inset-hint = A picture in the middle of the code. Error correction rises to 30% while one is in place.
+inset-choose = Choose an image…
+inset-replace = Replace…
+inset-remove = Remove
+inset-error = That file could not be used as an inset. QRnew reads PNG, JPEG, GIF, WebP and SVG.
 section-colors = Colors
 color-dark-label = Foreground
 color-light-label = Background

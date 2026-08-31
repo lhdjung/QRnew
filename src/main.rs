@@ -5,6 +5,7 @@
 //! ```text
 //! cargo run --release                          # the window
 //! cargo run --release -- --fill "https://example.org"
+//! cargo run --release -- --fill "…" --inset logo.png
 //! cargo run --release -- --fill "…" --width 1019 --height 762 --quit 10
 //! ```
 //!
@@ -15,6 +16,11 @@
 //! the process goes away. Neither flag is meant for anybody using the app —
 //! and passing either of them is also what turns the maximized default off,
 //! since a window the compositor sized is not a window you can compare.
+//!
+//! `--fill` and `--inset` are the two states the app cannot be started in from
+//! the outside otherwise — one needs somebody to type, the other needs
+//! somebody to work a file dialog — and both of them cost the renderer
+//! something worth measuring.
 
 use dioxus_native::{LogicalSize, WindowAttributes};
 use qrnew::{i18n, ui};
@@ -31,12 +37,14 @@ fn main() {
             .and_then(|at| args.get(at + 1))
             .and_then(|value| value.parse().ok())
     };
-    let fill = args
-        .iter()
-        .position(|arg| arg == "--fill")
-        .and_then(|at| args.get(at + 1))
-        .cloned()
-        .unwrap_or_default();
+    let text = |name: &str| -> Option<String> {
+        args.iter()
+            .position(|arg| arg == name)
+            .and_then(|at| args.get(at + 1))
+            .cloned()
+    };
+    let fill = text("--fill").unwrap_or_default();
+    let inset = text("--inset");
     let measured = flag("--width").or_else(|| flag("--height"));
 
     if let Some(seconds) = flag("--quit") {
@@ -59,11 +67,18 @@ fn main() {
         ))
         .with_maximized(measured.is_none());
 
-    dioxus_native::launch_cfg(
-        ui::App,
-        vec![Box::new(move || {
-            Box::new(ui::Fill(fill.clone())) as Box<dyn std::any::Any>
-        })],
-        vec![Box::new(attributes)],
-    );
+    // A context per seed, and the inset's is left out entirely when no path
+    // was given: `App` asks for it with `try_consume_context`, so a context
+    // that is not there is the same as no picture.
+    type Context = Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync>;
+    let mut contexts: Vec<Context> = vec![Box::new(move || {
+        Box::new(ui::Fill(fill.clone())) as Box<dyn std::any::Any>
+    })];
+    if let Some(path) = inset {
+        contexts.push(Box::new(move || {
+            Box::new(ui::Inlay(path.clone())) as Box<dyn std::any::Any>
+        }));
+    }
+
+    dioxus_native::launch_cfg(ui::App, contexts, vec![Box::new(attributes)]);
 }

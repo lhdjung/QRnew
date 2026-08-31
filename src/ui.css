@@ -63,6 +63,8 @@
    * one-module border, it just will not promise the code scans. Salmon is
    * already spoken for by the things that did not work. */
   --warn: #e9c07c;
+  --warn-dim: rgba(233, 192, 124, 0.11);
+  --warn-line: rgba(233, 192, 124, 0.34);
   --shadow-deep: rgba(0, 0, 0, 0.6);
 }
 
@@ -219,8 +221,13 @@ body {
   line-height: 1.45;
 }
 
-/* The line under the text field. `min-height` rather than `height`, so a long
- * sentence still wraps, and so an empty one still holds its place. */
+/* The line under the text field: the prompt while the field is empty, and — in
+ * `.bad` — the one failure the app could not report before. In between it says
+ * nothing at all. It used to count the characters typed, which is a running
+ * total of nothing: a QR code has no length anybody is working towards, so the
+ * number answered a question nobody had asked. `min-height` rather than
+ * `height`, so a long sentence still wraps and a silent line still holds its
+ * place. */
 .note {
   margin: -4px 0 0;
   min-height: 20px;
@@ -361,6 +368,33 @@ body {
   border-color: var(--accent);
 }
 
+/* The four segments while an inset holds error correction at 30%. Dimmed and
+ * inert rather than hidden: the level is still a fact about the code on
+ * screen, and taking the row away would leave the sentence under it talking
+ * about a control that is not there. */
+.chip.off {
+  color: var(--ink-3);
+  background: rgba(39, 43, 49, 0.45);
+  border-color: var(--line);
+}
+
+.chip.off:hover {
+  background: rgba(39, 43, 49, 0.45);
+  border-color: var(--line);
+}
+
+.chip.off.on {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: var(--accent-line);
+}
+
+.chip.off.on:hover {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: var(--accent-line);
+}
+
 /* The two colour tiles, which choose what the picker underneath them edits:
  * a swatch, the word for what it paints, and the hex it is currently set to. */
 .wells {
@@ -477,8 +511,7 @@ body {
  * The buttons are wide and the field is not. It holds one integer — two
  * digits at the very most — so a field stretched across the card was
  * promising room nobody can use, while the two targets that get pressed over
- * and over were the smallest things in the column. The space went to them,
- * and what is left over goes to the warning. */
+ * and over were the smallest things in the column. The space went to them. */
 .stepper {
   display: flex;
   flex-direction: row;
@@ -504,13 +537,31 @@ body {
   border-color: #464d57;
 }
 
+/* **`text-align` does nothing to an `<input>` in Blitz**, which is why the
+ * number in this one used to sit against its left edge with a stepper button
+ * on either side, looking like a value that had slipped.
+ *
+ * A text field's content is not laid out by the inline code that reads
+ * `text-align`: it belongs to a `parley::PlainEditor`, and `create_text_editor`
+ * hands that editor exactly three properties — font size, line height and
+ * brush — then calls `set_width(None)`, which is an editor with no box to
+ * align inside. The glyphs are painted at the content box's left edge, full
+ * stop. (Vertically they *are* centred, by the painter rather than by CSS.)
+ *
+ * So the centring is done with the one thing the painter does respect: the
+ * padding that decides where the content box starts. `1ch` is the advance of
+ * `0` in this field's own font — Blitz implements Stylo's
+ * `zero_advance_measure`, so it is the real measurement rather than the 0.5em
+ * fallback — and `ui.rs` writes a `padding-left` from it per digit on screen.
+ * **Half of this width is the number `ui.rs` subtracts from.**
+ * `the_margin_number_is_centered_in_its_field` measures the painted text
+ * against the box it is in, so the two cannot drift apart quietly. */
 .count {
   flex: 0 0 62px;
   height: 44px;
-  padding: 0 6px;
+  padding: 0;
   font: inherit;
   font-size: 17px;
-  text-align: center;
   color: var(--ink);
   background: var(--sunken);
   border: 1px solid var(--line-2);
@@ -528,15 +579,83 @@ body {
   outline: none;
 }
 
-/* The caution that appears when the margin goes under two, in the space the
- * stepper leaves at the end of its row. It is only ever on screen while the
- * value it is about is on screen next to it. */
+/* The caution that appears when the margin goes under two.
+ *
+ * It began as 12.5px of grey-gold tucked into the space left over at the end
+ * of the stepper's row, which is the size and the position of a footnote —
+ * and a footnote is not a warning. It is a banner of its own under the
+ * control now: an icon, a tinted panel, a thick left edge in the warning
+ * colour, and type larger than the hint below it, because the one line in
+ * this card that says a code might not scan should not be the smallest thing
+ * in it. */
 .warn {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  color: var(--warn);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.4;
+  background: var(--warn-dim);
+  border: 1px solid var(--warn-line);
+  border-left: 3px solid var(--warn);
+  border-radius: 11px;
+}
+
+/* ------------------------------------------------------------------ inset */
+
+/* The picture in the middle of the code, once there is one: a thumbnail and
+ * the name of the file it came from.
+ *
+ * A bare row rather than the sunken panel `.readout` gets, and the difference
+ * is what the two hold. A read-out is a wall of somebody else's text and needs
+ * a container to be a wall inside of; this is one image and one short line,
+ * and giving it a border would be a box drawn inside a box for no reason. It
+ * is also the difference between this card fitting under the colours and not:
+ * the rail has room for one more card and no room for one more panel.
+ *
+ * The thumbnail is painted on the code's own background colour rather than on
+ * the card, because that is what the picture will actually be sitting on — a
+ * dark logo with a transparent ground would otherwise look right here and
+ * vanish in the code. */
+.inset {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+.inset-thumb {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+}
+
+/* A file name is one long word as often as not, so it is told it may break
+ * anywhere rather than allowed to push the card wider than its rail. */
+.inset-name {
   flex: 1 1 auto;
   min-width: 0;
-  color: var(--warn);
-  font-size: 12.5px;
+  color: var(--ink);
+  font-size: 14px;
   line-height: 1.35;
+  overflow-wrap: break-word;
+  user-select: text;
+}
+
+.inset-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+}
+
+.inset-actions .btn {
+  flex: 1 1 0;
 }
 
 /* ----------------------------------------------------------------- picker */
@@ -546,7 +665,7 @@ body {
 .picker {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 /* The saturation/value square and the hue strip.
@@ -559,10 +678,18 @@ body {
  * `background-origin: border-box` is what makes them agree about *where* zero
  * is, too: a pointer's element coordinates are measured from the border box,
  * so the gradients have to start there as well or everything sits a pixel out.
- * The layers themselves are set from `ui.rs`, because the marker moves. */
+ * The layers themselves are set from `ui.rs`, because the marker moves.
+ *
+ * The square gave up thirty pixels of height, and the swatches four each, to
+ * pay for the Inset card underneath. This column is where the height in this
+ * window is spent: the picker was two hundred pixels tall against a rail with
+ * about a hundred and eighty to spare, so a second card down here was a
+ * subtraction from the square or nothing at all. A saturation/value square is
+ * a surface somebody sweeps a pointer across rather than one they read, and it
+ * is still the largest control in the app. */
 .sv {
   width: 310px;
-  height: 200px;
+  height: 170px;
   border: 1px solid var(--line-2);
   border-radius: 10px;
   background-origin: border-box;
@@ -585,7 +712,7 @@ body {
 }
 
 .swatch {
-  height: 30px;
+  height: 26px;
   padding: 0;
   border: 1px solid var(--line-2);
   border-radius: 8px;
@@ -733,10 +860,15 @@ body {
   font-weight: 600;
 }
 
+/* The same size and ink as a `.hint` in the window behind it, because it is
+ * the same kind of sentence: the app explaining itself. It was a step smaller
+ * than the notes it sits in front of, which made the one panel that says what
+ * QRnew *is* the quietest text in the app. */
 .about p {
   margin: 0;
   color: var(--ink-2);
-  font-size: 14px;
+  font-size: 15px;
+  line-height: 1.45;
   user-select: text;
 }
 

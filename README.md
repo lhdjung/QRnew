@@ -6,6 +6,8 @@ Small, simple, and offline-only, so user data remain private. Create a QR code i
 
 QRnew reads QR codes as well. Open an image file — PNG, JPEG, GIF, WebP or SVG — and the text inside it appears next to the button, with one click to copy it.
 
+A picture can sit in the middle of a code, too. Choose one and it is drawn into the middle of the modules; error correction rises to 30% while it is there, which is what pays for the part it covers.
+
 ![demo](resources/qrnew-demo.png)
 
 ## Installation

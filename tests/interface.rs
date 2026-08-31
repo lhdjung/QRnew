@@ -113,6 +113,41 @@ fn app_filled(text: &str) -> Harness<dioxus_native::DioxusDocument> {
     harness
 }
 
+/// A picture on disk for the inset to be, and the path to it.
+///
+/// Written rather than checked in: it is nine lines of SVG, and a fixture file
+/// is one more thing to keep in step with the code that reads it. `name` keeps
+/// two tests running at once from writing the same path.
+fn an_image(name: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!("qrnew-{name}.svg"));
+    std::fs::write(
+        &path,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+             <circle cx="6" cy="6" r="5" fill="#1b3f8f"/>
+           </svg>"##,
+    )
+    .expect("the temporary directory is writable");
+    path
+}
+
+/// The app opened with text in the field and a picture in the middle of it.
+///
+/// `Inlay` is the root context `main.rs` provides for `--inset`, and it is the
+/// only way to get one in front of the component: choosing a picture means
+/// working a native file dialog, which the harness has no way to touch and no
+/// business opening.
+fn app_with_inset(text: &str, name: &str) -> Harness<dioxus_native::DioxusDocument> {
+    let vdom = VirtualDom::new(App)
+        .with_root_context(Fill(text.to_string()))
+        .with_root_context(qrnew::ui::Inlay(
+            an_image(name).to_string_lossy().into_owned(),
+        ));
+    let mut harness = Harness::from_vdom(vdom, HarnessOptions::default());
+    harness.set_viewport_size(1280, 860);
+    harness.pump();
+    harness
+}
+
 #[test]
 fn nothing_is_drawn_until_something_is_typed() {
     let harness = app();
@@ -264,7 +299,7 @@ fn the_square_is_the_size_the_maths_assumes() {
     let harness = app();
 
     let square = harness.layout_rect("[data-square]");
-    assert_eq!((square.width, square.height), (310.0, 200.0));
+    assert_eq!((square.width, square.height), (310.0, 170.0));
     let strip = harness.layout_rect("[data-strip]");
     assert_eq!((strip.width, strip.height), (310.0, 22.0));
 
@@ -609,18 +644,34 @@ fn working_the_picker_does_not_move_the_code() {
 /// This is what the second column bought, and it is worth asserting rather
 /// than eyeballing, because one more control in either card takes it away
 /// again without anything else looking wrong.
+///
+/// **Both states of the inset card**, because they are different heights and
+/// the taller one is not the one the app opens in.
+///
+/// **And both at 820 as well as at 860**, because 860 is the size the window
+/// falls back to and not the size it opens at. Maximized on a 1512x982 laptop
+/// screen, the menu bar and the Dock leave 833 points of window, of which the
+/// title bar takes another 32 — so the number the guarantee has to hold at is
+/// the smaller one. It did not, when the Inset card was first written: the
+/// colours rail went over by fifteen pixels and quietly scrolled, which is how
+/// the picker came to be thirty pixels shorter than it was.
 #[test]
 fn no_control_is_below_the_fold() {
-    let harness = app();
-    for rail in [".rail-main", ".rail-colors"] {
-        let box_ = harness.layout_rect(rail);
-        let last = harness.layout_rect(&format!("{rail} .card:last-child"));
-        assert!(
-            last.y + last.height <= box_.y + box_.height,
-            "{rail} fits without scrolling: ends at {} against {}",
-            last.y + last.height,
-            box_.y + box_.height
-        );
+    for height in [860, 820] {
+        for mut harness in [app(), app_with_inset("https://example.org", "fold")] {
+            harness.set_viewport_size(1280, height);
+            harness.pump();
+            for rail in [".rail-main", ".rail-colors"] {
+                let box_ = harness.layout_rect(rail);
+                let last = harness.layout_rect(&format!("{rail} .card:last-child"));
+                assert!(
+                    last.y + last.height <= box_.y + box_.height,
+                    "{rail} fits without scrolling at {height}: ends at {} against {}",
+                    last.y + last.height,
+                    box_.y + box_.height
+                );
+            }
+        }
     }
 }
 
@@ -651,27 +702,34 @@ fn the_controls_and_the_code_are_in_separate_columns() {
 ///
 /// This is the test that would have caught the previous build setting one and
 /// getting nothing: it asserts on what is on screen, not on what was asked
-/// for. The same line then reports how much has been typed, which is what lets
-/// it hold its height without leaving a gap.
+/// for. The line then falls silent — it used to count the characters typed,
+/// which is a running total of nothing — and the point of this half is that
+/// falling silent does not move the button underneath it.
 #[test]
-fn the_field_has_a_prompt_and_then_a_count() {
+fn the_field_has_a_prompt_and_then_falls_silent() {
     let mut harness = app();
     let prompt = harness.text_content(".note");
     assert!(
         !prompt.trim().is_empty(),
         "an empty field is prompted for something to do"
     );
+    let button = harness.layout_rect("[data-read]");
 
     harness.click(".field");
     harness.type_text("hello");
     harness.pump();
 
-    let counted = harness.text_content(".note");
     assert!(
-        counted.contains('5'),
-        "the line counts what was typed: {counted:?}"
+        harness.text_content(".note").trim().is_empty(),
+        "the line has nothing to say about a code that is being drawn: {:?}",
+        harness.text_content(".note")
     );
     assert!(harness.query(".note.bad").is_none());
+    assert_eq!(
+        harness.layout_rect("[data-read]").y,
+        button.y,
+        "and saying nothing takes up the same room as saying something"
+    );
 }
 
 /// Text past what the densest code can hold says so.
@@ -968,4 +1026,252 @@ fn the_app_writes_hex_in_lower_case() {
         Some("#8b1a1a")
     );
     assert!(preview(&harness).unwrap().contains("#8b1a1a"));
+}
+
+/// **The number sits in the middle of its field.**
+///
+/// `text-align: center` is what a browser would need and what this field used
+/// to carry, and in Blitz it does nothing at all: a text field's content
+/// belongs to a `parley::PlainEditor` that `create_text_editor` hands a font
+/// size, a line height and a brush — not an alignment, and not a width to
+/// align inside. The glyphs are painted at the content box's left edge, so the
+/// number sat against the left border with a stepper button on either side of
+/// it, looking like a value that had come loose.
+///
+/// The centring is arithmetic now, done with `padding-left` in `ch` units, and
+/// this measures the result rather than the intent: where the text is actually
+/// painted, against the middle of the box it is painted in. It is also what
+/// ties `COUNT_MIDDLE` in `ui.rs` to `.count`'s width in `ui.css` — change one
+/// without the other and the number comes off centre here.
+///
+/// **The pixel of slack is Blitz's, and it is worth knowing about.** `1ch` is
+/// resolved by `BlitzFontMetricsProvider`, which asks fontique for the advance
+/// of `0` in the *specified* family list; the glyphs are painted by parley,
+/// which resolves that same list its own way. On macOS the two land on faces
+/// 5% apart — `ch` comes back 10px where the digit actually drawn is 9.45px at
+/// this size — so two digits end up half a pixel left of centre. The digits
+/// themselves are tabular, which is what keeps the error to that: `16` is
+/// exactly twice the width of `4`.
+#[test]
+fn the_margin_number_is_centered_in_its_field() {
+    let mut harness = app();
+
+    // Two digits and then one, because the padding is written per digit and a
+    // formula that is right for one width is not necessarily right for both.
+    for expected in ["16", "4"] {
+        harness.click("[data-margin]");
+        harness.press(keyboard_types::Key::Home);
+        for _ in 0..4 {
+            harness.press(keyboard_types::Key::Delete);
+        }
+        harness.type_text(expected);
+        harness.pump();
+        assert_eq!(
+            harness.attr("[data-margin]", "value").as_deref(),
+            Some(expected)
+        );
+
+        let node = harness.node("[data-margin]");
+        let doc = harness.base();
+        let field = doc.get_node(node).expect("the margin field");
+        let layout = field.final_layout();
+        // The painted width of the digits, straight out of the editor that
+        // paints them — this is the one measurement the app cannot take for
+        // itself, which is why the arithmetic it does instead is checked here.
+        let text = field
+            .data
+            .downcast_element()
+            .and_then(|element| element.text_input_data())
+            .and_then(|input| input.editor.try_layout())
+            .expect("the field lays its text out through a parley editor")
+            .width();
+
+        let starts_at = layout.border.left + layout.padding.left;
+        let slack = layout.size.width - (starts_at + text);
+        assert!(
+            (starts_at - slack).abs() < 1.5,
+            "{expected:?} sits {starts_at} from the left and {slack} from the right \
+             in a field {} wide",
+            layout.size.width,
+        );
+    }
+}
+
+/// The caution about a narrow margin is a banner, not a footnote.
+///
+/// It used to be the last item in the stepper's row, in whatever space the two
+/// buttons and the field left over — 12.5px of grey-gold beside a 17px number.
+/// That is the size and the position of an aside, and this one is the only
+/// line in the window that says a code might not scan. It is a block of its
+/// own under the control now, the full width of the card, with an icon.
+#[test]
+fn the_margin_warning_is_a_banner_under_the_control() {
+    let mut harness = app();
+    harness.click("[data-margin-less]");
+    harness.pump();
+
+    assert!(
+        harness.query(".stepper [data-margin-warning]").is_none(),
+        "it is no longer tucked into the stepper's row"
+    );
+    assert!(
+        harness.query("[data-margin-warning] .glyph").is_some(),
+        "and it carries the one alert icon in the app"
+    );
+
+    let stepper = harness.layout_rect(".stepper");
+    let warning = harness.layout_rect("[data-margin-warning]");
+    assert!(
+        warning.y >= stepper.y + stepper.height,
+        "it sits below the control it is about, not beside it: {} against {}",
+        warning.y,
+        stepper.y + stepper.height,
+    );
+    assert!(
+        warning.width > stepper.width * 0.9,
+        "and it has the width of the card rather than the room left over: {} of {}",
+        warning.width,
+        stepper.width,
+    );
+}
+
+/// **A picture reaches the middle of the code.**
+///
+/// The whole path, end to end: the bytes are read off disk, the format is
+/// worked out from the bytes rather than the name, and they come out again
+/// inside the document the preview and both exports are made of. The card
+/// shows what was chosen, so that a picture that has landed somewhere
+/// unexpected in the code can be told from one that was never read.
+#[test]
+fn an_inset_reaches_the_code_and_the_card() {
+    let harness = app_with_inset("https://example.org", "reaches");
+
+    let svg = preview(&harness).expect("a code is drawn with the picture in it");
+    assert!(
+        svg.contains("<image") && svg.contains("data:image/svg+xml;base64,"),
+        "the picture is embedded in the document, declared as what it is"
+    );
+
+    assert!(
+        harness.query("[data-inset-thumb]").is_some(),
+        "the card shows it back"
+    );
+    assert!(
+        harness.text_content("[data-inset-name]").contains("qrnew-"),
+        "under the name of the file it came from: {:?}",
+        harness.text_content("[data-inset-name]")
+    );
+}
+
+/// **An inset takes error correction over, and the row says so.**
+///
+/// `Qr::new` raises the level to `High` whenever there is a logo, whatever it
+/// was asked for — the modules the picture covers have to be paid for
+/// somewhere. Before this the four buttons went on showing 15% while the code
+/// was being drawn at 30%, which is the interface lying about the file it is
+/// about to save. The choice underneath is remembered rather than overwritten,
+/// so removing the picture gives it back.
+#[test]
+fn an_inset_holds_error_correction_at_thirty_percent() {
+    let mut harness = app_with_inset("https://example.org", "correction");
+
+    let denser = modules_across(&preview(&harness).unwrap());
+    assert_eq!(
+        harness.attr("[data-ec=\"high\"]", "aria-pressed").as_deref(),
+        Some("true"),
+        "the row shows the level the code is actually drawn at"
+    );
+    assert!(
+        harness
+            .attr("[data-ec=\"high\"]", "class")
+            .is_some_and(|class| class.contains("off")),
+        "and shows itself as held rather than chosen"
+    );
+
+    // A press lands on a button that is not taking any, and changes nothing.
+    harness.click("[data-ec=\"low\"]");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-ec=\"high\"]", "aria-pressed").as_deref(),
+        Some("true"),
+    );
+    assert_eq!(modules_across(&preview(&harness).unwrap()), denser);
+
+    // Take the picture away and the row is a control again, still set to what
+    // it was set to before the inset arrived.
+    harness.click("[data-inset-remove]");
+    harness.pump();
+    assert!(harness.query("[data-inset-thumb]").is_none());
+    assert_eq!(
+        harness
+            .attr("[data-ec=\"medium\"]", "aria-pressed")
+            .as_deref(),
+        Some("true"),
+        "the level the app opens at comes back"
+    );
+    assert!(
+        modules_across(&preview(&harness).unwrap()) < denser,
+        "and the code is the loose one again"
+    );
+}
+
+/// Text that no longer fits *because* of the inset says which two things can
+/// give.
+///
+/// Error correction at 30% costs capacity, so an inset can be what takes a
+/// code past what it can hold. "That is more text than a single QR code can
+/// hold" would be true and useless there: the text is not the only thing that
+/// can move.
+#[test]
+fn text_too_long_with_an_inset_says_the_inset_can_go() {
+    // Comfortably inside what a code holds at 15%, and past what one holds at
+    // 30% — which is the window this message exists for.
+    let harness = app_with_inset(&"x".repeat(1500), "toolong");
+
+    assert!(preview(&harness).is_none(), "no code was drawn");
+    let note = harness.text_content(".note.bad");
+    assert!(
+        note.contains("inset"),
+        "the way out includes the picture: {note:?}"
+    );
+}
+
+/// **`Copied.` lets go of the button again.**
+///
+/// A confirmation that stays up stops being a confirmation and becomes the
+/// button's name, and then it is a claim about the clipboard that nothing is
+/// checking. It comes down after `CONFIRM_FOR`, on a countdown that runs on a
+/// thread of its own and wakes the app when it finishes — which is the half of
+/// this that a unit test cannot reach: `a_countdown_finishes_when_it_says_it_will`
+/// proves the timer fires and wakes its waker, and this proves the wake-up
+/// travels through Blitz's event loop and back into the document.
+///
+/// **Conditional on there being a clipboard.** Raising the confirmation means
+/// actually putting an image on one, and `arboard` has nothing to talk to on a
+/// CI runner with no display. Where there is no clipboard the button says what
+/// it always said, and the test has nothing to check.
+#[test]
+fn a_copied_button_goes_back_to_its_own_name() {
+    let mut harness = app_filled("https://example.org");
+
+    let copy = "[data-copy-image]";
+    let name = harness.text_content(copy);
+    harness.click(copy);
+    harness.pump();
+
+    let confirmed = harness.text_content(copy);
+    if confirmed == name {
+        eprintln!("no clipboard on this machine; nothing to confirm");
+        return;
+    }
+
+    // Slack in one direction only, and on the far side of the countdown: the
+    // thread is allowed to oversleep and the app is allowed to be polled late.
+    std::thread::sleep(qrnew::ui::CONFIRM_FOR + std::time::Duration::from_millis(400));
+    harness.pump();
+    assert_eq!(
+        harness.text_content(copy),
+        name,
+        "the button is called what it was called before the click"
+    );
 }

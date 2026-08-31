@@ -31,12 +31,26 @@
 //! picker is simply *there*, and the wells above it choose which of the two
 //! colours it is editing rather than whether it exists.
 //!
+//! Both rails are now full: Content, Error correction and Margin down the
+//! first, Colors and Inset down the second. Height is the scarce thing here
+//! and the picker is what holds most of it, which is why adding the Inset card
+//! took thirty pixels off the saturation square — the arithmetic is in
+//! `ui.css`, and `no_control_is_below_the_fold` checks it at the size a
+//! maximized window actually gets on a laptop screen rather than at the size
+//! the window falls back to.
+//!
 //! The three export buttons are drawn from the first frame rather than
 //! appearing with the first character, dimmed until there is something to
 //! export, so the stage never rearranges itself while it is being looked at.
 
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
+use std::time::Duration;
+
 use dioxus::prelude::*;
-use qrnew_core::{ErrorCorrection, Qr, QrStyle, ReadError, Rgb};
+use qrnew_core::{ErrorCorrection, ImageFormat, Logo, Qr, QrStyle, ReadError, Rgb};
 
 use crate::fl;
 
@@ -70,6 +84,31 @@ pub const DEFAULT_MARGIN: u32 = SAFE_MARGIN;
 /// Past this the code is a stamp in the middle of an empty page, and the
 /// preview stops being a useful picture of what gets saved.
 pub const MAX_MARGIN: u32 = 16;
+
+/// How long a button says `Copied.` before it goes back to its own name.
+///
+/// A confirmation is only worth anything while it is still about the click
+/// that caused it. Left up, it stops being news and becomes the button's name:
+/// somebody who comes back to the window a minute later reads `Copied.` as a
+/// label rather than as an answer, and has no way to tell whether the thing on
+/// the clipboard is still the thing on screen.
+///
+/// Three seconds is long enough to be read by somebody whose eyes were on the
+/// code rather than on the button, and short enough that it is gone before the
+/// next thing anybody does.
+pub const CONFIRM_FOR: Duration = Duration::from_secs(3);
+
+/// The middle of the margin field, measured from inside its left border.
+///
+/// Half of the width `ui.css` gives `.count`, less the one-pixel border: the
+/// point the number is centred on. It is here rather than in the stylesheet
+/// because **Blitz ignores `text-align` inside an `<input>`** — the field's
+/// text belongs to a `parley` editor that is handed a font and nothing else —
+/// so the centring is arithmetic the app does with `padding-left` and the
+/// field's own `ch`. The long version of the story is above `.count` in
+/// `ui.css`, and `the_margin_number_is_centered_in_its_field` is what stops
+/// this number and that width drifting apart.
+const COUNT_MIDDLE: f32 = 30.0;
 
 /// The colours offered in the picker.
 ///
@@ -105,6 +144,116 @@ const PALETTE: [Rgb; 16] = [
 #[derive(Clone)]
 pub struct Fill(pub String);
 
+/// The picture in the middle of the code, as it was picked.
+///
+/// The bytes are kept rather than the path, because the file is read once and
+/// then belongs to the app: a code drawn from a picture that has since been
+/// moved or edited on disk would be a code the person never asked for. The
+/// format comes off those same bytes — `ImageFormat::detect` looks at what is
+/// in the file, not at what it is called — and it is what the thumbnail's
+/// `data:` URL declares itself to be.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Inset {
+    name: String,
+    format: ImageFormat,
+    bytes: Vec<u8>,
+}
+
+impl Inset {
+    /// Reads a file, if it turns out to be a picture.
+    ///
+    /// `None` covers both ways this can go wrong — the file would not open,
+    /// and it opened but is not an image — because the card has one thing to
+    /// say about either: that file cannot be the picture in the middle of a
+    /// code. Which of the two it was is not something the person can act on
+    /// differently.
+    fn read(path: &std::path::Path) -> Option<Self> {
+        let bytes = std::fs::read(path).ok()?;
+        // What the file *is*, not what it is called: a dialog filter is a
+        // convenience and an extension is a claim, so the bytes decide.
+        let format = ImageFormat::detect(&bytes)?;
+        Some(Self {
+            name: path
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+            format,
+            bytes,
+        })
+    }
+}
+
+/// A button's `Copied.`, which raises itself and then lets go on its own.
+///
+/// Two signals rather than one flag, because a second copy while the first is
+/// still confirmed has to be able to tell the two countdowns apart: `serial`
+/// numbers the copies, and a countdown that finds a newer number than its own
+/// has been overtaken and leaves the confirmation alone. Without it the first
+/// click's timer would cut the second click's confirmation short.
+#[derive(Debug, Clone, Copy)]
+struct Confirmation {
+    shown: Signal<bool>,
+    serial: Signal<u64>,
+}
+
+fn use_confirmation() -> Confirmation {
+    Confirmation {
+        shown: use_signal(|| false),
+        serial: use_signal(|| 0u64),
+    }
+}
+
+impl Confirmation {
+    /// Whether the button should be saying so. Subscribes, like any read.
+    fn showing(&self) -> bool {
+        *self.shown.read()
+    }
+
+    /// Says so, and takes it back after [`CONFIRM_FOR`].
+    fn raise(&mut self) {
+        *self.serial.write() += 1;
+        let serial = *self.serial.peek();
+        self.shown.set(true);
+
+        let mut shown = self.shown;
+        let latest = self.serial;
+        spawn(async move {
+            after(CONFIRM_FOR).await;
+            // `peek`, not a read: a task that subscribed to these would be
+            // woken by its own writes.
+            if *latest.peek() == serial {
+                shown.set(false);
+            }
+        });
+    }
+
+    /// Takes it back now, because what was copied is no longer what is here.
+    ///
+    /// A no-op when nothing is being claimed, so that an effect may call it
+    /// without writing on every pass.
+    fn lower(&mut self) {
+        if *self.shown.peek() {
+            self.shown.set(false);
+        }
+    }
+}
+
+/// A picture to open with, provided as a root context by `main.rs`.
+///
+/// [`Fill`]'s sibling, and it is here for both of the same reasons. The stated
+/// one is measurement: a code carrying an inset is a second image decoded and
+/// composited on every redraw, so a renderer measured on a bare code has not
+/// been measured on the heaviest thing the app draws. The quieter one is that
+/// **a native file dialog is the one control neither a test nor a scripted run
+/// can touch**, and without a way in, everything the interface does once a
+/// picture is in place — the thumbnail, error correction locked at 30%, what
+/// the too-long message says — would be reachable only by hand.
+///
+/// It holds a path rather than bytes: `main.rs` is given one on the command
+/// line, and a file that will not open is reported by the same silence as a
+/// file that is not a picture. See [`Inset::read`].
+#[derive(Clone)]
+pub struct Inlay(pub String);
+
 /// Which of the two colours the picker is pointed at.
 ///
 /// Not an `Option`: the picker is always on screen, and the wells choose what
@@ -136,9 +285,16 @@ pub fn App() -> Element {
     // what a printed code says did not ask for the code they were looking at
     // to become the code the app is drawing.
     let mut read_text = use_signal(|| None::<String>);
-    let mut copied = use_signal(|| false);
-    let mut copied_image = use_signal(|| false);
+    let mut copied = use_confirmation();
+    let mut copied_image = use_confirmation();
     let mut read_error = use_signal(|| None::<ReadError>);
+    // The picture in the middle of the code, and whether the last file offered
+    // for the job turned out not to be one.
+    let mut inset = use_signal(|| {
+        dioxus_core::try_consume_context::<Inlay>()
+            .and_then(|Inlay(path)| Inset::read(std::path::Path::new(&path)))
+    });
+    let mut inset_error = use_signal(|| false);
     let mut editing = use_signal(|| Well::Dark);
     let mut about = use_signal(|| false);
 
@@ -154,6 +310,16 @@ pub fn App() -> Element {
             dark: dark(),
             light: light(),
             quiet_zone: margin(),
+            // The default placement, always: a sixth of the code's width with
+            // half a module of air, which `the_default_logo_fits_even_the_
+            // smallest_code` in `qrnew-core` shows clears the finder patterns
+            // on a 21-module code. That is what lets the app offer an inset
+            // with no size control and no way to be turned down — the two
+            // rules `Qr::new` enforces are ones this placement cannot break.
+            logo: inset
+                .read()
+                .as_ref()
+                .map(|chosen| Logo::new(chosen.bytes.clone())),
             ..QrStyle::default()
         };
         // `Err` is an input past what the densest code can hold. The libcosmic
@@ -164,7 +330,21 @@ pub fn App() -> Element {
 
     // Kept apart from `code` so that a re-render that changes neither the text
     // nor the colours does not re-encode the SVG into base64.
-    let preview = use_memo(move || code().as_ref().map(|qr| data_url(qr.svg())));
+    let preview = use_memo(move || {
+        code()
+            .as_ref()
+            .map(|qr| data_url("image/svg+xml", qr.svg().as_bytes()))
+    });
+
+    // The chosen picture, as something an `<img>` can point at. A memo for the
+    // same reason: the bytes are base64'd once per choice rather than once per
+    // keystroke.
+    let thumbnail = use_memo(move || {
+        inset
+            .read()
+            .as_ref()
+            .map(|chosen| data_url(chosen.format.mime(), &chosen.bytes))
+    });
 
     let read_file = move |_| {
         spawn(async move {
@@ -182,13 +362,35 @@ pub fn App() -> Element {
             match outcome {
                 Ok(text) => {
                     read_error.set(None);
-                    copied.set(false);
+                    copied.lower();
                     read_text.set(Some(text));
                 }
                 Err(error) => {
                     read_text.set(None);
                     read_error.set(Some(error));
                 }
+            }
+        });
+    };
+
+    // The file dialog offers the same formats the reader does, because they
+    // are the same list for the same reason: they are what `resvg` can draw,
+    // and the preview and both exports go through `resvg`.
+    let choose_inset = move |_| {
+        spawn(async move {
+            let Some(handle) = rfd::AsyncFileDialog::new()
+                .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "svg"])
+                .pick_file()
+                .await
+            else {
+                return;
+            };
+            match Inset::read(handle.path()) {
+                Some(chosen) => {
+                    inset_error.set(false);
+                    inset.set(Some(chosen));
+                }
+                None => inset_error.set(true),
             }
         });
     };
@@ -236,14 +438,18 @@ pub fn App() -> Element {
                 height: raster.height as usize,
                 bytes: raster.pixels.into(),
             });
-            copied_image.set(copy.is_ok());
+            if copy.is_ok() {
+                copied_image.raise();
+            }
         }
     };
 
     let copy_text = move |_| {
         let Some(text) = read_text() else { return };
-        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-            copied.set(clipboard.set_text(text).is_ok());
+        if let Ok(mut clipboard) = arboard::Clipboard::new()
+            && clipboard.set_text(text).is_ok()
+        {
+            copied.raise();
         }
     };
 
@@ -253,12 +459,10 @@ pub fn App() -> Element {
     // claiming otherwise.
     use_effect(move || {
         code.read();
-        // `peek`, not a read: subscribing to the flag here would make the
-        // effect run on the write that raises it and put it straight back
-        // down again.
-        if *copied_image.peek() {
-            copied_image.set(false);
-        }
+        // `Confirmation::lower` peeks rather than reads, so this effect does
+        // not subscribe to the flag it clears — subscribing would make it run
+        // on the write that raises it and put it straight back down.
+        copied_image.lower();
     });
 
     // Both stepper buttons and the field itself go through here, so the number
@@ -273,21 +477,46 @@ pub fn App() -> Element {
     // stage's content and how the three export buttons are drawn.
     let ready = preview().is_some();
 
-    // The line under the field. It always says something, which is why it can
-    // hold its height without leaving a gap: the prompt while the field is
-    // empty, how much has been typed once it is not, and — the one failure the
-    // app could not report before — text past what the densest code can hold,
-    // which used to leave the placeholder on screen and explain nothing.
+    // Whether an inset is in place. It is asked three times below — the code
+    // is drawn with one, error correction is held at 30% by one, and the
+    // too-long message says different things with and without one — so it is
+    // read once here rather than borrowed three times in the middle of the
+    // markup.
+    let has_inset = inset.read().is_some();
+    let shown_ec = if has_inset { ErrorCorrection::High } else { ec() };
+
+    // The line under the field. The prompt while the field is empty, nothing
+    // at all while a code is being drawn, and — the one failure the app could
+    // not report before — text past what a code can hold.
+    //
+    // It used to count the characters typed once there was a code. That count
+    // was a running total of nothing: there is no length anybody is working
+    // towards here, no limit worth watching approach, and the one number that
+    // *would* matter arrives as a sentence when the text stops fitting. What
+    // is left is a line that is often silent, which `min-height` in `ui.css`
+    // is what makes safe.
     let (note, note_class) = if input().is_empty() {
         (fl!("input-placeholder"), "note")
     } else if ready {
-        (
-            fl!("input-count", count = input().chars().count()),
-            "note",
-        )
+        (String::new(), "note")
+    } else if has_inset {
+        // An inset raises error correction to 30%, which costs capacity — so
+        // text that would have fitted a moment ago may not fit now, and the
+        // way out is a choice between the two rather than only the text.
+        (fl!("input-too-long-inset"), "note bad")
     } else {
         (fl!("input-too-long"), "note bad")
     };
+
+    // How far the number in the margin field has to be pushed to sit in the
+    // middle of it. Half the field, less half the text: `1ch` is the width of
+    // a digit in the field's own font, so this is exact rather than tuned.
+    let count_pad = margin_draft.read().chars().count() as f32 * 0.5;
+
+    // Cloned out rather than borrowed through the markup: holding a `Ref` on
+    // the signal while the tree is built is a lock held over a great deal of
+    // other people's code, and a file name is a few dozen bytes.
+    let inset_name = inset.read().as_ref().map(|chosen| chosen.name.clone());
     let export_ink = if ready { Ink::Plain } else { Ink::Faint };
     let export_class = if ready { "btn" } else { "btn off" };
 
@@ -375,13 +604,19 @@ pub fn App() -> Element {
                                     onclick: copy_text,
                                     {
                                         glyph(
-                                            if copied() { Glyph::Check } else { Glyph::Copy },
-                                            if copied() { Ink::Accent } else { Ink::Plain },
+                                            if copied.showing() { Glyph::Check } else { Glyph::Copy },
+                                            if copied.showing() { Ink::Accent } else { Ink::Plain },
                                             "glyph",
                                         )
                                     }
                                     span {
-                                        {if copied() { fl!("read-copied") } else { fl!("read-copy") }}
+                                        {
+                                            if copied.showing() {
+                                                fl!("read-copied")
+                                            } else {
+                                                fl!("read-copy")
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -393,6 +628,14 @@ pub fn App() -> Element {
                             {glyph(Glyph::Shield, Ink::Accent, "glyph")}
                             span { {fl!("section-correction")} }
                         }
+                        // An inset takes this control away: `Qr::new` raises
+                        // error correction to `High` whenever there is a logo,
+                        // whatever it was asked for. The row goes on saying
+                        // what the code is actually drawn at — dimmed, and
+                        // inert, because a button that looks live and moves
+                        // nothing is worse than one that admits it is held.
+                        // The choice underneath is remembered, and comes back
+                        // when the inset goes.
                         div { class: "segments",
                             // `data-ec` is the level's own name rather than its
                             // label, because the label is a translation and a
@@ -406,10 +649,14 @@ pub fn App() -> Element {
                             ] {
                                 button {
                                     key: "{name}",
-                                    class: if ec() == level { "chip on" } else { "chip" },
+                                    class: chip_class(shown_ec == level, has_inset),
                                     "data-ec": "{name}",
-                                    aria_pressed: if ec() == level { "true" } else { "false" },
-                                    onclick: move |_| ec.set(level),
+                                    aria_pressed: if shown_ec == level { "true" } else { "false" },
+                                    onclick: move |_| {
+                                        if !has_inset {
+                                            ec.set(level);
+                                        }
+                                    },
                                     {label.clone()}
                                 }
                             }
@@ -417,7 +664,9 @@ pub fn App() -> Element {
                         // What the previous build hid behind a hover tooltip.
                         // There is room for it here, and a sentence somebody
                         // can read is worth more than one they have to find.
-                        p { class: "hint", {fl!("ec-hint")} }
+                        p { class: "hint",
+                            {if has_inset { fl!("ec-locked") } else { fl!("ec-hint") }}
+                        }
                     }
 
                     div { class: "card",
@@ -441,6 +690,13 @@ pub fn App() -> Element {
                                 class: "count",
                                 r#type: "text",
                                 "data-margin": "true",
+                                // **This is what centres the number.** Blitz
+                                // paints an input's text at the left edge of
+                                // its content box and never looks at
+                                // `text-align`, so the padding is the only
+                                // handle there is: half the field, less half
+                                // the text, in the field's own digit width.
+                                style: "padding-left: calc({COUNT_MIDDLE}px - {count_pad}ch)",
                                 value: "{margin_draft}",
                                 oninput: move |event| {
                                     let text = event.value();
@@ -475,18 +731,19 @@ pub fn App() -> Element {
                                 onclick: move |_| set_margin(margin() + 1),
                                 {glyph(Glyph::Plus, Ink::Plain, "glyph")}
                             }
-                            // Beside the number rather than under the card,
-                            // and only once somebody has actually gone below
-                            // two. A caveat printed permanently is read once
-                            // and then stops being read; this one arrives at
-                            // the moment it applies, next to the value that
-                            // caused it.
-                            if margin() < SAFE_MARGIN {
-                                span {
-                                    class: "warn",
-                                    "data-margin-warning": "true",
-                                    {fl!("margin-warning")}
-                                }
+                        }
+                        // Only once somebody has actually gone below two: a
+                        // caveat printed permanently is read once and then
+                        // stops being read, and this one arrives at the moment
+                        // it applies. It is a banner under the control rather
+                        // than a remark at the end of its row, and it is set
+                        // larger than the sentence below it, because the one
+                        // line here that says a code might not scan should not
+                        // be the smallest thing in the card.
+                        if margin() < SAFE_MARGIN {
+                            p { class: "warn", "data-margin-warning": "true",
+                                {glyph(Glyph::Alert, Ink::Warn, "glyph")}
+                                span { {fl!("margin-warning")} }
                             }
                         }
                         p { class: "hint", {fl!("margin-hint")} }
@@ -540,6 +797,73 @@ pub fn App() -> Element {
                             span { {fl!("color-reset")} }
                         }
                     }
+
+                    // Under the colours, which is where it belongs: an inset
+                    // is the last thing anybody adds and the first thing they
+                    // take away again, and it is the only control in the
+                    // window that changes what another one is allowed to say.
+                    div { class: "card",
+                        div { class: "card-head",
+                            {glyph(Glyph::Inset, Ink::Accent, "glyph")}
+                            span { {fl!("section-inset")} }
+                        }
+                        if let Some(name) = inset_name {
+                            div { class: "inset",
+                                img {
+                                    class: "inset-thumb",
+                                    "data-inset-thumb": "true",
+                                    // On the code's own background, because
+                                    // that is what the picture will be sitting
+                                    // on: a dark mark on a transparent ground
+                                    // reads here and disappears there.
+                                    style: "background: {light().to_hex()}",
+                                    src: thumbnail().unwrap_or_default(),
+                                    alt: "{name}",
+                                }
+                                span { class: "inset-name", "data-inset-name": "true", "{name}" }
+                            }
+                            div { class: "inset-actions",
+                                button {
+                                    class: "btn",
+                                    "data-inset-choose": "true",
+                                    onclick: choose_inset,
+                                    {glyph(Glyph::Image, Ink::Plain, "glyph")}
+                                    span { {fl!("inset-replace")} }
+                                }
+                                button {
+                                    class: "btn",
+                                    "data-inset-remove": "true",
+                                    onclick: move |_| {
+                                        inset.set(None);
+                                        inset_error.set(false);
+                                    },
+                                    {glyph(Glyph::Close, Ink::Plain, "glyph")}
+                                    span { {fl!("inset-remove")} }
+                                }
+                            }
+                        } else {
+                            button {
+                                class: "btn wide",
+                                "data-inset-choose": "true",
+                                onclick: choose_inset,
+                                {glyph(Glyph::Image, Ink::Plain, "glyph")}
+                                span { {fl!("inset-choose")} }
+                            }
+                        }
+                        if inset_error() {
+                            p { class: "error", {fl!("inset-error")} }
+                        }
+                        // The sentence is what an empty card is for: it says
+                        // what an inset is and what taking one costs. Once
+                        // there is a picture the thumbnail says the first
+                        // half, and the error-correction card next door is
+                        // already saying the second in its own hint — so
+                        // keeping it here would be the same fact twice, in the
+                        // one column that has no room to spare.
+                        if !has_inset {
+                            p { class: "hint", {fl!("inset-hint")} }
+                        }
+                    }
                 }
 
                 section { class: "stage",
@@ -565,16 +889,25 @@ pub fn App() -> Element {
                             {glyph(Glyph::Download, export_ink, "glyph")}
                             span { {fl!("save-svg")} }
                         }
-                        button { class: "{export_class}", onclick: copy,
+                        button {
+                            class: "{export_class}",
+                            "data-copy-image": "true",
+                            onclick: copy,
                             {
                                 glyph(
-                                    if copied_image() { Glyph::Check } else { Glyph::Copy },
-                                    if copied_image() { Ink::Accent } else { export_ink },
+                                    if copied_image.showing() { Glyph::Check } else { Glyph::Copy },
+                                    if copied_image.showing() { Ink::Accent } else { export_ink },
                                     "glyph",
                                 )
                             }
                             span {
-                                {if copied_image() { fl!("copy-copied") } else { fl!("copy") }}
+                                {
+                                    if copied_image.showing() {
+                                        fl!("copy-copied")
+                                    } else {
+                                        fl!("copy")
+                                    }
+                                }
                             }
                         }
                     }
@@ -861,7 +1194,7 @@ fn Picker(color: Signal<Rgb>) -> Element {
 /// are measured against; `ui.css` sets `background-origin: border-box` so that
 /// the layers agree.
 const SQUARE_W: f64 = 310.0;
-const SQUARE_H: f64 = 200.0;
+const SQUARE_H: f64 = 170.0;
 const STRIP_H: f64 = 22.0;
 
 /// A colour as the picker holds it: hue in degrees, the rest in 0..=1.
@@ -886,6 +1219,8 @@ enum Ink {
     Plain,
     /// Buttons that are not doing anything yet, and quiet furniture.
     Faint,
+    /// The one caution the app has: a margin too narrow to vouch for.
+    Warn,
 }
 
 impl Ink {
@@ -894,6 +1229,9 @@ impl Ink {
             Ink::Accent => "#4ECB8F",
             Ink::Plain => "#D2D8E0",
             Ink::Faint => "#8C949E",
+            // `--warn` in `ui.css`, spelled out again because an icon's ink
+            // is a presentation attribute and cannot read a custom property.
+            Ink::Warn => "#E9C07C",
         }
     }
 }
@@ -901,7 +1239,7 @@ impl Ink {
 /// The icons, as the paths that draw them on a 24×24 grid.
 ///
 /// Hand-drawn rather than pulled from an icon font, for the reason the whole
-/// app exists: a font is a file to ship and a licence to honour, and fifteen
+/// app exists: a font is a file to ship and a licence to honour, and seventeen
 /// icons is less of both. They are stroked, round-capped and unfilled, which
 /// is the one decision that keeps them looking like a set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -921,6 +1259,13 @@ enum Glyph {
     Check,
     /// A border around a smaller square: the margin, drawn as what it is.
     Frame,
+    /// A square with something round in the middle of it: the inset, drawn as
+    /// what it is, and deliberately not [`Frame`](Glyph::Frame) with the inner
+    /// shape filled — the two sit in the same column and have to be told apart
+    /// at a glance.
+    Inset,
+    /// A triangle with a bang in it, for the one warning in the window.
+    Alert,
     Minus,
     Plus,
     Close,
@@ -968,6 +1313,11 @@ impl Glyph {
             Glyph::Copy => &["M9 8.6 H19.4 V19.4 H9 Z", "M15.4 8.6 V4.6 H4.6 V15.4 H9"],
             Glyph::Check => &["M5.2 12.6 L10 17.4 L18.8 7.2"],
             Glyph::Frame => &["M4.4 4.4 H19.6 V19.6 H4.4 Z", "M9.2 9.2 H14.8 V14.8 H9.2 Z"],
+            Glyph::Inset => &[
+                "M4.4 4.4 H19.6 V19.6 H4.4 Z",
+                "M15.2 12 A3.2 3.2 0 1 1 8.8 12 A3.2 3.2 0 1 1 15.2 12",
+            ],
+            Glyph::Alert => &["M12 3.9 L21.2 19.9 H2.8 Z", "M12 10 V14.3", "M12 17 h0.4"],
             Glyph::Minus => &["M6.2 12 H17.8"],
             Glyph::Plus => &["M6.2 12 H17.8", "M12 6.2 V17.8"],
             Glyph::Close => &["M6.4 6.4 L17.6 17.6", "M17.6 6.4 L6.4 17.6"],
@@ -977,6 +1327,21 @@ impl Glyph {
                 "M17 13.8 V19.4 H4.6 V7 H10.2",
             ],
         }
+    }
+}
+
+/// The classes one error-correction segment is drawn with.
+///
+/// Four states out of two questions — is this the level the code is drawn at,
+/// and is an inset holding the row where it is — and they are spelled out
+/// rather than assembled, because a class list built by pushing strings
+/// together is a class list nothing can grep for.
+const fn chip_class(selected: bool, locked: bool) -> &'static str {
+    match (selected, locked) {
+        (true, false) => "chip on",
+        (true, true) => "chip on off",
+        (false, false) => "chip",
+        (false, true) => "chip off",
     }
 }
 
@@ -1118,18 +1483,22 @@ fn parse_hex(text: &str) -> Option<Rgb> {
     }
 }
 
-/// The generated SVG, as something an `<img>` can point at.
+/// Bytes, as something an `<img>` can point at.
+///
+/// Two callers: the generated SVG, rebuilt on every keystroke, and whatever
+/// picture has been chosen as an inset, encoded once when it is chosen.
 ///
 /// Base64 rather than percent-encoding because a QR code's document is mostly
 /// path data and the characters that would have to be escaped are common in
 /// it: base64 costs a third more, escaping everything costs three times more,
 /// and this is rebuilt on every keystroke.
-fn data_url(svg: &str) -> String {
+fn data_url(mime: &str, bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-    let bytes = svg.as_bytes();
-    let mut out = String::with_capacity(24 + bytes.len().div_ceil(3) * 4);
-    out.push_str("data:image/svg+xml;base64,");
+    let mut out = String::with_capacity(mime.len() + 13 + bytes.len().div_ceil(3) * 4);
+    out.push_str("data:");
+    out.push_str(mime);
+    out.push_str(";base64,");
 
     for chunk in bytes.chunks(3) {
         let block = (u32::from(chunk[0]) << 16)
@@ -1149,6 +1518,71 @@ fn data_url(svg: &str) -> String {
     out
 }
 
+/// A future that completes once `delay` has passed.
+///
+/// **There is no timer in the dependency list to borrow one from**, and that
+/// is the point of the dependency list: `tokio` is in the tree, pulled in by
+/// something else, but only as `rt` — no time driver, and nothing running one.
+/// The alternative to twenty lines here is a crate whose whole job is to spawn
+/// the thread below, in an app whose privacy claim is that somebody can read
+/// its dependencies in one sitting.
+///
+/// The thread is started on the first poll rather than on construction, so a
+/// countdown that is dropped before anyone waits on it costs nothing. The
+/// waker is stored on every poll rather than only the first: a task that is
+/// polled from somewhere else afterwards has a new waker, and the old one
+/// would wake nobody.
+fn after(delay: Duration) -> After {
+    After { delay, alarm: None }
+}
+
+struct After {
+    delay: Duration,
+    alarm: Option<Arc<Mutex<Countdown>>>,
+}
+
+#[derive(Default)]
+struct Countdown {
+    done: bool,
+    waker: Option<Waker>,
+}
+
+impl Future for After {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let me = self.get_mut();
+        let delay = me.delay;
+        let alarm = me.alarm.get_or_insert_with(|| {
+            let alarm = Arc::new(Mutex::new(Countdown::default()));
+            let ring = Arc::clone(&alarm);
+            std::thread::spawn(move || {
+                std::thread::sleep(delay);
+                let waker = {
+                    let mut countdown = ring.lock().unwrap();
+                    countdown.done = true;
+                    countdown.waker.take()
+                };
+                // Woken outside the lock: the waker runs the app's own code on
+                // the way through, and it has no business doing that while
+                // holding something this thread will not be back to release.
+                if let Some(waker) = waker {
+                    waker.wake();
+                }
+            });
+            alarm
+        });
+
+        let mut countdown = alarm.lock().unwrap();
+        if countdown.done {
+            Poll::Ready(())
+        } else {
+            countdown.waker = Some(cx.waker().clone());
+            Poll::Pending
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1166,9 +1600,64 @@ mod tests {
 
     #[test]
     fn base64_matches_a_known_encoding() {
+        let url = |text: &str| data_url("image/svg+xml", text.as_bytes());
+
         // The three padding cases, which is the whole of what can go wrong.
-        assert!(data_url("any carnal pleasure.").ends_with("YW55IGNhcm5hbCBwbGVhc3VyZS4="));
-        assert!(data_url("any carnal pleasure").ends_with("YW55IGNhcm5hbCBwbGVhc3VyZQ=="));
-        assert!(data_url("any carnal pleasur").ends_with("YW55IGNhcm5hbCBwbGVhc3Vy"));
+        assert!(url("any carnal pleasure.").ends_with("YW55IGNhcm5hbCBwbGVhc3VyZS4="));
+        assert!(url("any carnal pleasure").ends_with("YW55IGNhcm5hbCBwbGVhc3VyZQ=="));
+        assert!(url("any carnal pleasur").ends_with("YW55IGNhcm5hbCBwbGVhc3Vy"));
+    }
+
+    #[test]
+    fn a_data_url_declares_the_type_it_was_given() {
+        assert!(data_url("image/png", b"\x89PNG").starts_with("data:image/png;base64,"));
+    }
+
+    /// **The countdown behind every `Copied.` in the window.**
+    ///
+    /// It is tested here rather than through the interface because raising a
+    /// confirmation means putting something on the clipboard first, and the
+    /// tests run on a Linux CI machine with no display to have a clipboard on.
+    /// So this is the part that can be checked anywhere: it does not finish
+    /// early, it does finish, and it wakes whoever was waiting rather than
+    /// relying on being polled again by chance.
+    #[test]
+    fn a_countdown_finishes_when_it_says_it_will() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        /// Counts the wake-ups, so that the test can tell being woken from
+        /// being polled again for some other reason.
+        struct Counter(AtomicUsize);
+
+        impl std::task::Wake for Counter {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Release);
+            }
+        }
+
+        let counter = Arc::new(Counter(AtomicUsize::new(0)));
+        let waker = Waker::from(Arc::clone(&counter));
+        let mut cx = Context::from_waker(&waker);
+
+        let delay = Duration::from_millis(120);
+        let mut timer = std::pin::pin!(after(delay));
+        let started = std::time::Instant::now();
+
+        assert_eq!(timer.as_mut().poll(&mut cx), Poll::Pending);
+        assert_eq!(
+            counter.0.load(Ordering::Acquire),
+            0,
+            "nothing has been woken yet"
+        );
+
+        // Slack in one direction only: a thread that sleeps is allowed to
+        // oversleep, and this asserts it did not *under*sleep.
+        std::thread::sleep(delay * 3);
+        assert!(started.elapsed() >= delay);
+        assert!(
+            counter.0.load(Ordering::Acquire) >= 1,
+            "the waiter was woken rather than left to poll again on its own"
+        );
+        assert_eq!(timer.as_mut().poll(&mut cx), Poll::Ready(()));
     }
 }
