@@ -42,6 +42,16 @@
 //! The three export buttons are drawn from the first frame rather than
 //! appearing with the first character, dimmed until there is something to
 //! export, so the stage never rearranges itself while it is being looked at.
+//!
+//! # Light and dark
+//!
+//! The desktop decides, and there is no switch. Blitz gives Stylo the window's
+//! theme and re-evaluates `prefers-color-scheme` when it changes, so `ui.css`
+//! answers the question in the one place a stylesheet should. The exception is
+//! an icon, whose colour is a presentation attribute on a document CSS cannot
+//! reach into: [`glyph`] draws every one of them twice, once in each theme's
+//! ink, and the stylesheet hides the one that does not apply. That pair is
+//! also the reason the window had a single dark theme until now.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -172,6 +182,21 @@ impl Inset {
         // What the file *is*, not what it is called: a dialog filter is a
         // convenience and an extension is a claim, so the bytes decide.
         let format = ImageFormat::detect(&bytes)?;
+
+        // And then, once, whatever scaling the picture needs to be one the app
+        // can carry. A photograph is several thousand pixels across, which is
+        // detail no export can use, an image re-decoded on every redraw — and,
+        // past four thousand and change, more than a GPU texture atlas will
+        // take at all. `vello_hybrid` does not draw such an image smaller, it
+        // unwraps the refusal, and **the window closes**: this is the line
+        // between choosing a photograph and losing the app. It happens here,
+        // at the one moment a picture arrives, rather than in the memo that
+        // redraws the code on every keystroke.
+        let (format, bytes) = match qrnew_core::shrink_logo(&bytes) {
+            Some(scaled) => (ImageFormat::Png, scaled),
+            None => (format, bytes),
+        };
+
         Some(Self {
             name: path
                 .file_name()
@@ -1209,8 +1234,18 @@ struct Hsv {
 ///
 /// It is a presentation attribute on the `<svg>` rather than a CSS colour,
 /// because **CSS does not reach inside an SVG in Blitz** — the element is
-/// handed to `usvg` as a document of its own. Which is also why the interface
-/// has one theme: see the note at the top of `ui.css`.
+/// handed to `usvg` as a document of its own. A presentation attribute cannot
+/// read a custom property and cannot be inside a media query, so each of these
+/// is two colours rather than one: see [`glyph`], which draws both and lets
+/// the stylesheet hide the one that does not belong to the theme in force.
+///
+/// Two of the four are a palette token written out a second time — the accent
+/// and the caution, which have to be exactly the green and the gold of the
+/// chrome they sit in, and `an_icon_is_inked_the_colour_the_stylesheet_says`
+/// keeps the two files saying the same number. The two greys are not tokens:
+/// a 1.7-pixel stroke does not carry the same weight as a line of text at the
+/// same colour, so they were matched by eye against the words beside them and
+/// land between the ink steps rather than on one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Ink {
     /// Section marks and the brand, in the accent.
@@ -1224,13 +1259,26 @@ enum Ink {
 }
 
 impl Ink {
-    const fn stroke(self) -> &'static str {
+    /// The four on a bright window.
+    const fn light(self) -> &'static str {
+        match self {
+            Ink::Accent => "#0F9D63",
+            Ink::Plain => "#2B313A",
+            Ink::Faint => "#838B95",
+            Ink::Warn => "#8A5B06",
+        }
+    }
+
+    /// The same four on a dark one.
+    ///
+    /// Not the light inks inverted: an icon is a line drawing, and a line has
+    /// to stay a shade away from the surface it is on in both directions —
+    /// which is a different distance on paper than it is on graphite.
+    const fn dark(self) -> &'static str {
         match self {
             Ink::Accent => "#4ECB8F",
             Ink::Plain => "#D2D8E0",
             Ink::Faint => "#8C949E",
-            // `--warn` in `ui.css`, spelled out again because an icon's ink
-            // is a presentation attribute and cannot read a custom property.
             Ink::Warn => "#E9C07C",
         }
     }
@@ -1345,18 +1393,30 @@ const fn chip_class(selected: bool, locked: bool) -> &'static str {
     }
 }
 
-/// One icon, as an inline `<svg>` sized by `class`.
+/// One icon, as a pair of inline `<svg>`s sized by `class`.
 ///
 /// Blitz serializes the element back to markup and parses it with `usvg`, the
 /// same route the preview takes — so an icon here is a real document, not a
-/// glyph in a font and not a rasterized image.
+/// glyph in a font and not a rasterized image. That is also what makes it a
+/// pair: a document of its own is a document CSS cannot reach into, so the ink
+/// cannot follow the theme and the icon has to. One is drawn in each theme's
+/// ink and `ui.css` hides the wrong one, which is a node and a small document
+/// spent to keep the desktop's own light and dark setting working.
 fn glyph(kind: Glyph, ink: Ink, class: &'static str) -> Element {
+    rsx! {
+        {drawn(kind, ink.light(), format!("{class} lit"))}
+        {drawn(kind, ink.dark(), format!("{class} dim"))}
+    }
+}
+
+/// One icon in one colour.
+fn drawn(kind: Glyph, stroke: &'static str, class: String) -> Element {
     rsx! {
         svg {
             class: "{class}",
             view_box: "0 0 24 24",
             fill: "none",
-            stroke: ink.stroke(),
+            stroke: "{stroke}",
             stroke_width: "1.7",
             stroke_linecap: "round",
             stroke_linejoin: "round",
@@ -1586,6 +1646,39 @@ impl Future for After {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **An icon's ink and the stylesheet's have to be the same colour.**
+    ///
+    /// They are written twice — once as a presentation attribute in [`Ink`],
+    /// because CSS cannot reach inside an SVG in Blitz, and once as a custom
+    /// property in `ui.css` — and there is no way to have them written once.
+    /// So the two files are compared instead: the light palette comes first in
+    /// the stylesheet and the dark one second, which is the order [`Ink`]
+    /// answers in.
+    #[test]
+    fn an_icon_is_inked_the_colour_the_stylesheet_says() {
+        fn palettes(token: &str) -> Vec<String> {
+            let name = format!("{token}:");
+            include_str!("ui.css")
+                .lines()
+                .filter_map(|line| line.trim().strip_prefix(&name))
+                .map(|value| value.trim().trim_end_matches(';').to_ascii_lowercase())
+                .collect()
+        }
+
+        // The two greys are left out on purpose: they are not tokens, and
+        // why they are not is on the type.
+        for (ink, token) in [(Ink::Accent, "--accent"), (Ink::Warn, "--warn")] {
+            assert_eq!(
+                palettes(token),
+                vec![
+                    ink.light().to_ascii_lowercase(),
+                    ink.dark().to_ascii_lowercase(),
+                ],
+                "{token} in ui.css against Ink::{ink:?}",
+            );
+        }
+    }
 
     #[test]
     fn hex_parses_both_lengths_and_either_case() {

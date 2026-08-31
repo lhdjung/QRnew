@@ -24,6 +24,7 @@
 
 use blitz_test_harness::{Harness, HarnessOptions};
 use blitz_traits::events::BlitzImeEvent;
+use blitz_traits::shell::ColorScheme;
 use dioxus::prelude::VirtualDom;
 use qrnew::ui::{App, Fill};
 
@@ -130,6 +131,26 @@ fn an_image(name: &str) -> std::path::PathBuf {
     path
 }
 
+/// A picture too large for the app to carry, and the path to it.
+///
+/// A QR code stands in for a photograph. `qrnew-core` will write one at any
+/// size and is already a dev-dependency, which beats checking in a two
+/// megapixel fixture — and what matters about a photograph here is only that
+/// it is larger than [`qrnew_core::MAX_LOGO_SIDE`].
+fn a_large_image(name: &str) -> std::path::PathBuf {
+    let png = qrnew_core::render_png(
+        "a stand-in for a photograph",
+        qrnew_core::ErrorCorrection::Low,
+        &qrnew_core::QrStyle::default(),
+        24,
+    )
+    .expect("the core draws a code at any scale");
+
+    let path = std::env::temp_dir().join(format!("qrnew-{name}.png"));
+    std::fs::write(&path, png).expect("the temporary directory is writable");
+    path
+}
+
 /// The app opened with text in the field and a picture in the middle of it.
 ///
 /// `Inlay` is the root context `main.rs` provides for `--inset`, and it is the
@@ -137,15 +158,33 @@ fn an_image(name: &str) -> std::path::PathBuf {
 /// working a native file dialog, which the harness has no way to touch and no
 /// business opening.
 fn app_with_inset(text: &str, name: &str) -> Harness<dioxus_native::DioxusDocument> {
+    app_with_picture(text, &an_image(name))
+}
+
+fn app_with_picture(text: &str, image: &std::path::Path) -> Harness<dioxus_native::DioxusDocument> {
     let vdom = VirtualDom::new(App)
         .with_root_context(Fill(text.to_string()))
-        .with_root_context(qrnew::ui::Inlay(
-            an_image(name).to_string_lossy().into_owned(),
-        ));
+        .with_root_context(qrnew::ui::Inlay(image.to_string_lossy().into_owned()));
     let mut harness = Harness::from_vdom(vdom, HarnessOptions::default());
     harness.set_viewport_size(1280, 860);
     harness.pump();
     harness
+}
+
+/// The width and height a PNG declares in its header.
+fn png_size(png: &[u8]) -> (u32, u32) {
+    let number = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "not a PNG");
+    (number(16), number(20))
+}
+
+/// The picture the code is carrying, decoded back out of the document.
+fn inset_of(svg: &str) -> Vec<u8> {
+    let payload = svg
+        .split_once("href=\"data:image/png;base64,")
+        .expect("the code carries a PNG")
+        .1;
+    decode_base64(payload.split_once('"').unwrap().0)
 }
 
 #[test]
@@ -1274,4 +1313,82 @@ fn a_copied_button_goes_back_to_its_own_name() {
         name,
         "the button is called what it was called before the click"
     );
+}
+
+/// **A picture larger than the renderer's texture atlas is scaled down as it
+/// is taken in, not carried at the size it arrived.**
+///
+/// This is the crash that made the app close: `vello_hybrid` keeps its images
+/// in a 4096-pixel atlas and does not draw one that will not fit — it refuses,
+/// and unwraps the refusal. Any photograph off a phone is over that line, and
+/// choosing one took the window with it.
+///
+/// Checked on the document rather than on `shrink_logo`, which `qrnew-core`
+/// tests on its own: what is worth proving here is that a picture reaching the
+/// app through the one door there is comes out the other side already small.
+#[test]
+fn a_picture_too_large_to_carry_is_scaled_down_as_it_is_taken_in() {
+    let path = a_large_image("large");
+    let on_disk = png_size(&std::fs::read(&path).unwrap());
+    assert!(
+        on_disk.0 > qrnew_core::MAX_LOGO_SIDE,
+        "the fixture has to be too large to begin with: {on_disk:?}"
+    );
+
+    let harness = app_with_picture("https://example.org", &path);
+    let carried = png_size(&inset_of(&preview(&harness).unwrap()));
+
+    assert_eq!(
+        carried,
+        (qrnew_core::MAX_LOGO_SIDE, qrnew_core::MAX_LOGO_SIDE)
+    );
+
+    // And the thumbnail is the same picture, not the file that was picked.
+    let thumbnail = harness.attr("[data-inset-thumb]", "src").unwrap();
+    assert!(
+        thumbnail.starts_with("data:image/png;base64,"),
+        "{thumbnail}"
+    );
+}
+
+/// **Every icon is drawn twice, and the desktop's theme picks one.**
+///
+/// An icon's colour is a presentation attribute on an SVG that Blitz hands to
+/// `usvg` as a document of its own, so no stylesheet can reach it and no media
+/// query can change it. `glyph` in `ui.rs` draws the pair instead and `ui.css`
+/// hides one of them, which is the whole of QRnew's light and dark support —
+/// and it is support that silently becomes half-support if either side of that
+/// arrangement is tidied away.
+#[test]
+fn one_of_each_icon_pair_is_shown_and_it_is_the_theme_that_chooses() {
+    let shown = |harness: &Harness<dioxus_native::DioxusDocument>, class: &str| {
+        harness
+            .query_all(class)
+            .into_iter()
+            .filter(|node| harness.layout_rect_of(*node).width > 0.0)
+            .count()
+    };
+
+    for (scheme, lit, dim) in [
+        (ColorScheme::Light, 1usize, 0usize),
+        (ColorScheme::Dark, 0, 1),
+    ] {
+        let vdom = VirtualDom::new(App).with_root_context(Fill("https://example.org".into()));
+        let mut harness = Harness::from_vdom(
+            vdom,
+            HarnessOptions {
+                color_scheme: scheme,
+                ..HarnessOptions::default()
+            },
+        );
+        harness.set_viewport_size(1280, 860);
+        harness.pump();
+
+        let pairs = harness.query_all(".lit").len();
+        assert!(pairs > 10, "the window is full of icons: {pairs}");
+        assert_eq!(harness.query_all(".dim").len(), pairs, "one of each");
+
+        assert_eq!(shown(&harness, ".lit"), pairs * lit, "{scheme:?}");
+        assert_eq!(shown(&harness, ".dim"), pairs * dim, "{scheme:?}");
+    }
 }

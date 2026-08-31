@@ -12,6 +12,7 @@
 
 mod draw;
 mod logo;
+mod raster;
 mod read;
 mod style;
 
@@ -41,6 +42,22 @@ use crate::logo::Placement;
 /// rendering has nothing left over for the printing, lighting and camera angle
 /// of an actual scan.
 pub const MAX_LOGO_AREA: f32 = 0.15;
+
+/// The longest side a logo image is kept at, in pixels.
+///
+/// A logo is drawn at [`Logo::DEFAULT_SIZE`] — a sixth of the code — so even
+/// the largest code there is, exported at ten pixels per module, draws it
+/// about three hundred pixels across. Everything past that is detail no export
+/// can use, and carrying it is not free: the image travels inside the SVG as
+/// base64 and is decoded again every time the code is redrawn.
+///
+/// It is also a hard limit rather than a preference. A GPU renderer keeps its
+/// images in a texture atlas — `vello_hybrid`'s is 4096 pixels square — and an
+/// image that does not fit in one is not drawn small, it is refused, which in
+/// a renderer that unwraps the refusal means the window goes away. A photo
+/// straight off a camera is over that limit, so this is what stands between a
+/// person picking one and the app closing.
+pub const MAX_LOGO_SIDE: u32 = 512;
 
 /// How far a logo has to stay from the edge of the code, in modules.
 ///
@@ -308,6 +325,69 @@ pub fn render_png(
     Qr::new(data, ec, style)?.to_png(scale)
 }
 
+/// Scales an image down until neither of its sides is longer than
+/// [`MAX_LOGO_SIDE`], as a PNG.
+///
+/// `None` means keep the bytes you already have, and covers the three cases
+/// that need no work: the image fits, it is an SVG and so is already every
+/// size it will ever need to be, or it cannot be read — and a picture nothing
+/// here can read is one nothing downstream can draw either, so making it
+/// smaller was never going to help.
+///
+/// A PNG whatever went in, because the work happens in pixels: writing a
+/// scaled JPEG back out would be a second generation of the same lossy
+/// encoding, on an image that is about to be drawn at a sixth of a QR code.
+pub fn shrink_logo(image: &[u8]) -> Option<Vec<u8>> {
+    let format = ImageFormat::detect(image)?;
+    if format == ImageFormat::Svg {
+        return None;
+    }
+
+    let href = raster::href(image, format);
+    let (width, height) = raster::natural_size(&href)?;
+    let longest = width.max(height);
+    if longest <= MAX_LOGO_SIDE as f32 {
+        return None;
+    }
+
+    let factor = MAX_LOGO_SIDE as f32 / longest;
+    let target = (
+        raster::whole(width * factor),
+        raster::whole(height * factor),
+    );
+    let natural = (raster::whole(width), raster::whole(height));
+
+    // Halving needs the picture at its own size first, which for a large
+    // enough image is a pixmap that cannot be allocated. Drawing it straight
+    // at the size wanted needs no such buffer: it is the worse picture, and it
+    // is the one that always works.
+    let scaled = in_halves(&href, natural, target).or_else(|| raster::draw(&href, target, None))?;
+
+    scaled.encode_png().ok()
+}
+
+/// The image at `natural`, halved until one more halving would take it under
+/// `target`, and then resampled the rest of the way.
+///
+/// Going down in halves rather than in one step is the difference between a
+/// scaled photograph and a noisy one. A single leap from four thousand pixels
+/// to five hundred samples one row in eight and throws the rest away, so fine
+/// detail arrives as speckle; halving averages every pixel into the one below
+/// it, and the step that finishes the job is always under 2:1.
+fn in_halves(href: &str, natural: (u32, u32), target: (u32, u32)) -> Option<tiny_skia::Pixmap> {
+    let mut pixmap = raster::draw(href, natural, None)?;
+
+    while pixmap.width() >= target.0 * 2 && pixmap.height() >= target.1 * 2 {
+        let half = (pixmap.width() / 2, pixmap.height() / 2);
+        pixmap = raster::resample(&pixmap, half)?;
+    }
+    if (pixmap.width(), pixmap.height()) != target {
+        pixmap = raster::resample(&pixmap, target)?;
+    }
+
+    Some(pixmap)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -566,6 +646,73 @@ mod tests {
             logo: Some(logo),
             ..QrStyle::default()
         }
+    }
+
+    /// A solid rectangle, as a PNG, standing in for a photograph off a phone.
+    fn photo(width: u32, height: u32) -> Vec<u8> {
+        let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
+        pixmap.fill(tiny_skia::Color::from_rgba8(30, 90, 200, 255));
+        pixmap.encode_png().unwrap()
+    }
+
+    /// The size of an encoded image, read back the way the renderer reads it.
+    fn size_of(image: &[u8]) -> (u32, u32) {
+        let href = raster::href(image, ImageFormat::Png);
+        let (width, height) = raster::natural_size(&href).unwrap();
+        (width as u32, height as u32)
+    }
+
+    /// The case this exists for: a picture larger than a GPU texture atlas,
+    /// which is every photograph a phone takes.
+    #[test]
+    fn a_logo_larger_than_the_atlas_is_scaled_down_to_fit() {
+        let shrunk = shrink_logo(&photo(4167, 2573)).unwrap();
+        let (width, height) = size_of(&shrunk);
+
+        assert_eq!(width, MAX_LOGO_SIDE);
+        assert!(height <= MAX_LOGO_SIDE, "{height}");
+        // The shape is the picture's, not the box's: 4167:2573 is 1.62, and a
+        // logo squashed to fit a square would be the wrong picture entirely.
+        let before = 4167.0 / 2573.0;
+        let after = f64::from(width) / f64::from(height);
+        assert!((before - after).abs() < 0.01, "{before} became {after}");
+    }
+
+    /// Whichever side is the long one.
+    #[test]
+    fn a_tall_logo_is_scaled_by_its_height() {
+        let shrunk = shrink_logo(&photo(900, 3000)).unwrap();
+        assert_eq!(size_of(&shrunk), (154, MAX_LOGO_SIDE));
+    }
+
+    #[test]
+    fn a_logo_that_already_fits_is_left_alone() {
+        assert_eq!(shrink_logo(&photo(MAX_LOGO_SIDE, 200)), None);
+        assert_eq!(shrink_logo(&logo_image(GREEN)), None);
+    }
+
+    #[test]
+    fn a_vector_logo_is_left_alone() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="9000" height="9000"/>"#;
+        assert_eq!(shrink_logo(svg), None);
+    }
+
+    #[test]
+    fn bytes_that_are_not_an_image_are_left_alone() {
+        assert_eq!(shrink_logo(b"not an image at all"), None);
+    }
+
+    /// The scaled picture has to survive everything the original would have:
+    /// it is a PNG, it is what ends up in the document, and the code still
+    /// carries it.
+    #[test]
+    fn a_scaled_logo_is_still_a_logo() {
+        let shrunk = shrink_logo(&photo(5000, 5000)).unwrap();
+        assert_eq!(&shrunk[..8], b"\x89PNG\r\n\x1a\n");
+
+        let style = with_logo(Logo::new(shrunk));
+        let svg = render_svg(LONG, ErrorCorrection::High, &style).unwrap();
+        assert!(svg.contains("href=\"data:image/png;base64,iVBOR"), "{svg}");
     }
 
     #[test]

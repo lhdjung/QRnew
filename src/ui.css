@@ -2,14 +2,25 @@
 
 /* QRnew's whole appearance.
  *
- * One theme, and it is dark. That is a deliberate narrowing from the previous
- * build's `prefers-color-scheme` pair, for two reasons: a dark surround is what
- * makes a mostly-white QR code read as an object rather than as a hole in the
- * window, and — the practical half — **CSS does not reach inside an SVG in
- * Blitz**, so every icon in `ui.rs` carries its ink as a presentation
- * attribute. A second theme would mean a second set of icons. If light mode is
- * wanted back, the cheap route is `filter: invert(1)` on `.glyph`, because
- * every icon here is monochrome by construction.
+ * Two themes, and the desktop picks. `prefers-color-scheme` is a real media
+ * query here — Blitz hands winit's window theme to Stylo and re-evaluates the
+ * query when the desktop changes its mind — so the app follows the system
+ * live, and a switch of its own would only be a second answer to a question
+ * already answered. Light is the one written on `:root`, because a window that
+ * is bright by default is the one that looks like the rest of the desktop; the
+ * block at the end of this file redefines the same token names and nothing
+ * else. Every colour in this file is one of those names, which is what makes a
+ * second theme a block rather than a rewrite.
+ *
+ * The exception, and it is the reason the app had one theme until now: **CSS
+ * does not reach inside an SVG in Blitz**, because the element is handed to
+ * `usvg` as a document of its own. An icon's ink is therefore a presentation
+ * attribute, and a presentation attribute cannot read a custom property or a
+ * media query. So `ui.rs` draws every icon twice, once in each theme's ink,
+ * and `.lit` / `.dim` at the foot of this file shows whichever one belongs to
+ * the theme in force. Two small documents instead of one is a real cost, paid
+ * once when the tree is built; it is what buys icons that are not grey-on-grey
+ * in one of the two windows.
  *
  * Two things this file deliberately does without, both because Blitz at the
  * pinned revision does them wrong rather than because they are unwanted:
@@ -27,45 +38,102 @@
  *     `ui.rs`: Blitz resolves the centre in CSS pixels and adds it to a
  *     rectangle in device pixels, so it lands at half the offset on a 2×
  *     display. `background-position` is scaled correctly, so anything that has
- *     to be somewhere in particular is placed with that instead.
- *
- * Everything else is a token on `:root`, so the palette is one block. */
-
+ *     to be somewhere in particular is placed with that instead. */
 :root {
-  /* Surfaces, warm-neutral graphite rather than blue-black. */
-  --bg: #131417;
-  --card: #1c1e22;
-  --card-top: #212429;
-  --sunken: #17191c;
-  --raised: #272b31;
-  --raised-hi: #313640;
+  /* Surfaces. Paper and near-paper: the cards are white, the window they sit
+   * on is a shade off it, and the fields are a shade under that. */
+  --bg: #f4f5f7;
+  --card: #fbfbfc;
+  --card-top: #ffffff;
+  --sunken: #f0f2f5;
+  --sunken-hi: #ffffff;
+  --raised: #ffffff;
+  --raised-hi: #eef0f4;
+  /* A control the app has switched off. Barely a tint — on white it is the
+   * absence of a surface rather than a darker one. */
+  --off: rgba(15, 23, 42, 0.045);
 
   /* Ink. Three steps is all the interface needs. */
-  --ink: #edeff2;
-  --ink-2: #aab2bc;
-  --ink-3: #7b838e;
+  --ink: #16181d;
+  --ink-2: #4d545e;
+  --ink-3: #838b95;
 
-  /* Lines. */
-  --line: #2b2f36;
-  --line-2: #3a4049;
+  /* Lines. `--line-3` is a border under the pointer. */
+  --line: #e4e7eb;
+  --line-2: #d2d7de;
+  --line-3: #b6bdc6;
 
-  /* The one accent: a fresh leaf green, used for state and for section marks
-   * and for nothing else. `--accent-ink` is what goes *on* the accent, and it
-   * is a near-black rather than a dark green so that a filled button reads as
-   * text on a colour rather than as a colour on a colour. */
-  --accent: #4ecb8f;
-  --accent-ink: #0a1a13;
-  --accent-dim: rgba(78, 203, 143, 0.13);
-  --accent-line: rgba(78, 203, 143, 0.45);
+  /* The one accent: a leaf green, used for state and for section marks and
+   * for nothing else. `--accent-ink` is what goes *on* the accent — white
+   * here, because a filled button in this theme is a dark colour carrying
+   * light text, which is the opposite of what it is in the other one. The
+   * green itself is a deeper leaf than the dark theme's for the same reason
+   * the ink is: the same colour cannot carry a line of text on white and
+   * remain the same colour on graphite. */
+  --accent: #0f9d63;
+  --accent-ink: #ffffff;
+  --accent-dim: rgba(15, 157, 99, 0.1);
+  --accent-line: rgba(15, 157, 99, 0.38);
 
-  --danger: #ff9585;
+  --danger: #c0392b;
   /* A caution rather than a failure: the app will happily draw a code with a
-   * one-module border, it just will not promise the code scans. Salmon is
-   * already spoken for by the things that did not work. */
-  --warn: #e9c07c;
-  --warn-dim: rgba(233, 192, 124, 0.11);
-  --warn-line: rgba(233, 192, 124, 0.34);
-  --shadow-deep: rgba(0, 0, 0, 0.6);
+   * one-module border, it just will not promise the code scans. */
+  --warn: #8a5b06;
+  --warn-dim: rgba(180, 124, 12, 0.1);
+  --warn-line: rgba(138, 91, 6, 0.3);
+
+  /* The mat the code sits on is painted in the code's own light colour, which
+   * on this theme is usually white on nearly white. The hairline is what keeps
+   * it an object rather than a hole; the dark theme has contrast enough
+   * without one and sets it to nothing. */
+  --mat-line: #e0e4e9;
+  --shadow-deep: rgba(16, 24, 40, 0.14);
+  --scrim: rgba(17, 20, 26, 0.4);
+}
+
+/* The same names, for a desktop that has asked for a dark one.
+ *
+ * Not a dimming of the theme above: a dark window wants more contrast between
+ * its surfaces and less between its inks, so the surfaces climb in steps while
+ * the greys stay close together. The green is the brighter of the two, and
+ * what goes on top of it is a near-black rather than a dark green, so a filled
+ * button reads as text on a colour rather than as a colour on a colour. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Warm-neutral graphite rather than blue-black. */
+    --bg: #131417;
+    --card: #1c1e22;
+    --card-top: #212429;
+    --sunken: #17191c;
+    --sunken-hi: #14171a;
+    --raised: #272b31;
+    --raised-hi: #313640;
+    --off: rgba(39, 43, 49, 0.45);
+
+    --ink: #edeff2;
+    --ink-2: #aab2bc;
+    --ink-3: #7b838e;
+
+    --line: #2b2f36;
+    --line-2: #3a4049;
+    --line-3: #464d57;
+
+    --accent: #4ecb8f;
+    --accent-ink: #0a1a13;
+    --accent-dim: rgba(78, 203, 143, 0.13);
+    --accent-line: rgba(78, 203, 143, 0.45);
+
+    --danger: #ff9585;
+    /* Salmon is already spoken for by the things that did not work, so the
+     * caution is gold. */
+    --warn: #e9c07c;
+    --warn-dim: rgba(233, 192, 124, 0.11);
+    --warn-line: rgba(233, 192, 124, 0.34);
+
+    --mat-line: rgba(0, 0, 0, 0);
+    --shadow-deep: rgba(0, 0, 0, 0.6);
+    --scrim: rgba(8, 9, 11, 0.62);
+  }
 }
 
 * {
@@ -109,15 +177,10 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  /* A soft wash off the top-left, so a dark window is not a flat one. Linear
-   * rather than radial because a radial gradient's geometry is measured wrong
-   * on a HiDPI display; at these opacities nobody can tell the difference. */
-  background: linear-gradient(
-      152deg,
-      rgba(78, 203, 143, 0.075),
-      rgba(0, 0, 0, 0) 46%
-    ),
-    var(--bg);
+  /* Flat, and painted by `body`. There was a green wash off the top-left here,
+   * which was there to keep a dark window from reading as a slab; a bright
+   * window does not have that problem, and a tint across the whole surround is
+   * a colour the app has no business asserting behind somebody else's code. */
 }
 
 /* ---------------------------------------------------------------- header */
@@ -279,7 +342,7 @@ body {
 }
 
 .field:focus {
-  background: #14171a;
+  background: var(--sunken-hi);
   border-color: var(--accent-line);
   outline: none;
 }
@@ -304,7 +367,7 @@ body {
 
 .btn:hover {
   background: var(--raised-hi);
-  border-color: #464d57;
+  border-color: var(--line-3);
 }
 
 .btn.wide {
@@ -316,12 +379,12 @@ body {
  * moment somebody starts typing. */
 .btn.off {
   color: var(--ink-3);
-  background: rgba(39, 43, 49, 0.45);
+  background: var(--off);
   border-color: var(--line);
 }
 
 .btn.off:hover {
-  background: rgba(39, 43, 49, 0.45);
+  background: var(--off);
   border-color: var(--line);
 }
 
@@ -352,7 +415,7 @@ body {
 
 .chip:hover {
   background: var(--raised-hi);
-  border-color: #464d57;
+  border-color: var(--line-3);
 }
 
 .chip.on {
@@ -374,12 +437,12 @@ body {
  * about a control that is not there. */
 .chip.off {
   color: var(--ink-3);
-  background: rgba(39, 43, 49, 0.45);
+  background: var(--off);
   border-color: var(--line);
 }
 
 .chip.off:hover {
-  background: rgba(39, 43, 49, 0.45);
+  background: var(--off);
   border-color: var(--line);
 }
 
@@ -534,7 +597,7 @@ body {
 
 .step:hover {
   background: var(--raised-hi);
-  border-color: #464d57;
+  border-color: var(--line-3);
 }
 
 /* **`text-align` does nothing to an `<input>` in Blitz**, which is why the
@@ -574,7 +637,7 @@ body {
 }
 
 .count:focus {
-  background: #14171a;
+  background: var(--sunken-hi);
   border-color: var(--accent-line);
   outline: none;
 }
@@ -771,6 +834,7 @@ body {
   width: min(100%, 54vh, 470px);
   aspect-ratio: 1 / 1;
   padding: 18px;
+  border: 1px solid var(--mat-line);
   border-radius: 20px;
   box-shadow: 0 18px 46px var(--shadow-deep);
 }
@@ -835,7 +899,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(8, 9, 11, 0.62);
+  background: var(--scrim);
 }
 
 .about {
@@ -885,7 +949,26 @@ body {
 }
 
 /* Icons. Every one is a `<svg>` in `ui.rs`, painted through usvg — so this
- * sizes them and nothing more; their colour is baked in at the call site. */
+ * sizes them and nothing more; their colour is baked in at the call site.
+ *
+ * Which is why there are two of each: `glyph` in `ui.rs` emits the same icon
+ * twice, once in the ink for each theme, and these two rules are the whole of
+ * the choosing. A hidden one takes no space and is never painted, so the pair
+ * costs a node and a small usvg document, not a layout. */
+.dim {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .lit {
+    display: none;
+  }
+
+  .dim {
+    display: block;
+  }
+}
+
 .glyph {
   flex: 0 0 auto;
   width: 18px;

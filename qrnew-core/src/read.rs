@@ -10,9 +10,9 @@
 use std::fmt;
 
 use resvg::tiny_skia;
-use resvg::usvg;
 
-use crate::logo::{self, ImageFormat};
+use crate::logo::ImageFormat;
+use crate::raster;
 
 /// Smallest and largest the image is scaled to before decoding, as the length
 /// of its longer side in pixels.
@@ -107,41 +107,21 @@ pub fn read(image: &[u8]) -> Result<String, ReadError> {
 /// background rather than as ink.
 fn rasterize(image: &[u8]) -> Result<tiny_skia::Pixmap, ReadError> {
     let format = ImageFormat::detect(image).ok_or(ReadError::NotAnImage)?;
-    let href = format!("data:{};base64,{}", format.mime(), logo::base64(image));
+    let href = raster::href(image, format);
 
     // How big the image is is not something this crate parses out of a file
-    // header, so the first pass exists only to ask `usvg`. Nothing is drawn
-    // from it, which is why the document around it can be any size at all.
-    let (width, height) = intrinsic_size(&document(1.0, 1.0, &href))?;
+    // header, so it is asked before anything is drawn. `usvg` drops an
+    // `<image>` whose data it cannot make sense of, which is what an image
+    // that is not the one it claims to be looks like from here.
+    let (width, height) = raster::natural_size(&href)
+        .filter(|(width, height)| *width > 0.0 && *height > 0.0)
+        .ok_or_else(|| ReadError::Damaged("the image data could not be decoded".to_owned()))?;
 
     let scale = fit(width.max(height));
-    let (width, height) = ((width * scale).round(), (height * scale).round());
-    let tree = usvg::Tree::from_str(&document(width, height, &href), &usvg::Options::default())
-        .map_err(|error| ReadError::Damaged(error.to_string()))?;
+    let size = (raster::whole(width * scale), raster::whole(height * scale));
 
-    let mut pixmap = tiny_skia::Pixmap::new(width as u32, height as u32)
-        .ok_or_else(|| ReadError::Damaged("the image has no area".to_owned()))?;
-    pixmap.fill(tiny_skia::Color::WHITE);
-    resvg::render(
-        &tree,
-        tiny_skia::Transform::identity(),
-        &mut pixmap.as_mut(),
-    );
-
-    Ok(pixmap)
-}
-
-/// An SVG document holding nothing but the image, at the given size.
-fn document(width: f32, height: f32, href: &str) -> String {
-    format!(
-        concat!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">"#,
-            r#"<image width="{width}" height="{height}" href="{href}"/></svg>"#,
-        ),
-        width = width,
-        height = height,
-        href = href,
-    )
+    raster::draw(&href, size, Some(tiny_skia::Color::WHITE))
+        .ok_or_else(|| ReadError::Damaged("the image has no area".to_owned()))
 }
 
 /// The scale that brings an image's longer side into the range a decoder is
@@ -156,31 +136,11 @@ fn fit(longest: f32) -> f32 {
     }
 }
 
-/// The size of the image inside a document, which is its own size rather than
-/// whatever the document asked for.
-fn intrinsic_size(document: &str) -> Result<(f32, f32), ReadError> {
-    let tree = usvg::Tree::from_str(document, &usvg::Options::default())
-        .map_err(|error| ReadError::Damaged(error.to_string()))?;
-
-    find_image(tree.root()).ok_or_else(|| {
-        // `usvg` drops an `<image>` whose data it cannot make sense of, so an
-        // empty document here means the bytes were not the image they claimed.
-        ReadError::Damaged("the image data could not be decoded".to_owned())
-    })
-}
-
-fn find_image(group: &usvg::Group) -> Option<(f32, f32)> {
-    group.children().iter().find_map(|node| match node {
-        usvg::Node::Image(image) => Some((image.size().width(), image.size().height())),
-        usvg::Node::Group(group) => find_image(group),
-        _ => None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{ErrorCorrection, Qr, QrStyle};
+    use resvg::usvg;
 
     const DATA: &str = "https://github.com/lhdjung/QRnew";
 
