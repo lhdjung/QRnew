@@ -282,6 +282,75 @@ fn a_swatch_recolors_the_code() {
     );
 }
 
+/// **The mat is outlined, and the outline stays visible on any mat.**
+///
+/// The mat is painted in the code's own background colour, and that colour is
+/// a real part of the exported file: the quiet zone a scanner needs is drawn
+/// in it. On a light window the mat and the page can be the same colour —
+/// `#f5f4f2` is on the palette and `--bg` is `#f4f5f7` — and a code whose
+/// border cannot be seen is a code whose border nobody can judge. `.preview`
+/// is therefore outlined with a dash, and `mat_line` in `ui.rs` derives the
+/// dash's colour from the mat, because a grey fixed against white vanishes on
+/// the middle of the greyscale row.
+///
+/// So this walks the mat from white to the middle grey to black and asks the
+/// same question at each stop: is the line still a line?
+#[test]
+fn the_mat_is_outlined_whatever_colour_the_mat_is() {
+    /// How far apart, on 0…255 of brightness, counts as visible.
+    const CLEARLY: i32 = 24;
+
+    let luma = |(r, g, b): (u8, u8, u8)| {
+        (i32::from(r) * 299 + i32::from(g) * 587 + i32::from(b) * 114) / 1000
+    };
+    // The mat's colour and its outline's, both off the one inline `style`.
+    let mat_and_line = |harness: &Harness<dioxus_native::DioxusDocument>| {
+        let style = harness
+            .attr(".preview", "style")
+            .expect("the mat carries its colours inline");
+        let value = |property: &str| {
+            let at = style
+                .find(property)
+                .unwrap_or_else(|| panic!("no {property} in {style:?}"));
+            hex(style[at..].split_once('#').expect("a hex colour").1)
+        };
+        (value("background"), value("border-color"))
+    };
+
+    // Both themes, because the page behind the mat is a different colour in
+    // each and the line has to clear the mat in front of it either way.
+    for theme in ["light", "dark"] {
+        let mut harness = app();
+        harness.click(".theme-open");
+        harness.pump();
+        harness.click(&format!("[data-theme=\"{theme}\"]"));
+        harness.pump();
+        harness.click(".theme-close");
+        harness.pump();
+
+        harness.click(".field");
+        harness.type_text("https://example.org");
+        harness.pump();
+        harness.click("[data-well=\"light\"]");
+        harness.pump();
+
+        // White, the middle of the greyscale row, and black. The middle one is
+        // the case a fixed grey gets wrong.
+        for swatch in ["#ffffff", "#9a9793", "#000000"] {
+            harness.click(&format!("[data-swatch=\"{swatch}\"]"));
+            harness.pump();
+
+            let (mat, line) = mat_and_line(&harness);
+            assert_eq!(mat, hex(swatch), "the mat took {swatch}");
+            assert!(
+                (luma(mat) - luma(line)).abs() >= CLEARLY,
+                "on a {theme} window the outline is still visible on {swatch}: \
+                 mat {mat:?} against line {line:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn the_hex_field_recolors_the_code() {
     let mut harness = app();
@@ -358,15 +427,21 @@ fn the_square_is_the_size_the_maths_assumes() {
 
 /// The colour the modules are painted with, as three channels.
 fn dark_fill(svg: &str) -> (u8, u8, u8) {
-    let hex = svg
+    let fill = svg
         .split_once("<path fill=\"")
         .expect("the modules are painted with a fill")
         .1
         .split_once('"')
         .unwrap()
         .0;
-    let channel = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).unwrap();
-    (channel(1), channel(3), channel(5))
+    hex(fill)
+}
+
+/// `rrggbb` as three bytes, with or without a leading `#`.
+fn hex(text: &str) -> (u8, u8, u8) {
+    let text = text.trim_start_matches('#');
+    let byte = |at: usize| u8::from_str_radix(&text[at..at + 2], 16).expect("a hex pair");
+    (byte(0), byte(2), byte(4))
 }
 
 /// The square sets saturation and value; the strip sets hue.
@@ -1351,16 +1426,25 @@ fn a_picture_too_large_to_carry_is_scaled_down_as_it_is_taken_in() {
     );
 }
 
-/// **Every icon is drawn twice, and the desktop's theme picks one.**
+/// **The theme is the desktop's until somebody says otherwise.**
 ///
-/// An icon's colour is a presentation attribute on an SVG that Blitz hands to
-/// `usvg` as a document of its own, so no stylesheet can reach it and no media
-/// query can change it. `glyph` in `ui.rs` draws the pair instead and `ui.css`
-/// hides one of them, which is the whole of QRnew's light and dark support —
-/// and it is support that silently becomes half-support if either side of that
-/// arrangement is tidied away.
+/// Three answers, and two mechanisms behind them that have to agree. The
+/// palette is a class on `.app` — a class rather than a media query because
+/// nothing a component can call moves `prefers-color-scheme`, and because
+/// macOS stops reporting theme changes the moment the app sets an appearance
+/// of its own. The *icons* cannot be a class at all: an icon's ink is a
+/// presentation attribute on an SVG that Blitz hands to `usvg` as a document
+/// of its own, so `glyph` in `ui.rs` draws each one twice and `ui.css` hides
+/// one of the pair.
+///
+/// If those two ever disagree the window is half-themed — dark surfaces under
+/// icons drawn for a light one — and nothing fails until somebody looks. So
+/// each case below checks both: the class the app is wearing, and which half
+/// of every icon pair survived layout.
 #[test]
-fn one_of_each_icon_pair_is_shown_and_it_is_the_theme_that_chooses() {
+fn the_theme_is_the_desktops_until_somebody_picks_one() {
+    // How many of a class are actually laid out. A hidden icon keeps its node
+    // and loses its box, which is exactly the distinction being tested.
     let shown = |harness: &Harness<dioxus_native::DioxusDocument>, class: &str| {
         harness
             .query_all(class)
@@ -1369,26 +1453,93 @@ fn one_of_each_icon_pair_is_shown_and_it_is_the_theme_that_chooses() {
             .count()
     };
 
-    for (scheme, lit, dim) in [
-        (ColorScheme::Light, 1usize, 0usize),
-        (ColorScheme::Dark, 0, 1),
+    // The desktop, what gets picked from the sheet, and the palette that
+    // should come out of the two together.
+    for (desktop, pick, wanted) in [
+        (ColorScheme::Light, None, "light"),
+        (ColorScheme::Dark, None, "dark"),
+        // Either desktop, overruled in both directions.
+        (ColorScheme::Dark, Some("light"), "light"),
+        (ColorScheme::Light, Some("dark"), "dark"),
+        // And back to the desktop, which is the answer somebody arrives at by
+        // changing their mind rather than by never opening the sheet.
+        (ColorScheme::Dark, Some("system"), "dark"),
     ] {
         let vdom = VirtualDom::new(App).with_root_context(Fill("https://example.org".into()));
         let mut harness = Harness::from_vdom(
             vdom,
             HarnessOptions {
-                color_scheme: scheme,
+                color_scheme: desktop,
                 ..HarnessOptions::default()
             },
         );
         harness.set_viewport_size(1280, 860);
         harness.pump();
 
-        let pairs = harness.query_all(".lit").len();
-        assert!(pairs > 10, "the window is full of icons: {pairs}");
-        assert_eq!(harness.query_all(".dim").len(), pairs, "one of each");
+        let chosen = pick.unwrap_or("system");
+        if let Some(pick) = pick {
+            harness.click(".theme-open");
+            harness.pump();
+            harness.click(&format!("[data-theme=\"{pick}\"]"));
+            harness.pump();
+            harness.click(".theme-close");
+            harness.pump();
+        }
 
-        assert_eq!(shown(&harness, ".lit"), pairs * lit, "{scheme:?}");
-        assert_eq!(shown(&harness, ".dim"), pairs * dim, "{scheme:?}");
+        let case = format!("{desktop:?} desktop, {chosen} picked");
+        assert!(
+            harness.query(&format!(".app.theme-{chosen}")).is_some(),
+            "{case}: the root wears the choice, not the outcome"
+        );
+
+        // And the icons agree with the palette that choice resolves to.
+        let pairs = harness.query_all(".lit").len();
+        assert!(pairs > 10, "{case}: the window is full of icons");
+        assert_eq!(harness.query_all(".dim").len(), pairs, "{case}: one of each");
+        let (lit, dim) = if wanted == "dark" { (0, pairs) } else { (pairs, 0) };
+        assert_eq!(shown(&harness, ".lit"), lit, "{case}: light-ink icons shown");
+        assert_eq!(shown(&harness, ".dim"), dim, "{case}: dark-ink icons shown");
     }
+}
+
+/// **The sheet opens, chooses, and closes.**
+///
+/// The theme is the one setting in the app that is not a control on the face
+/// of the window, so the way in, the way out, and what the sheet says when it
+/// arrives are worth a test of their own.
+#[test]
+fn the_theme_sheet_opens_chooses_and_closes() {
+    let mut harness = app();
+    assert!(harness.query("[data-theme]").is_none(), "it starts closed");
+
+    harness.click(".theme-open");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-theme=\"system\"]", "aria-pressed").as_deref(),
+        Some("true"),
+        "the sheet opens on the answer in force"
+    );
+
+    harness.click("[data-theme=\"dark\"]");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-theme=\"dark\"]", "aria-pressed").as_deref(),
+        Some("true"),
+    );
+    assert_eq!(
+        harness.attr("[data-theme=\"system\"]", "aria-pressed").as_deref(),
+        Some("false"),
+        "and only one of them at a time"
+    );
+    // The sheet stays up: picking a theme is a thing somebody may want to do
+    // twice, and the window behind it is what they are judging.
+    assert!(harness.query("[data-theme]").is_some());
+
+    harness.click(".theme-close");
+    harness.pump();
+    assert!(harness.query("[data-theme]").is_none());
+    assert!(
+        harness.query(".app.theme-dark").is_some(),
+        "and the choice outlives the sheet"
+    );
 }

@@ -588,6 +588,85 @@ quarters of the largest allocation the crate makes, and
 `shrink_logo` on that photograph: 98.3 MB of footprint before, 57.3 MB after.
 In the app: 237.4 MB settled before, 196.8 MB after.
 
+## 7. The theme is a class, because it could not be a media query
+
+The assessment above lists `prefers-color-scheme` for dark mode as step two of
+the port, and treats system dark mode as a thing Blitz hands you for free. That
+is true exactly as far as it goes: Blitz maps winit's window theme onto the
+media query and re-evaluates it live, and following the desktop was one block
+of CSS.
+
+What it does not cover is an app that wants to let somebody *overrule* the
+desktop, which QRnew now does — Theme, beside About, offers System, Light and
+Dark, and System is the default. That turns out to be a different problem, and
+the difference is worth writing down because nothing in the docs says it:
+
+- **Nothing a Dioxus component can call moves `prefers-color-scheme`.** The
+  lever exists — `blitz_shell::View::set_theme_override` — but it belongs to
+  the shell, and a component sees the document, not the view. `ShellProvider`,
+  which is how a document reaches windowing functionality, has no theme
+  method at all.
+- **Asking winit to change the window's own theme is not a substitute, and on
+  macOS it is specifically not one.** `Window::set_theme` is reachable, via
+  `use_window`, and it does change the appearance. But `winit-appkit` watches
+  `effectiveAppearance` and returns early — no `ThemeChanged` event — when the
+  window's appearance was set by the program rather than by the desktop. So
+  the title bar changes and Stylo never hears about it. Any design that
+  routes an in-app theme switch through winit and back out through the media
+  query is relying on an event that platform deliberately withholds.
+
+So the palette is a class on the app's root element, and `prefers-color-scheme`
+is consulted in exactly one place: inside the `.theme-system` branch, which is
+the case where the desktop really is the authority and the event really does
+arrive. `set_theme` is still called, purely so the title bar matches the window
+under it; nothing in the interface depends on whether the platform honours it.
+
+Three consequences fell out, and two of them are Blitz-specific enough to be
+worth the next person's time:
+
+- **The palette cannot live on `:root`.** A class is on an element the app
+  renders, and the app renders inside `<main>` — it never sees `html` or
+  `body`. Custom properties are inherited, so writing them on `.app` reaches
+  everything *inside* `.app`, and nothing outside it: the root element's own
+  background, and any overlay rendered as a sibling. Both modal sheets moved
+  inside `.app` for that reason, and `.app` paints `--bg` itself rather than
+  leaving it to `body`.
+- **The dark palette is written twice.** It applies to a selector and to a
+  media query, and CSS has no way to share one block between the two. The
+  duplication is real and the fix is a test —
+  `the_dark_palette_says_the_same_thing_twice` compares the copies token by
+  token — because a colour edited in one and not the other is a theme that
+  differs by how it was arrived at, with nothing on screen to say so.
+- **Bare text inside a `<button>` does not repaint when the theme changes.**
+  The surface takes the new colour and the word keeps the old one, so a
+  segmented row is dark-on-dark until something else makes Blitz rebuild that
+  node — clicking a segment, in practice, which corrects the row one segment at
+  a time and looks exactly as odd as it sounds. Wrapping the label in a
+  `<span>` fixes it; every other button in the app already had one, for its
+  icon. The headless harness resolves the same tree correctly, so this is a
+  renderer-only fault and no test catches it.
+- **An icon still cannot be themed by CSS.** The element is handed to `usvg`
+  as a document of its own, so its ink is a presentation attribute that cannot
+  read a custom property or a media query. Every icon is therefore drawn twice,
+  once per palette, with a rule hiding one — two nodes and two small usvg
+  documents per icon on screen, one of each never painted. That is the price of
+  a *runtime* theme switch specifically, and it is why the switch is spent on
+  the window rather than on anything that appears in a list.
+
+One thing the light window needed that the dark one did not, and that survives
+the choice becoming three-way: **the mat under the code is painted in the
+code's own background colour**, and nothing stops that being the colour of the
+page behind it — `#f5f4f2` is on the palette and the hex field takes anything.
+`.preview` is outlined with a dash rather than a rule, so it reads as the app's
+boundary rather than as a frame somebody exported, and `mat_line` in `ui.rs`
+derives the dash's colour from the mat by pushing it half a palette away from
+itself. That derivation is what makes the line theme-independent: a mat light
+enough to need a dark line is already lighter than a dark window, and one dark
+enough to need a light line is already darker than a light one. It is the one
+token with no entry in the dark palette, and
+`the_mat_is_outlined_whatever_colour_the_mat_is` walks white, mid-grey and
+black under both themes.
+
 ## What is still open
 
 - **Linux and Windows.** Still unrun, but no longer unrunnable. `build.yml`

@@ -8,7 +8,7 @@ QRnew reads QR codes as well. Open an image file — PNG, JPEG, GIF, WebP or SVG
 
 A picture can sit in the middle of a code, too. Choose one and it is drawn into the middle of the modules; error correction rises to 30% while it is there, which is what pays for the part it covers.
 
-The window follows the desktop's light or dark setting and changes with it, so there is nothing to set.
+The window follows the desktop's light or dark setting, and *Theme* in the corner overrules that when you want it to: a code looks like a different code matted on graphite than it does on paper, and paper is usually what it ends up printed on. The dashed line around the preview is where the code ends, so the blank border that gets saved with it stays visible even when you give it the same colour as the window behind it.
 
 ![demo](resources/qrnew-demo.png)
 

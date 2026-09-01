@@ -1,6 +1,10 @@
 app-title = QRnew
 app-description = Small and simple QR code generator. Local-only, no telemetry. Your data are safe.
 about = About
+theme = Theme
+theme-system = Follow system
+theme-light = Light
+theme-dark = Dark
 repository = View on GitHub
 view = View
 input-placeholder = Enter text or a link, and the code appears.

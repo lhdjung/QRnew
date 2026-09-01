@@ -2,25 +2,39 @@
 
 /* QRnew's whole appearance.
  *
- * Two themes, and the desktop picks. `prefers-color-scheme` is a real media
- * query here — Blitz hands winit's window theme to Stylo and re-evaluates the
- * query when the desktop changes its mind — so the app follows the system
- * live, and a switch of its own would only be a second answer to a question
- * already answered. Light is the one written on `:root`, because a window that
- * is bright by default is the one that looks like the rest of the desktop; the
- * block at the end of this file redefines the same token names and nothing
- * else. Every colour in this file is one of those names, which is what makes a
- * second theme a block rather than a rewrite.
+ * Two palettes, and three ways of choosing between them. `.app` carries
+ * `theme-system`, `theme-light` or `theme-dark`, and everything below hangs
+ * off that class: light is written on `:root` and is what the file falls back
+ * to, `.theme-dark` redefines the same token names and nothing else, and
+ * `.theme-system` picks between them with `prefers-color-scheme`. Every colour
+ * in this file is one of those names, which is what makes a second palette a
+ * block rather than a rewrite.
  *
- * The exception, and it is the reason the app had one theme until now: **CSS
- * does not reach inside an SVG in Blitz**, because the element is handed to
- * `usvg` as a document of its own. An icon's ink is therefore a presentation
- * attribute, and a presentation attribute cannot read a custom property or a
- * media query. So `ui.rs` draws every icon twice, once in each theme's ink,
- * and `.lit` / `.dim` at the foot of this file shows whichever one belongs to
- * the theme in force. Two small documents instead of one is a real cost, paid
- * once when the tree is built; it is what buys icons that are not grey-on-grey
- * in one of the two windows.
+ * **A class rather than a media query alone, and that is forced.**
+ * `prefers-color-scheme` is real here — Blitz hands winit's window theme to
+ * Stylo and re-evaluates when the desktop changes its mind — but nothing an
+ * app can call from inside a component moves it, and on macOS asking winit to
+ * change the window's own appearance deliberately does *not* raise the
+ * `ThemeChanged` event that would. So the media query is consulted only inside
+ * `.theme-system`, which is the one case where the desktop genuinely is the
+ * authority; the other two are the app's own answer and are plain selectors.
+ * The whole story is above `Theme` in `ui.rs`.
+ *
+ * Because the palette lives on `.app` rather than on `:root`, it reaches the
+ * rest of the window by inheritance — a custom property is an inherited
+ * property — so **anything painted in these colours has to be a descendant of
+ * `.app`**, the modal sheets included. That is why they are nested inside it
+ * in `ui.rs` rather than sitting beside it.
+ *
+ * The exception, and it is what a runtime theme switch costs: **CSS does not
+ * reach inside an SVG in Blitz**, because the element is handed to `usvg` as a
+ * document of its own. An icon's ink is therefore a presentation attribute,
+ * and a presentation attribute cannot read a custom property or a media query.
+ * So `ui.rs` draws every icon twice, once in each palette's ink, and
+ * `.lit` / `.dim` at the foot of this file shows whichever one belongs. Two
+ * small documents instead of one is a real cost, paid once when the tree is
+ * built; it is what buys icons that are not grey-on-grey in one of the two
+ * windows.
  *
  * Two things this file deliberately does without, both because Blitz at the
  * pinned revision does them wrong rather than because they are unwanted:
@@ -82,24 +96,80 @@
   --warn-dim: rgba(180, 124, 12, 0.1);
   --warn-line: rgba(138, 91, 6, 0.3);
 
-  /* The mat the code sits on is painted in the code's own light colour, which
-   * on this theme is usually white on nearly white. The hairline is what keeps
-   * it an object rather than a hole; the dark theme has contrast enough
-   * without one and sets it to nothing. */
-  --mat-line: #e0e4e9;
+  /* The dashed outline around the mat, for the mat this file can predict: the
+   * white one the app opens at. It is the one line in the window drawn against
+   * a surface somebody else chooses, so `mat_line` in `ui.rs` derives the
+   * colour from the mat and writes it inline over this. That derivation is
+   * what makes this the one token with no entry in the dark palette below —
+   * the line is half a palette from the mat either way, which clears a dark
+   * window as readily as a light one. What stays here is what the rule is
+   * worth on its own. */
+  --mat-line: #b3b3b3;
   --shadow-deep: rgba(16, 24, 40, 0.14);
   --scrim: rgba(17, 20, 26, 0.4);
 }
 
-/* The same names, for a desktop that has asked for a dark one.
+/* The same names, for a dark window.
  *
- * Not a dimming of the theme above: a dark window wants more contrast between
- * its surfaces and less between its inks, so the surfaces climb in steps while
- * the greys stay close together. The green is the brighter of the two, and
- * what goes on top of it is a near-black rather than a dark green, so a filled
- * button reads as text on a colour rather than as a colour on a colour. */
+ * Not a dimming of the palette above: a dark window wants more contrast
+ * between its surfaces and less between its inks, so the surfaces climb in
+ * steps while the greys stay close together. The green is the brighter of the
+ * two, and what goes on top of it is a near-black rather than a dark green, so
+ * a filled button reads as text on a colour rather than as a colour on a
+ * colour.
+ *
+ * **It is written twice, and that is CSS rather than carelessness.** The
+ * palette applies in two unrelated situations — somebody asked for dark, or
+ * somebody left the choice to a desktop that is dark — and one of those is a
+ * selector while the other is a media query. There is no way to say "this
+ * selector, but only inside that query" and no way to name a block and use it
+ * in both, so the block is repeated. `the_dark_palette_says_the_same_thing_
+ * twice` in `ui.rs` compares the two copies token by token, which is the part
+ * that would otherwise rot: a colour changed in one and not the other is a
+ * theme that is subtly different depending on how it was arrived at, and
+ * nothing on screen would say so. */
+.theme-dark {
+  /* Warm-neutral graphite rather than blue-black. */
+  --bg: #131417;
+  --card: #1c1e22;
+  --card-top: #212429;
+  --sunken: #17191c;
+  --sunken-hi: #14171a;
+  --raised: #272b31;
+  --raised-hi: #313640;
+  --off: rgba(39, 43, 49, 0.45);
+
+  --ink: #edeff2;
+  --ink-2: #aab2bc;
+  --ink-3: #7b838e;
+
+  --line: #2b2f36;
+  --line-2: #3a4049;
+  --line-3: #464d57;
+
+  --accent: #4ecb8f;
+  --accent-ink: #0a1a13;
+  --accent-dim: rgba(78, 203, 143, 0.13);
+  --accent-line: rgba(78, 203, 143, 0.45);
+
+  --danger: #ff9585;
+  /* Salmon is already spoken for by the things that did not work, so the
+   * caution is gold. */
+  --warn: #e9c07c;
+  --warn-dim: rgba(233, 192, 124, 0.11);
+  --warn-line: rgba(233, 192, 124, 0.34);
+
+  --shadow-deep: rgba(0, 0, 0, 0.6);
+  --scrim: rgba(8, 9, 11, 0.62);
+}
+
+/* And the same again for somebody who has left the choice to the desktop. This
+ * is the *only* place `prefers-color-scheme` is asked in this file, because it
+ * is the only place the desktop is the authority — and it is also the only
+ * case Blitz keeps live, since macOS stops reporting theme changes once the
+ * app has set an appearance of its own. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  .theme-system {
     /* Warm-neutral graphite rather than blue-black. */
     --bg: #131417;
     --card: #1c1e22;
@@ -130,7 +200,6 @@
     --warn-dim: rgba(233, 192, 124, 0.11);
     --warn-line: rgba(233, 192, 124, 0.34);
 
-    --mat-line: rgba(0, 0, 0, 0);
     --shadow-deep: rgba(0, 0, 0, 0.6);
     --scrim: rgba(8, 9, 11, 0.62);
   }
@@ -172,15 +241,24 @@ body {
   height: 100%;
 }
 
-/* The whole window: a slim header over a three-column body. */
+/* The whole window: a slim header over a three-column body.
+ *
+ * **It paints its own background, and `body` above is only the fallback.** The
+ * palette is written on this element rather than on `:root`, because the
+ * theme is a class and this is the element that carries it — so `body` can
+ * only ever see the light `--bg`, and a dark window would otherwise be a dark
+ * app on a light page. Covering the viewport is what makes that moot, which
+ * is what `height: 100vh` was already for.
+ *
+ * Flat, with no wash. There was a green one off the top-left, to keep a dark
+ * window from reading as a slab; a tint across the whole surround is a colour
+ * the app has no business asserting behind somebody else's code. */
 .app {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  /* Flat, and painted by `body`. There was a green wash off the top-left here,
-   * which was there to keep a dark window from reading as a slab; a bright
-   * window does not have that problem, and a tint across the whole surround is
-   * a colour the app has no business asserting behind somebody else's code. */
+  background: var(--bg);
+  color: var(--ink);
 }
 
 /* ---------------------------------------------------------------- header */
@@ -327,6 +405,14 @@ body {
  * startup, and one of the two places worth selecting text in. */
 .field {
   width: 100%;
+  /* Symmetric, and measured rather than assumed. This was briefly 11/13, to
+   * pull the ink up off a line box that reserves descender room most strings
+   * do not use — and that was wrong. Measured on the real renderer at 2×: the
+   * field's inner box runs 94 device pixels, and with equal padding the
+   * x-height band lands on its centre to within half a pixel. Text without
+   * descenders then reads a hair high and text with them a hair low, which is
+   * what centred text does; moving it either way fixes one string and breaks
+   * the other. */
   padding: 12px 14px;
   font: inherit;
   font-size: 15px;
@@ -401,6 +487,21 @@ body {
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
 }
+
+/* The theme sheet's row: three wide rather than four, and roomier, because
+ * one of the three is two words and a segment that only just fits its label
+ * reads as a mistake. The sheet widens with it — the segments are the widest
+ * thing in it, so the panel is sized by them rather than the other way. */
+.segments-3 {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.segments-3 .chip {
+  padding: 12px 10px;
+  font-size: 15px;
+}
+
 
 .chip {
   padding: 9px 0;
@@ -824,6 +925,24 @@ body {
  * It is also why the corners can be round without clipping the image: the
  * radius is carried by the mat, and the image never reaches it.
  *
+ * **The outline is dashed, and it is not decoration.** The mat is the code's
+ * own background colour and the window behind it is `--bg`; nothing stops
+ * those two being the same colour, and one of them is a colour somebody can
+ * type into the hex field. When they meet, the code's border — the quiet zone
+ * a scanner needs, which is drawn in that same colour and is a real part of
+ * the exported file — has no visible edge, and the preview stops saying how
+ * much blank paper is being saved around the code. A dash is what says *the
+ * picture ends here* without claiming to be part of the picture: it reads as
+ * the app's line rather than as a frame somebody exported, which a solid rule
+ * on a matching mat does not. It is the same dash the placeholder uses, so
+ * the empty stage and the full one are the same object.
+ *
+ * Its *colour* is not here, and cannot be. A grey chosen against white is
+ * gone the moment somebody clicks the middle of the greyscale row, four
+ * pixels from where the colour was picked — so `mat_line` in `ui.rs` derives
+ * it from the mat and sets `border-color` inline. `--mat-line` is what this
+ * rule is worth without that.
+ *
  * The cap came down from 620: with two columns of controls beside it, a code
  * that filled the rest of the window stopped reading as one thing on a page
  * and started reading as a wall. */
@@ -834,7 +953,7 @@ body {
   width: min(100%, 54vh, 470px);
   aspect-ratio: 1 / 1;
   padding: 18px;
-  border: 1px solid var(--mat-line);
+  border: 1px dashed var(--mat-line);
   border-radius: 20px;
   box-shadow: 0 18px 46px var(--shadow-deep);
 }
@@ -870,7 +989,7 @@ body {
 
 /* ------------------------------------------------------------------ about */
 
-.about-open {
+.chrome-btn {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -884,7 +1003,7 @@ body {
   border-radius: 10px;
 }
 
-.about-open:hover {
+.chrome-btn:hover {
   color: var(--ink);
   background: var(--raised);
 }
@@ -902,7 +1021,10 @@ body {
   background: var(--scrim);
 }
 
-.about {
+/* A modal panel: the About card and the theme sheet are the same object with
+ * different contents, so the box is `.sheet` and what is peculiar to one of
+ * them is the second class it carries. */
+.sheet {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -914,7 +1036,15 @@ body {
   box-shadow: 0 24px 60px var(--shadow-deep);
 }
 
-.about h2 {
+/* Wider than the About card, and the segmented row is why: three buttons in
+ * one track, one of them two words. It is here rather than beside `.segments-3`
+ * because both selectors are one class deep — put it above `.sheet` and source
+ * order hands the width back. */
+.theme-sheet {
+  width: 440px;
+}
+
+.sheet h2 {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -928,7 +1058,7 @@ body {
  * the same kind of sentence: the app explaining itself. It was a step smaller
  * than the notes it sits in front of, which made the one panel that says what
  * QRnew *is* the quietest text in the app. */
-.about p {
+.sheet p {
   margin: 0;
   color: var(--ink-2);
   font-size: 15px;
@@ -941,7 +1071,7 @@ body {
   font-size: 13px;
 }
 
-.about-actions {
+.sheet-actions {
   display: flex;
   flex-direction: row;
   gap: 10px;
@@ -952,19 +1082,29 @@ body {
  * sizes them and nothing more; their colour is baked in at the call site.
  *
  * Which is why there are two of each: `glyph` in `ui.rs` emits the same icon
- * twice, once in the ink for each theme, and these two rules are the whole of
- * the choosing. A hidden one takes no space and is never painted, so the pair
- * costs a node and a small usvg document, not a layout. */
+ * twice, once in the ink for each palette, and these three rules are the whole
+ * of the choosing. They mirror the palettes exactly — the class decides, and
+ * the desktop is asked only for `theme-system`. A hidden one takes no space
+ * and is never painted, so the pair costs a node and a small usvg document,
+ * not a layout. */
 .dim {
   display: none;
 }
 
+.theme-dark .lit {
+  display: none;
+}
+
+.theme-dark .dim {
+  display: block;
+}
+
 @media (prefers-color-scheme: dark) {
-  .lit {
+  .theme-system .lit {
     display: none;
   }
 
-  .dim {
+  .theme-system .dim {
     display: block;
   }
 }

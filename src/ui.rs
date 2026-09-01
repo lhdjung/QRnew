@@ -43,15 +43,38 @@
 //! appearing with the first character, dimmed until there is something to
 //! export, so the stage never rearranges itself while it is being looked at.
 //!
-//! # Light and dark
+//! # Light, dark, and following the desktop
 //!
-//! The desktop decides, and there is no switch. Blitz gives Stylo the window's
-//! theme and re-evaluates `prefers-color-scheme` when it changes, so `ui.css`
-//! answers the question in the one place a stylesheet should. The exception is
-//! an icon, whose colour is a presentation attribute on a document CSS cannot
-//! reach into: [`glyph`] draws every one of them twice, once in each theme's
-//! ink, and the stylesheet hides the one that does not apply. That pair is
-//! also the reason the window had a single dark theme until now.
+//! Three answers and the person at the window picks, from a sheet behind the
+//! button beside About. Following the desktop is the default, because it is
+//! the answer that is right without anybody being asked — but it is only a
+//! default. Somebody comparing a code against the paper it will be printed on
+//! wants a light window at ten at night, and the desktop's setting has no
+//! opinion about that worth overriding theirs.
+//!
+//! **The choice is a class on `.app`, not a media query**, and that is forced
+//! rather than chosen. `prefers-color-scheme` is real here — Blitz hands Stylo
+//! winit's window theme — but nothing an app can call from inside a component
+//! moves it. The one lever, `View::set_theme_override`, belongs to the shell
+//! and is not reachable from a Dioxus component; and asking winit to change
+//! the window's own theme does not stand in for it, because macOS deliberately
+//! *suppresses* the `ThemeChanged` event when the appearance was set by the
+//! program rather than by the desktop. So [`Theme`] writes `theme-system`,
+//! `theme-light` or `theme-dark` onto the root element, `ui.css` hangs both
+//! palettes off that, and `prefers-color-scheme` is consulted only inside the
+//! `theme-system` branch — which is the one case where the desktop really is
+//! the authority and the event really does arrive.
+//!
+//! The window is still asked, mind: [`App`] calls `set_theme` on winit so the
+//! title bar matches the window under it. That is cosmetic and best-effort —
+//! a compositor may decline — and nothing in the interface depends on it.
+//!
+//! An icon is the one thing this cannot reach. Its ink is a presentation
+//! attribute on a document CSS cannot see inside, so [`glyph`] draws every
+//! icon twice, once in each palette's ink, and the stylesheet hides the one
+//! that does not apply. A node and a small usvg document per icon is what a
+//! runtime theme switch costs here, and it is why the choice is spent on the
+//! window rather than on anything smaller.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -60,6 +83,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use dioxus::prelude::*;
+use dioxus_native::winit::window::{Theme as WinitTheme, Window as WinitWindow};
 use qrnew_core::{ErrorCorrection, ImageFormat, Logo, Qr, QrStyle, ReadError, Rgb};
 
 use crate::fl;
@@ -279,6 +303,17 @@ impl Confirmation {
 #[derive(Clone)]
 pub struct Inlay(pub String);
 
+/// The theme to open in, provided as a root context by `main.rs`.
+///
+/// It exists for `--theme`, which exists because the choice is behind a button
+/// and a sheet: there is no way to photograph a dark window from the outside
+/// otherwise, and "here is what it looks like" is a question about this app
+/// that gets asked. Nothing provides it in a test, and an absent context is
+/// [`Theme::System`] — which is also what somebody who never opens the sheet
+/// gets.
+#[derive(Clone)]
+pub struct Tone(pub Theme);
+
 /// Which of the two colours the picker is pointed at.
 ///
 /// Not an `Option`: the picker is always on screen, and the wells choose what
@@ -288,6 +323,66 @@ pub struct Inlay(pub String);
 enum Well {
     Dark,
     Light,
+}
+
+/// Which palette the window is painted in, and who decides.
+///
+/// [`Theme::System`] is the default and the only one of the three that is an
+/// answer *about* the question rather than to it: it hands the decision back
+/// to the desktop and follows it live. The other two are somebody overruling
+/// that, which is a thing worth being able to do — a code is judged against
+/// the surface around it, and the surface that matters is usually the paper it
+/// is going to be printed on rather than whatever the desktop is set to after
+/// dark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Theme {
+    /// Whatever the desktop says, changing when the desktop changes.
+    System,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    /// The three, in the order the sheet offers them.
+    const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
+
+    /// The name this theme goes by in the markup.
+    ///
+    /// It is both half of the class on `.app` — `theme-{slug}`, which every
+    /// themed rule in `ui.css` hangs off — and the `data-theme` a test selects
+    /// its button by. One name for both, because a test that clicked on the
+    /// visible label would be a test that passed in English and nowhere else.
+    const fn slug(self) -> &'static str {
+        match self {
+            Theme::System => "system",
+            Theme::Light => "light",
+            Theme::Dark => "dark",
+        }
+    }
+
+    /// The theme `name` names, for `--theme` on the command line.
+    ///
+    /// The same three words the sheet's buttons carry as `data-theme`, since
+    /// there is no sense in the flag and the markup disagreeing about what a
+    /// theme is called.
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|theme| theme.slug() == name)
+    }
+
+    /// What winit is asked to make the title bar.
+    ///
+    /// `None` is not "no opinion" so much as "stop holding one": it clears any
+    /// appearance the app has set, which is what puts the window back under
+    /// the desktop's control — and, on macOS, what starts the `ThemeChanged`
+    /// events flowing again so that `prefers-color-scheme` is live for the
+    /// `theme-system` branch of the stylesheet.
+    const fn window(self) -> Option<WinitTheme> {
+        match self {
+            Theme::System => None,
+            Theme::Light => Some(WinitTheme::Light),
+            Theme::Dark => Some(WinitTheme::Dark),
+        }
+    }
 }
 
 #[component]
@@ -322,6 +417,26 @@ pub fn App() -> Element {
     let mut inset_error = use_signal(|| false);
     let mut editing = use_signal(|| Well::Dark);
     let mut about = use_signal(|| false);
+    let mut theme = use_signal(|| {
+        dioxus_core::try_consume_context::<Tone>().map_or(Theme::System, |Tone(seed)| seed)
+    });
+    let mut theme_sheet = use_signal(|| false);
+
+    // The title bar belongs to the platform, and the platform will not read a
+    // class off `.app` — so the one thing the stylesheet cannot reach is asked
+    // for here. It is cosmetic: a compositor that declines leaves a title bar
+    // that does not match, and the window under it is right either way.
+    //
+    // The window arrives as a context, and there is not one in a test: the
+    // harness builds the document with no window at all. `try_consume_context`
+    // is what lets the same component run in both, the way `Fill` and `Inlay`
+    // already do.
+    let window = use_hook(dioxus_core::try_consume_context::<Arc<dyn WinitWindow>>);
+    use_effect(move || {
+        if let Some(window) = &window {
+            window.set_theme(theme().window());
+        }
+    });
 
     // The one generated code, which everything downstream is a view of. A memo
     // rather than a signal written from four handlers: the inputs say what the
@@ -548,7 +663,11 @@ pub fn App() -> Element {
     rsx! {
         style { {include_str!("ui.css")} }
 
-        div { class: "app",
+        // The theme is a class here rather than a media query in `ui.css`,
+        // and both sheets are inside it rather than beside it: a custom
+        // property is inherited, so anything painted in the app's colours has
+        // to be a descendant of the element the palette is written on.
+        div { class: "app theme-{theme().slug()}",
 
             header { class: "topbar",
                 div { class: "brand",
@@ -557,7 +676,13 @@ pub fn App() -> Element {
                 }
                 div { class: "spacer" }
                 button {
-                    class: "about-open",
+                    class: "chrome-btn theme-open",
+                    onclick: move |_| theme_sheet.toggle(),
+                    {glyph(Glyph::Theme, Ink::Faint, "glyph")}
+                    span { {fl!("theme")} }
+                }
+                button {
+                    class: "chrome-btn about-open",
                     onclick: move |_| about.toggle(),
                     {glyph(Glyph::Info, Ink::Faint, "glyph")}
                     span { {fl!("about")} }
@@ -666,6 +791,22 @@ pub fn App() -> Element {
                             // label, because the label is a translation and a
                             // test that selected on it would pass in English
                             // and nowhere else.
+                            // **The label is in a `<span>`, and it has to
+                            // be.** Bare text inside a `<button>` keeps the
+                            // colour it was first painted in when the theme
+                            // changes under it: the surface repaints and the
+                            // word does not, which leaves dark text on a dark
+                            // chip until something else makes Blitz rebuild
+                            // that node — clicking it, in practice, so the row
+                            // corrects itself one segment at a time. Wrapping
+                            // the text is what makes it a node with a style of
+                            // its own. Every other button in this file happens
+                            // to be built this way already, for the icon; the
+                            // two segmented rows are the only ones that were
+                            // not, and they were the only ones that broke. The
+                            // headless harness resolves this correctly, so
+                            // there is no test that would catch it coming
+                            // back.
                             for (level , name , label) in [
                                 (ErrorCorrection::Low, "low", fl!("ec-low")),
                                 (ErrorCorrection::Medium, "medium", fl!("ec-medium")),
@@ -682,7 +823,7 @@ pub fn App() -> Element {
                                             ec.set(level);
                                         }
                                     },
-                                    {label.clone()}
+                                    span { {label.clone()} }
                                 }
                             }
                         }
@@ -896,7 +1037,9 @@ pub fn App() -> Element {
                         // The mat is painted in the code's own background
                         // colour, so the rounded corners belong to the mat and
                         // the image never has to be clipped to them.
-                        div { class: "preview", style: "background: {light().to_hex()}",
+                        div {
+                            class: "preview",
+                            style: "background: {light().to_hex()}; border-color: {mat_line(light())}",
                             img { src: "{src}", alt: fl!("app-title") }
                         }
                     } else {
@@ -938,34 +1081,80 @@ pub fn App() -> Element {
                     }
                 }
             }
-        }
 
-        if about() {
-            div { class: "scrim", onclick: move |_| about.set(false),
-                div {
-                    class: "about",
-                    // The scrim closes on a click; the panel is not the scrim.
-                    onclick: move |event| event.stop_propagation(),
-                    h2 {
-                        {glyph(Glyph::Code, Ink::Accent, "glyph-brand")}
-                        span { {fl!("app-title")} }
-                    }
-                    p { {fl!("app-description")} }
-                    p { class: "version", {format!("Version {}", env!("CARGO_PKG_VERSION"))} }
-                    div { class: "about-actions",
-                        button {
-                            class: "btn",
-                            onclick: move |_| {
-                                let _ = open::that(env!("CARGO_PKG_REPOSITORY"));
-                            },
-                            {glyph(Glyph::External, Ink::Plain, "glyph")}
-                            span { {fl!("repository")} }
+            if theme_sheet() {
+                div { class: "scrim", onclick: move |_| theme_sheet.set(false),
+                    div {
+                        class: "sheet theme-sheet",
+                        // The scrim closes on a click; the panel is not the
+                        // scrim.
+                        onclick: move |event| event.stop_propagation(),
+                        h2 {
+                            {glyph(Glyph::Theme, Ink::Accent, "glyph-brand")}
+                            span { {fl!("theme")} }
                         }
-                        button {
-                            class: "btn about-close",
-                            onclick: move |_| about.set(false),
-                            {glyph(Glyph::Close, Ink::Plain, "glyph")}
-                            span { {fl!("close")} }
+                        // The same segmented row the error-correction levels
+                        // use, because it is the same shape of question: a
+                        // short closed list where the answer in force is worth
+                        // seeing without opening anything.
+                        div { class: "segments segments-3",
+                            for choice in Theme::ALL {
+                                button {
+                                    key: "{choice.slug()}",
+                                    class: chip_class(theme() == choice, false),
+                                    "data-theme": "{choice.slug()}",
+                                    aria_pressed: if theme() == choice { "true" } else { "false" },
+                                    onclick: move |_| theme.set(choice),
+                                    span {
+                                        match choice {
+                                            Theme::System => fl!("theme-system"),
+                                            Theme::Light => fl!("theme-light"),
+                                            Theme::Dark => fl!("theme-dark"),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        div { class: "sheet-actions",
+                            button {
+                                class: "btn theme-close",
+                                onclick: move |_| theme_sheet.set(false),
+                                {glyph(Glyph::Close, Ink::Plain, "glyph")}
+                                span { {fl!("close")} }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if about() {
+                div { class: "scrim", onclick: move |_| about.set(false),
+                    div {
+                        class: "sheet about",
+                        // The scrim closes on a click; the panel is not the
+                        // scrim.
+                        onclick: move |event| event.stop_propagation(),
+                        h2 {
+                            {glyph(Glyph::Code, Ink::Accent, "glyph-brand")}
+                            span { {fl!("app-title")} }
+                        }
+                        p { {fl!("app-description")} }
+                        p { class: "version", {format!("Version {}", env!("CARGO_PKG_VERSION"))} }
+                        div { class: "sheet-actions",
+                            button {
+                                class: "btn",
+                                onclick: move |_| {
+                                    let _ = open::that(env!("CARGO_PKG_REPOSITORY"));
+                                },
+                                {glyph(Glyph::External, Ink::Plain, "glyph")}
+                                span { {fl!("repository")} }
+                            }
+                            button {
+                                class: "btn about-close",
+                                onclick: move |_| about.set(false),
+                                {glyph(Glyph::Close, Ink::Plain, "glyph")}
+                                span { {fl!("close")} }
+                            }
                         }
                     }
                 }
@@ -1307,6 +1496,8 @@ enum Glyph {
     Check,
     /// A border around a smaller square: the margin, drawn as what it is.
     Frame,
+    /// A circle half hatched: the theme, and the sheet that chooses it.
+    Theme,
     /// A square with something round in the middle of it: the inset, drawn as
     /// what it is, and deliberately not [`Frame`](Glyph::Frame) with the inner
     /// shape filled — the two sit in the same column and have to be told apart
@@ -1369,6 +1560,18 @@ impl Glyph {
             Glyph::Minus => &["M6.2 12 H17.8"],
             Glyph::Plus => &["M6.2 12 H17.8", "M12 6.2 V17.8"],
             Glyph::Close => &["M6.4 6.4 L17.6 17.6", "M17.6 6.4 L6.4 17.6"],
+            // Contrast: a circle split down the middle, one half hatched. Not
+            // a sun and not a moon, because those two are the *answers* and
+            // this is the button that asks the question.
+            Glyph::Theme => &[
+                "M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12",
+                "M12 3 V21",
+                "M12 6.2 h3.1",
+                "M12 9.1 h5.2",
+                "M12 12 h6",
+                "M12 14.9 h5.2",
+                "M12 17.8 h3.1",
+            ],
             Glyph::External => &[
                 "M14.2 4.6 H19.4 V9.8",
                 "M19.4 4.6 L11.2 12.8",
@@ -1399,9 +1602,13 @@ const fn chip_class(selected: bool, locked: bool) -> &'static str {
 /// same route the preview takes — so an icon here is a real document, not a
 /// glyph in a font and not a rasterized image. That is also what makes it a
 /// pair: a document of its own is a document CSS cannot reach into, so the ink
-/// cannot follow the theme and the icon has to. One is drawn in each theme's
-/// ink and `ui.css` hides the wrong one, which is a node and a small document
-/// spent to keep the desktop's own light and dark setting working.
+/// cannot follow the theme and the icon has to. One is drawn in each palette's
+/// ink and `ui.css` hides the wrong one.
+///
+/// It is the price of letting somebody change the theme while the window is
+/// open, and it is paid on every icon whether they ever do or not: a node and
+/// a small usvg document that is laid out nowhere and painted never. Worth
+/// knowing before spending the same trick on anything that appears in a list.
 fn glyph(kind: Glyph, ink: Ink, class: &'static str) -> Element {
     rsx! {
         {drawn(kind, ink.light(), format!("{class} lit"))}
@@ -1425,6 +1632,50 @@ fn drawn(kind: Glyph, stroke: &'static str, class: String) -> Element {
             }
         }
     }
+}
+
+/// The dashed outline's colour on a mat painted `mat`.
+///
+/// The outline is what tells the code's own background apart from the window
+/// behind it, and `ui.css` can only guess at one of those two: the mat is
+/// whatever colour somebody picked. A fixed grey answers the case the app
+/// opens in — white on near-white — and disappears the moment anybody clicks
+/// the middle of the greyscale row, which is four pixels from where the colour
+/// is chosen. So the line is derived from the mat instead.
+///
+/// It is the mat pushed away from itself: towards black if the mat is light,
+/// towards white if it is dark. That keeps a line on the mat's own hue rather
+/// than a grey laid over it, and it is also what makes the line independent of
+/// the theme: a line half a palette away from the mat clears the page on
+/// either side of it, because a mat light enough to need a dark line is
+/// already lighter than a dark window, and one dark enough to need a light
+/// line is already darker than a light one.
+///
+/// The two fractions differ because the eye does. A third of the way to black
+/// off white is a line you read without looking at it; the same third of the
+/// way to white off black is barely there, so the dark side gets more.
+fn mat_line(mat: Rgb) -> String {
+    /// Luminance above which a mat counts as light, on 0…1.
+    const LIGHT_ABOVE: f32 = 0.5;
+    /// How far a light mat's line is pushed towards black.
+    const TOWARDS_BLACK: f32 = 0.32;
+    /// And a dark one's towards white.
+    const TOWARDS_WHITE: f32 = 0.44;
+
+    // The 299/587/114 weighting, which is what `read` in `qrnew-core` flattens
+    // a photograph to before handing it to `rqrr`. Deliberately the same one:
+    // if the app is going to call a colour light or dark, it should call it
+    // what its own reader would.
+    let luminance = (299.0 * f32::from(mat.r) + 587.0 * f32::from(mat.g) + 114.0 * f32::from(mat.b))
+        / 255_000.0;
+    let (target, amount) = if luminance > LIGHT_ABOVE {
+        (0.0, TOWARDS_BLACK)
+    } else {
+        (255.0, TOWARDS_WHITE)
+    };
+    let mix = |channel: u8| (f32::from(channel) + (target - f32::from(channel)) * amount) as u8;
+
+    Rgb::new(mix(mat.r), mix(mat.g), mix(mat.b)).to_hex()
 }
 
 /// The three `background` lists that draw one position marker.
@@ -1657,20 +1908,34 @@ mod tests {
     /// answers in.
     #[test]
     fn an_icon_is_inked_the_colour_the_stylesheet_says() {
-        fn palettes(token: &str) -> Vec<String> {
+        /// Every value `token` is given in `ui.css`, in order and without
+        /// repeats.
+        ///
+        /// The repeats are the dark palette's, which is written twice — once
+        /// for the class and once for the media query. Two colours are what
+        /// this test is about; three would only be saying that
+        /// `the_dark_palette_says_the_same_thing_twice` is passing, which is
+        /// that test's job.
+        fn palette(token: &str) -> Vec<String> {
             let name = format!("{token}:");
-            include_str!("ui.css")
+            let mut seen: Vec<String> = Vec::new();
+            for value in include_str!("ui.css")
                 .lines()
                 .filter_map(|line| line.trim().strip_prefix(&name))
                 .map(|value| value.trim().trim_end_matches(';').to_ascii_lowercase())
-                .collect()
+            {
+                if !seen.contains(&value) {
+                    seen.push(value);
+                }
+            }
+            seen
         }
 
         // The two greys are left out on purpose: they are not tokens, and
         // why they are not is on the type.
         for (ink, token) in [(Ink::Accent, "--accent"), (Ink::Warn, "--warn")] {
             assert_eq!(
-                palettes(token),
+                palette(token),
                 vec![
                     ink.light().to_ascii_lowercase(),
                     ink.dark().to_ascii_lowercase(),
@@ -1678,6 +1943,43 @@ mod tests {
                 "{token} in ui.css against Ink::{ink:?}",
             );
         }
+    }
+
+    /// **The dark palette is written twice, so the two have to agree.**
+    ///
+    /// It applies when somebody picked dark and when somebody left the choice
+    /// to a dark desktop, and those are a selector and a media query — CSS
+    /// gives no way to share one block between them, so `ui.css` repeats it.
+    /// A colour edited in one copy and not the other would be a theme that
+    /// looked subtly different depending on how it was arrived at, and nothing
+    /// on screen would say which copy was in force.
+    #[test]
+    fn the_dark_palette_says_the_same_thing_twice() {
+        /// Every `--token: value` between `selector` and the `}` that ends it.
+        fn block(selector: &str) -> Vec<(String, String)> {
+            let after = include_str!("ui.css")
+                .split_once(selector)
+                .unwrap_or_else(|| panic!("no {selector} in ui.css"))
+                .1;
+            after
+                .split_once('}')
+                .expect("the block is closed")
+                .0
+                .lines()
+                .filter_map(|line| line.trim().strip_prefix("--"))
+                .filter_map(|declaration| declaration.split_once(':'))
+                .map(|(name, value)| {
+                    (
+                        name.trim().to_string(),
+                        value.trim().trim_end_matches(';').to_string(),
+                    )
+                })
+                .collect()
+        }
+
+        let chosen = block(".theme-dark {");
+        assert!(chosen.len() > 20, "the palette is most of the window");
+        assert_eq!(chosen, block(".theme-system {"), "the two copies have drifted");
     }
 
     #[test]
