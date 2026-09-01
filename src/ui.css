@@ -292,6 +292,19 @@ body {
 
 /* ------------------------------------------------------------------ body */
 
+/* **The bottom padding is 18 and the sides are 30, and the difference is a
+ * budget rather than an oversight.** At 820 points of window — the number
+ * `no_control_is_below_the_fold` holds the app to — the colours rail runs 707
+ * points of content in a 724-point box, so the whole margin for error in this
+ * window is the dozen points under the cards.
+ *
+ * That was not enough. Every box in the rail is sized by an explicit
+ * `line-height`, so none of them moves when the font does; the one thing that
+ * still does is where a sentence wraps, and the hint at the bottom of the
+ * Inset card wraps to two lines in San Francisco and to three in the wider
+ * face a Linux machine picks for `system-ui` — twenty-two points the rail did
+ * not have, which is how CI found this and a laptop never would. Twelve points
+ * came off this margin so that line has somewhere to go. */
 .body {
   display: flex;
   flex-direction: row;
@@ -301,7 +314,7 @@ body {
   width: 100%;
   max-width: 1500px;
   margin: 0 auto;
-  padding: 4px 30px 30px;
+  padding: 4px 30px 18px;
   min-height: 0;
 }
 
