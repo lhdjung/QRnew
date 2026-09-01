@@ -15,6 +15,24 @@
 //! inside an SVG never applies: `draw.rs` writes every colour as a
 //! presentation attribute so that an exported file stands on its own.
 //!
+//! **With one seam in it, and it is the renderer's fault rather than the
+//! design's.** A code with an inset reaches the screen as two layers: the
+//! document without the picture, and the picture laid into the hole the
+//! document left for it. `anyrender_vello_hybrid` keeps every image it has
+//! ever drawn in a GPU atlas, keyed by an identity counter rather than by
+//! content and freed never, so a picture arriving inside a *new* document on
+//! every keystroke is a new picture every time — 392 of them at the 512-pixel
+//! cap `shrink_logo` imposes, and then `AtlasLimitReached` unwrapped two
+//! crates down and the window is gone. Out here the picture is one `<img>`
+//! whose `src` does not change while the picture does not.
+//!
+//! The seam is held shut by `Qr::inset_box`, which is the same code that drew
+//! the hole saying where it is, and by
+//! `the_picture_on_the_stage_is_where_the_document_puts_it`, which measures
+//! the result on screen — including, by hit test, that the picture is painted
+//! over the code rather than under it. What is saved and copied never went
+//! through any of this: it is `Qr::svg`, one document with everything in it.
+//!
 //! # The shape of the window
 //!
 //! **Three columns, and that is the whole layout argument.** Two fixed-width
@@ -507,7 +525,7 @@ impl InsetSize {
 /// the picture — and this app is the caller, and it gives up the size. Drawing
 /// nothing would be the one answer that is certainly wrong: the text is fine,
 /// the picture is fine, and the placeholder would say neither.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct Drawn {
     qr: Qr,
     /// Whether the picture had to be drawn at [`InsetSize::Medium`] because
@@ -729,10 +747,29 @@ pub fn App() -> Element {
 
     // Kept apart from `code` so that a re-render that changes neither the text
     // nor the colours does not re-encode the SVG into base64.
+    //
+    // **Without the picture in it**, which is not a smaller preview but a
+    // different arrangement of the same one: the code's document already
+    // leaves a hole where the inset goes, and the picture is laid into that
+    // hole as an `<img>` of its own on the stage. What is saved and copied is
+    // still `Qr::svg`, one document with everything in it.
+    //
+    // The reason is the renderer underneath. `anyrender_vello_hybrid` keeps
+    // every image it has ever drawn in a GPU atlas, keyed by an identity
+    // counter rather than by content, and frees none of them — so a picture
+    // that arrives inside a *new* document on every keystroke is a new picture
+    // every time, and the eight atlases fill. At the 512-pixel cap
+    // `shrink_logo` imposes that is 392 redraws, which is a minute of moving
+    // the colour picker, and the end of it is `AtlasLimitReached` unwrapped
+    // two crates down. Out here the picture is one `<img>` whose `src` does
+    // not change while the picture does not, so it is uploaded once.
+    //
+    // It is also simply less work: the inset used to be base64'd into the
+    // document and then base64'd again with it, twice per keystroke.
     let preview = use_memo(move || {
         code()
             .as_ref()
-            .map(|drawn| data_url("image/svg+xml", drawn.qr.svg().as_bytes()))
+            .map(|drawn| data_url("image/svg+xml", drawn.qr.svg_without_inset().as_bytes()))
     });
 
     // The chosen picture, as something an `<img>` can point at. A memo for the
@@ -911,6 +948,21 @@ pub fn App() -> Element {
     let held = move |choice: InsetSize| {
         room.is_some_and(|room| choice.fraction() > room) || (capped && inset_size() == choice)
     };
+
+    // Where the picture goes on the stage, written as the style the layer over
+    // the code wears. The code that says where is the code that drew the hole,
+    // so the two cannot disagree about it — see the `preview` memo for why the
+    // picture is a layer at all. The numbers are fractions of the whole
+    // document, quiet zone included, and the box the layer sits in is the
+    // document, so a percentage is the whole conversion.
+    let spot = code
+        .read()
+        .as_ref()
+        .and_then(|drawn| drawn.qr.inset_box())
+        .map(|inset| {
+            let (edge, side) = (100.0 * inset.offset, 100.0 * inset.side);
+            format!("left: {edge}%; top: {edge}%; width: {side}%; height: {side}%")
+        });
 
     // The line under the field. The prompt while the field is empty, nothing
     // at all while a code is being drawn, and — the one failure the app could
@@ -1465,7 +1517,26 @@ pub fn App() -> Element {
                         div {
                             class: "preview",
                             style: "background: {light().to_hex()}; border-color: {mat_line(light())}",
-                            img { src: "{src}", alt: fl!("app-title") }
+                            // Two layers, one picture. The document is square
+                            // and so is this box, so the code fills it exactly
+                            // and a percentage inside it is a fraction of the
+                            // document — which is the unit `inset_box` speaks.
+                            div { class: "code",
+                                img { "data-preview": "true", src: "{src}", alt: fl!("app-title") }
+                                if let (Some(spot), Some(picture)) = (spot.as_ref(), thumbnail()) {
+                                    // No `alt`: the code above already names
+                                    // the whole thing, and a screen reader
+                                    // meeting this twice would be told about a
+                                    // picture it cannot describe anyway.
+                                    img {
+                                        class: "inset",
+                                        "data-preview-inset": "true",
+                                        src: "{picture}",
+                                        alt: "",
+                                        style: "{spot}",
+                                    }
+                                }
+                            }
                         }
                     } else {
                         div { class: "placeholder",

@@ -48,7 +48,13 @@ const MODULE_RADIUS: f32 = 0.5;
 const FINDER_RADIUS: f32 = 0.75;
 
 /// Writes the matrix as an SVG document.
-pub fn draw(colors: &[Color], modules: u32, size: u32, style: &QrStyle) -> String {
+///
+/// The second half of the return is where the logo's `<image>` begins, when
+/// there is one and it could be drawn. It is the last element in the document,
+/// so that offset is also the length of the same document without it — which
+/// is what [`Qr::svg_without_inset`](crate::Qr::svg_without_inset) hands to a
+/// caller drawing the picture as a layer of its own.
+pub fn draw(colors: &[Color], modules: u32, size: u32, style: &QrStyle) -> (String, Option<usize>) {
     let grid = Grid {
         colors,
         modules,
@@ -63,12 +69,21 @@ pub fn draw(colors: &[Color], modules: u32, size: u32, style: &QrStyle) -> Strin
     open_document(&mut svg, size, style);
     modules_path(&mut svg, &grid, quiet, style);
     finder_paths(&mut svg, modules, quiet, style);
-    if let Some(logo) = &style.logo {
-        logo_image(&mut svg, logo, &grid, quiet);
-    }
+    // Measured rather than assumed: `logo_image` writes nothing for a style
+    // whose logo has no placement or no readable format, and an offset naming
+    // an element that is not there would truncate the document at `</svg>`
+    // and call the result "without the inset".
+    let logo_at = match &style.logo {
+        Some(logo) => {
+            let at = svg.len();
+            logo_image(&mut svg, logo, &grid, quiet);
+            (svg.len() > at).then_some(at)
+        }
+        None => None,
+    };
     svg.push_str("</svg>");
 
-    svg
+    (svg, logo_at)
 }
 
 /// The module matrix, with the parts that are drawn some other way — or not at

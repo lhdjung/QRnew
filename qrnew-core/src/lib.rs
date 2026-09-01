@@ -160,12 +160,28 @@ impl From<LogoError> for QrError {
     }
 }
 
+/// Where the inset's picture sits in a document, as fractions of its side.
+///
+/// The box is square and centred, so one offset describes both edges. Both
+/// numbers are fractions of the whole document — quiet zone included — because
+/// the document is what a caller has on screen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InsetBox {
+    /// Distance from the document's edge to the picture's, left and top alike.
+    pub offset: f32,
+    /// The picture's side.
+    pub side: f32,
+}
+
 /// A generated QR code, held as the SVG that every output format derives from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Qr {
     svg: String,
     size: u32,
     ec: ErrorCorrection,
+    /// Where the inset's `<image>` begins in `svg`, and where the picture it
+    /// draws sits in the document. `None` when this code has no picture in it.
+    inset: Option<(usize, InsetBox)>,
 }
 
 impl Qr {
@@ -199,16 +215,55 @@ impl Qr {
             check_logo(logo, modules)?;
         }
 
+        let (svg, logo_at) = draw::draw(&code.into_colors(), modules, size, style);
+        let inset = logo_at.zip(style.logo.as_ref()).map(|(at, logo)| {
+            let (x, _, side) = Placement::new(logo, modules).image_box();
+            let document = size as f32;
+            (
+                at,
+                InsetBox {
+                    offset: (x + style.quiet_zone as f32) / document,
+                    side: side / document,
+                },
+            )
+        });
+
         Ok(Self {
-            svg: draw::draw(&code.into_colors(), modules, size, style),
+            svg,
             size,
             ec,
+            inset,
         })
     }
 
     /// The code as an SVG document.
     pub fn svg(&self) -> &str {
         &self.svg
+    }
+
+    /// The same document with the inset's picture left out, for a caller that
+    /// is going to draw the picture itself.
+    ///
+    /// **The code underneath is not a different code.** The modules the
+    /// picture covers are already left out when the code is drawn, so this is
+    /// the same document with a hole in it, and putting the picture back at
+    /// [`Qr::inset_box`] reproduces [`Qr::svg`] exactly.
+    ///
+    /// This exists for a live preview, where the alternative is re-encoding
+    /// the picture into a fresh document on every keystroke — which costs the
+    /// base64 of it twice over each time, and hands the renderer a picture it
+    /// has no way to recognize as one it already has. A file should use
+    /// [`Qr::svg`], which is one self-contained document.
+    pub fn svg_without_inset(&self) -> String {
+        match self.inset {
+            Some((at, _)) => format!("{}</svg>", &self.svg[..at]),
+            None => self.svg.clone(),
+        }
+    }
+
+    /// Where [`Qr::svg`] draws the inset's picture, or `None` if it draws none.
+    pub fn inset_box(&self) -> Option<InsetBox> {
+        self.inset.map(|(_, box_)| box_)
     }
 
     /// Consumes the code, returning its SVG document.
@@ -908,6 +963,50 @@ mod tests {
         // Without one, the level asked for is the level used.
         let plain = Qr::new(LONG, ErrorCorrection::Low, &QrStyle::default()).unwrap();
         assert_eq!(plain.error_correction(), ErrorCorrection::Low);
+    }
+
+    /// The two-layer document is the one-layer document with a hole in it.
+    ///
+    /// A live preview draws the code and the picture separately, so that the
+    /// picture is one image the renderer can recognize as the same one rather
+    /// than a fresh one per keystroke. That is only safe while the two halves
+    /// add back up to the file that gets saved, which is what this measures:
+    /// the shortened document is a prefix of the full one, and the box the
+    /// caller is handed is the box the full one draws the picture in.
+    #[test]
+    fn the_document_without_the_picture_is_the_document_with_it_taken_out() {
+        let style = with_logo(Logo::new(logo_image(GREEN)));
+        let qr = Qr::new(LONG, ErrorCorrection::Low, &style).unwrap();
+        let without = qr.svg_without_inset();
+
+        assert!(!without.contains("<image"), "{without}");
+        assert!(
+            qr.svg().starts_with(without.strip_suffix("</svg>").unwrap()),
+            "everything before the picture is untouched"
+        );
+        assert!(without.ends_with("</svg>"), "and the document is still closed");
+
+        // The box, against the numbers the full document writes into the
+        // `<image>` itself. Both are in the document's own units, so the one
+        // the caller gets is the other divided by the document's side.
+        let inset = qr.inset_box().expect("a code with a picture has a box");
+        let side = qr.size_in_modules() as f32;
+        let attr = |name: &str| -> f32 {
+            let after = qr.svg().split_once("<image ").unwrap().1;
+            let value = after.split_once(&format!("{name}=\"")).unwrap().1;
+            value.split_once('"').unwrap().0.parse().unwrap()
+        };
+        assert!((inset.offset * side - attr("x")).abs() < 0.001, "{inset:?}");
+        assert!((inset.offset * side - attr("y")).abs() < 0.001, "{inset:?}");
+        assert!((inset.side * side - attr("width")).abs() < 0.001, "{inset:?}");
+    }
+
+    #[test]
+    fn a_code_with_no_picture_has_nothing_to_take_out() {
+        let qr = Qr::new(LONG, ErrorCorrection::Low, &QrStyle::default()).unwrap();
+
+        assert_eq!(qr.inset_box(), None);
+        assert_eq!(qr.svg_without_inset(), qr.svg());
     }
 
     #[test]

@@ -32,8 +32,8 @@ use qrnew::ui::{App, Fill, Remember, Theme, Tone};
 ///
 /// `None` when there is no code on screen, which is the placeholder state.
 fn preview(harness: &Harness<dioxus_native::DioxusDocument>) -> Option<String> {
-    harness.query(".preview img")?;
-    let src = harness.attr(".preview img", "src")?;
+    harness.query("[data-preview]")?;
+    let src = harness.attr("[data-preview]", "src")?;
     let payload = src.strip_prefix("data:image/svg+xml;base64,")?;
     Some(String::from_utf8(decode_base64(payload)).expect("the preview is a UTF-8 document"))
 }
@@ -75,27 +75,15 @@ fn outlines(svg: &str) -> Vec<&str> {
 ///
 /// `draw.rs` writes every curve in this document as an arc command and uses no
 /// other curve command, so one letter answers it.
-/// The width of the picture in the middle of the code, in module units.
+/// How wide the picture in the middle of the code is drawn, in points.
 ///
-/// `draw.rs` writes the logo as an `<image>` whose box is in the same
-/// coordinates as the modules, so this number is comparable across codes only
-/// when they are the same size — every test below either holds the code still
-/// or compares against itself.
-fn image_width(svg: &str) -> f32 {
-    let attrs = svg
-        .split_once("<image ")
-        .expect("the code carries a picture")
-        .1;
-    let width = attrs
-        .split_once("width=\"")
-        .expect("the picture has a width")
-        .1;
-    width
-        .split_once('"')
-        .unwrap()
-        .0
-        .parse()
-        .expect("the width is a number")
+/// Measured on the screen rather than read out of a string, because the stage
+/// draws the code and the picture as two layers — see the `preview` memo in
+/// `ui.rs` — and the point of the arrangement is that they land as one. The
+/// preview box is a fixed size whatever the code inside it is, so unlike the
+/// module units this replaces, these numbers compare across codes.
+fn inset_width(harness: &Harness<dioxus_native::DioxusDocument>) -> f32 {
+    harness.layout_rect("[data-preview-inset]").width
 }
 
 fn curved(path: &str) -> bool {
@@ -234,15 +222,6 @@ fn png_size(png: &[u8]) -> (u32, u32) {
     let number = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
     assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "not a PNG");
     (number(16), number(20))
-}
-
-/// The picture the code is carrying, decoded back out of the document.
-fn inset_of(svg: &str) -> Vec<u8> {
-    let payload = svg
-        .split_once("href=\"data:image/png;base64,")
-        .expect("the code carries a PNG")
-        .1;
-    decode_base64(payload.split_once('"').unwrap().0)
 }
 
 #[test]
@@ -1072,10 +1051,9 @@ fn the_two_cautions_are_the_same_banner() {
 /// **The inset's size is a control now, and it reaches the drawn code.**
 ///
 /// `qrnew-core` has carried `Logo::size` since before the rewrite and the
-/// window had no way to ask for anything but the default. The picture's own
-/// box in the SVG is what says it arrived — `draw.rs` writes it as an
-/// `<image>` whose `width` is in module units, so the three sizes are three
-/// different numbers and the order they come in is the order the row offers.
+/// window had no way to ask for anything but the default. The picture's box on
+/// the stage is what says it arrived: three sizes are three different widths,
+/// and the order they come in is the order the row offers.
 #[test]
 fn the_inset_row_draws_the_picture_at_the_size_it_asks_for() {
     let mut harness = app_with_inset("https://example.org/a-long-enough-address", "fold");
@@ -1091,8 +1069,8 @@ fn the_inset_row_draws_the_picture_at_the_size_it_asks_for() {
             Some("true"),
             "the row says which size the picture is drawn at"
         );
-        let svg = preview(&harness).expect("a code survives resizing its picture");
-        widths.push((size, image_width(&svg)));
+        preview(&harness).expect("a code survives resizing its picture");
+        widths.push((size, inset_width(&harness)));
     }
 
     assert!(
@@ -1156,7 +1134,8 @@ fn a_shrinking_code_keeps_its_picture_and_says_the_size_is_held() {
     let mut harness = app_with_inset("https://example.org", "fold");
     harness.click("[data-inset-size=\"large\"]");
     harness.pump();
-    let asked = image_width(&preview(&harness).expect("a code with a large picture"));
+    preview(&harness).expect("a code with a large picture");
+    let asked = inset_width(&harness);
 
     // Cleared from the front with Home and Delete rather than with Backspace,
     // for the reason `the_hex_field_recolors_the_code` sets out: Backspace
@@ -1172,7 +1151,7 @@ fn a_shrinking_code_keeps_its_picture_and_says_the_size_is_held() {
     let svg = preview(&harness).expect("the code is still drawn, at a size that fits");
     assert_eq!(modules_across(&svg), 21 + 2 * 2, "down to the smallest code");
     assert!(
-        image_width(&svg) < asked,
+        inset_width(&harness) < asked,
         "the picture was drawn smaller rather than not at all"
     );
     let large = harness.attr("[data-inset-size=\"large\"]", "class").unwrap();
@@ -1739,18 +1718,27 @@ fn the_margin_warning_is_a_banner_under_the_control() {
 /// **A picture reaches the middle of the code.**
 ///
 /// The whole path, end to end: the bytes are read off disk, the format is
-/// worked out from the bytes rather than the name, and they come out again
-/// inside the document the preview and both exports are made of. The card
-/// shows what was chosen, so that a picture that has landed somewhere
-/// unexpected in the code can be told from one that was never read.
+/// worked out from the bytes rather than from the file's name, and they come
+/// out again on the stage, in the hole the code left for them. The card shows
+/// what was chosen, so that a picture that has landed somewhere unexpected can
+/// be told from one that was never read.
+///
+/// It is the layer that is checked rather than the document, because the
+/// document on screen does not carry the picture any more — see
+/// `the_picture_on_the_stage_is_where_the_document_puts_it` for why. What gets
+/// saved is still one document with everything in it, which is `qrnew-core`'s
+/// to prove and does.
 #[test]
 fn an_inset_reaches_the_code_and_the_card() {
     let harness = app_with_inset("https://example.org", "reaches");
 
-    let svg = preview(&harness).expect("a code is drawn with the picture in it");
+    preview(&harness).expect("a code is drawn to put the picture in");
+    let drawn = harness
+        .attr("[data-preview-inset]", "src")
+        .expect("the picture is on the stage");
     assert!(
-        svg.contains("<image") && svg.contains("data:image/svg+xml;base64,"),
-        "the picture is embedded in the document, declared as what it is"
+        drawn.starts_with("data:image/svg+xml;base64,"),
+        "declared as what the bytes are rather than as what the name claimed"
     );
 
     assert!(
@@ -1885,9 +1873,16 @@ fn a_copied_button_goes_back_to_its_own_name() {
 /// and unwraps the refusal. Any photograph off a phone is over that line, and
 /// choosing one took the window with it.
 ///
-/// Checked on the document rather than on `shrink_logo`, which `qrnew-core`
-/// tests on its own: what is worth proving here is that a picture reaching the
-/// app through the one door there is comes out the other side already small.
+/// Checked on what reaches the screen rather than on `shrink_logo`, which
+/// `qrnew-core` tests on its own: what is worth proving here is that a picture
+/// coming through the one door there is comes out the other side already
+/// small.
+///
+/// The picture is drawn as its own layer over the code now, so the `<img>` on
+/// the stage is where it is read from — and the same bytes are what the code
+/// is built with, so measuring one measures both. That layer is also the
+/// second half of the answer to this crash: it is a size the atlas can take,
+/// *and* it is uploaded once instead of once per keystroke.
 #[test]
 fn a_picture_too_large_to_carry_is_scaled_down_as_it_is_taken_in() {
     let path = a_large_image("large");
@@ -1898,7 +1893,12 @@ fn a_picture_too_large_to_carry_is_scaled_down_as_it_is_taken_in() {
     );
 
     let harness = app_with_picture("https://example.org", &path);
-    let carried = png_size(&inset_of(&preview(&harness).unwrap()));
+    let drawn = harness.attr("[data-preview-inset]", "src").unwrap();
+    let carried = png_size(&decode_base64(
+        drawn
+            .strip_prefix("data:image/png;base64,")
+            .expect("the picture on the stage is the PNG the app made"),
+    ));
 
     assert_eq!(
         carried,
@@ -1907,9 +1907,72 @@ fn a_picture_too_large_to_carry_is_scaled_down_as_it_is_taken_in() {
 
     // And the thumbnail is the same picture, not the file that was picked.
     let thumbnail = harness.attr("[data-inset-thumb]", "src").unwrap();
+    assert_eq!(thumbnail, drawn, "one picture, drawn in two places");
+}
+
+/// **The picture on the stage is where the saved document puts it.**
+///
+/// The preview is two layers: the code with a hole where the inset goes, and
+/// the picture laid into the hole. That is not a nicety — handing the renderer
+/// the picture inside a *new* document on every keystroke fills
+/// `vello_hybrid`'s image atlas, which keys what it has already uploaded by an
+/// identity counter and frees nothing, and the end of that is
+/// `AtlasLimitReached` unwrapped two crates down. At the 512-pixel cap
+/// `shrink_logo` imposes, eight atlases of 4096 square hold 392 of them.
+///
+/// Two layers are only worth having if they land as one, and `qrnew-core`'s
+/// own tests only go as far as the numbers it hands over. This is the other
+/// half: that the window puts the picture where it was told to, in points on
+/// the screen.
+#[test]
+fn the_picture_on_the_stage_is_where_the_document_puts_it() {
+    let harness = app_with_inset("https://example.org", "spot");
+
+    let svg = preview(&harness).expect("a code with a picture in it");
     assert!(
-        thumbnail.starts_with("data:image/png;base64,"),
-        "{thumbnail}"
+        !svg.contains("<image"),
+        "the document on screen carries no picture, which is the whole point"
+    );
+
+    let code = harness.layout_rect("[data-preview]");
+    let inset = harness.layout_rect("[data-preview-inset]");
+
+    // **Over the code, not under it**, which layout alone cannot say and a
+    // headless harness cannot paint. Hit testing is the way to ask: it walks
+    // `paint_children` in reverse, so the node it returns for a point is the
+    // one drawn last there. A picture in exactly the right place and behind
+    // the code it belongs in front of would pass every other line here.
+    let (x, y) = harness.center_of("[data-preview-inset]");
+    assert_eq!(
+        harness.hit_node(x, y),
+        harness.node("[data-preview-inset]"),
+        "the picture is painted over the code"
+    );
+
+    // Centred on both axes, to within the rounding a percentage of a box that
+    // is not a whole number of points can produce.
+    let left = inset.x - code.x;
+    let right = (code.x + code.width) - (inset.x + inset.width);
+    let top = inset.y - code.y;
+    assert!(
+        (left - right).abs() < 1.0,
+        "centred across the code: {left} against {right}"
+    );
+    assert!(
+        (left - top).abs() < 1.0,
+        "and the same distance down: {left} against {top}"
+    );
+
+    // And as wide as the document says. The core's default share is a share of
+    // the *code*, which the quiet zone does not widen, so the fraction of the
+    // box on screen is smaller than the fraction of the code by that much.
+    let document = modules_across(&svg) as f32;
+    let modules = document - 2.0 * qrnew::ui::DEFAULT_MARGIN as f32;
+    let expected = code.width * qrnew_core::Logo::DEFAULT_SIZE * modules / document;
+    assert!(
+        (inset.width - expected).abs() < 1.0,
+        "the picture is {} points across where the document asks for {expected}",
+        inset.width
     );
 }
 

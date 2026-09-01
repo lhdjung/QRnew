@@ -764,6 +764,38 @@ black under both themes.
   the scrollbar. **Worth noting for the next control that wants this rail:
   there is no third round of this. The padding and the gaps have been shaved
   twice and the saturation square twice, and what is left to give is a card.**
+- **The window had a fuse in it, 392 redraws long.** Reported from use rather
+  than from a test: shape and inset changes with a picture loaded ended in
+  `AtlasLimitReached`, unwrapped inside `vello_hybrid`, and the app was gone.
+
+  The chain is short and every link is upstream. The preview is a new `data:`
+  URL on every change; Blitz re-parses it into a new `usvg::Tree`, which
+  decodes the embedded picture into a new `peniko::Blob`; `Blob::id()` is a
+  global counter rather than a hash, so `anyrender_vello_hybrid`'s image cache
+  — keyed by that id — misses; and that crate frees nothing, ever. Eight
+  atlases of 4096 square hold 392 pictures at QRnew's 512-pixel cap, and then
+  the process ends. Measured against the real allocator, which is CPU-only:
+  see the new section in `blitz-atlas.md`.
+
+  **The fuse gets much shorter if the advice in that document is taken first.**
+  It asks upstream for a 1024-pixel atlas to save 60 MB, and at 1024 the same
+  app survives *eight* previews. That is now written down there, because the
+  two reports landing in the wrong order would be worse than neither.
+
+  QRnew's own answer is to stop handing the renderer a new picture. The preview
+  is two layers now: `Qr::svg_without_inset` for the code with a hole in it,
+  `Qr::inset_box` for where the hole is, and an `<img>` over the top whose
+  `src` does not change while the picture does not. One upload for the life of
+  the window, and it also drops the inset being base64'd twice on every
+  keystroke. The seam is held by a test that measures the picture's box on
+  screen and hit-tests its centre — `hit_inner` walks `paint_children` in
+  reverse, so the node it returns is the one painted last, which is the only
+  way a headless harness can say "over" rather than "in the right place".
+
+  Worth keeping as a shape: this is the *second* face of the same upstream
+  defect. The first was a photograph too large for one atlas, answered by
+  `shrink_logo` and `MAX_LOGO_SIDE`, and that cap is exactly what sets the 392.
+  A workaround that bounds one dimension of a bug does not bound the bug.
 - **The inset has a size now, and the ceiling on it is not a constant.**
   `Logo::size` has been in the core since before the rewrite with no way to
   ask for it. Three sizes — an eighth, the core's sixth, a quarter — and the

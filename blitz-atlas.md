@@ -194,3 +194,80 @@ Which is the other half of the argument for exposing this. An application that
 knows its largest image knows the atlas it needs, in both directions: QRnew
 wants a smaller one than the default, and an application that legitimately draws
 something larger than 4096 has no way to ask for that either.
+
+## Nothing is ever freed, and that changes the advice above
+
+**`anyrender_vello_hybrid` uploads every image it is asked to draw and frees
+none of them.** Not on a new frame, not when the node goes away, not ever. The
+crate contains no call to `ImageCache::deallocate` at all.
+
+The cache that is supposed to stop the repeats cannot, because of what it is
+keyed by:
+
+```rust
+// anyrender_vello_hybrid/src/scene.rs
+pub(crate) fn upload_image(&mut self, image: &ImageData) -> ImageId {
+    let peniko_id = image.data.id();
+    if let Some(atlas_id) = self.cache.get(&peniko_id) {
+        return *atlas_id;
+    };
+    …
+}
+```
+
+`Blob::id()` is not a hash of the bytes. It is a counter:
+
+```rust
+// linebender_resource_handle/src/blob.rs
+id: ID_COUNTER.fetch_add(1, Ordering::Relaxed).into(),
+```
+
+So two decodes of the same file are two different images as far as the atlas is
+concerned, and `cached_images` on the window renderer grows for the life of the
+window. Any Blitz app that draws a raster image whose source changes — a
+`data:` URL rebuilt as the user types, a re-parsed SVG with an `<image>` in it,
+an image element whose `src` is swapped — is on a fuse. QRnew's preview is
+exactly that shape, and the end of it is `AtlasLimitReached` from
+`wgpu.rs:544`, `.unwrap()`ed, with the window.
+
+**How long the fuse is, measured** — `vello_common::image_cache` is pure CPU, so
+this needs no GPU. Allocate a square repeatedly at the default `max_atlases: 8`
+and count what gets through:
+
+    atlas size    picture 512    picture 256    picture 128
+    4096 (default)        392           1800           7688
+    2048                   72            392           1800
+    1024                    8             72            392
+
+The top-left cell is QRnew as shipped: 392 previews, which is a minute of
+dragging in the colour picker.
+
+**And the bottom-left cell is why this section is here.** The advice above is to
+ask for a 1024-pixel atlas, on the argument that QRnew's largest image is 512
+and 1024 is the doubling that makes packing work. That argument is sound about
+*one* image and catastrophic about a leak: at 1024 the same app gets **eight**
+previews before the window goes. A memory fix that turns a one-minute fuse into
+a three-second one is not a fix, and the two reports have to land in that
+order — or `image_atlas_config` becomes a foot-gun the moment it is wired up.
+
+Three separable asks, in the order they matter:
+
+1. **Free what is no longer drawn**, or key the cache by content rather than by
+   `Blob` identity. Either one alone fixes QRnew: the picture in the middle of
+   a code is the same bytes on every keystroke, and a content key would hit.
+2. **Do not unwrap `AtlasLimitReached`.** A drawing that cannot be allocated
+   should be a drawing that does not appear. This is the "second thing worth
+   fixing" named above, and the leak is what makes it reachable in an app that
+   never draws anything too large.
+3. *Then* let the application configure the atlas, as the sections above ask.
+
+**What QRnew did instead**, since none of that is its to ship: the preview stopped
+carrying the picture. `Qr::svg_without_inset` hands the stage a document with a
+hole where the inset goes, `Qr::inset_box` says where the hole is, and the
+picture is a second `<img>` laid over it whose `src` does not change while the
+picture does not. One upload for the life of the window. It costs a seam
+between two layers, held shut by a test that measures the picture's box on
+screen and hit-tests its centre to prove it is painted over the code and not
+under it. The saved and copied files never went through any of it — they are
+`Qr::svg`, one document, as they always were.
+
