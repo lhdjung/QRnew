@@ -12,6 +12,12 @@ bin := 'qrnew'
 # desktop entry pointing at an icon installed under the other spelling. One ID,
 # and this is it.
 appid := 'dev.lhdjung.QRnew'
+# The version the bundle claims, taken from `Cargo.toml` rather than written
+# here. It was written here, and in the release workflow, and both said 0.1.0:
+# three copies of one number, of which only one is the one `cargo` builds
+# against. A tagged release would have shipped a bundle claiming whatever the
+# last person to remember had typed.
+version := `sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1`
 
 # Path to root file system, which defaults to `/`.
 rootdir := ''
@@ -111,8 +117,8 @@ bundle-macos: build-release
     <key>CFBundleName</key><string>QRnew</string>
     <key>CFBundleDisplayName</key><string>QRnew</string>
     <key>CFBundleIdentifier</key><string>{{appid}}</string>
-    <key>CFBundleVersion</key><string>0.1.0</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>{{version}}</string>
+    <key>CFBundleShortVersionString</key><string>{{version}}</string>
     <key>CFBundleExecutable</key><string>{{bin}}</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>

@@ -31,13 +31,22 @@
 //! picker is simply *there*, and the wells above it choose which of the two
 //! colours it is editing rather than whether it exists.
 //!
-//! Both rails are now full: Content, Error correction and Margin down the
-//! first, Colors and Inset down the second. Height is the scarce thing here
-//! and the picker is what holds most of it, which is why adding the Inset card
-//! took thirty pixels off the saturation square — the arithmetic is in
-//! `ui.css`, and `no_control_is_below_the_fold` checks it at the size a
-//! maximized window actually gets on a laptop screen rather than at the size
-//! the window falls back to.
+//! Both rails are now full: Content, Error correction, Margin and Shape down
+//! the first, Colors and Inset down the second. Height is the scarce thing
+//! here and the picker is what holds most of it, which is why adding the Inset
+//! card took thirty pixels off the saturation square and the row of inset
+//! sizes took twelve more, and why the Shape card was paid for out of every
+//! card's padding and every gap between them — the arithmetic is in `ui.css`,
+//! and `no_control_is_below_the_fold` checks it at the size a maximized window
+//! actually gets on a laptop screen rather than at the size the window falls
+//! back to.
+//!
+//! Two of the cards say something a decision costs, in the same banner: a
+//! margin under two may be hard for a scanner to find, and a code that is not
+//! drawn in squares takes a camera longer to lock onto. Neither is allowed to
+//! be the thing a rail scrolls away, which is a promise about the shortest
+//! window rather than about the order of the cards — see the Shape card, which
+//! is last and whose caution is therefore the lower of the two.
 //!
 //! The three export buttons are drawn from the first frame rather than
 //! appearing with the first character, dimmed until there is something to
@@ -83,8 +92,13 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use dioxus::prelude::*;
+use dioxus_native::winit::event::{ElementState, WindowEvent};
+use dioxus_native::winit::keyboard::{Key as WinitKey, NamedKey};
 use dioxus_native::winit::window::{Theme as WinitTheme, Window as WinitWindow};
-use qrnew_core::{ErrorCorrection, ImageFormat, Logo, Qr, QrStyle, ReadError, Rgb};
+use qrnew_core::{
+    ErrorCorrection, Finder, FinderShape, ImageFormat, Logo, ModuleShape, Qr, QrError, QrStyle,
+    ReadError, Rgb,
+};
 
 use crate::fl;
 
@@ -344,6 +358,163 @@ enum Well {
     Light,
 }
 
+/// How the code's own marks are drawn.
+///
+/// **One choice for two of `qrnew-core`'s knobs, deliberately.** The core
+/// holds a [`ModuleShape`] and a [`FinderShape`] and they are independent —
+/// `every_combination_of_shapes_scans` there walks all six pairings — but six
+/// is not a question worth putting to somebody making one code. Rounded
+/// modules inside square finders is the pairing nobody picks on purpose: it
+/// reads as a style that was applied to most of the code and missed the
+/// corners. So the app offers the three that are a *look*, and the finders
+/// follow the modules rather than being asked about separately.
+///
+/// Nothing here can make a code that does not *scan*, and that is not a hope:
+/// a scanner reads the colour at the centre of a module, every shape in the
+/// core covers its own centre, and `every_combination_of_shapes_scans` and
+/// `every_combination_of_shapes_scans_with_a_logo_in_the_way` decode all of
+/// them with a real reader.
+///
+/// Scanning is not the same as scanning *quickly*, though, and the card says
+/// so as soon as anything but [`Square`] is chosen. A phone pointed at a
+/// rounded or dotted code takes visibly longer to lock onto it: the decoder
+/// gets fewer clean edges to work from, so autofocus has more to do before the
+/// first frame it can read. That is a cost paid at the camera, where the
+/// decoding tests cannot see it, which is exactly why it has to be written
+/// down rather than left to the test suite.
+///
+/// [`Square`]: Look::Square
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Look {
+    /// Square modules and square finders: the code as the standard draws it.
+    #[default]
+    Square,
+    /// Corners taken off wherever no neighbour fills them in, so runs of
+    /// modules merge into strokes, with the finders softened to match.
+    Rounded,
+    /// A circle per module, and the same softened finders — which stay whole
+    /// rather than breaking into dots, because a finder is the one part of a
+    /// code a scanner looks for before it can read anything.
+    Dots,
+}
+
+impl Look {
+    /// The three, in the order the row offers them.
+    const ALL: [Self; 3] = [Self::Square, Self::Rounded, Self::Dots];
+
+    /// The name this look goes by in the markup.
+    ///
+    /// A `data-look` for the tests to select on, for the same reason
+    /// [`Theme::slug`] is one: a test that clicked the visible label would
+    /// pass in English and nowhere else.
+    const fn slug(self) -> &'static str {
+        match self {
+            Look::Square => "square",
+            Look::Rounded => "rounded",
+            Look::Dots => "dots",
+        }
+    }
+
+    /// The outline each module is given.
+    const fn module(self) -> ModuleShape {
+        match self {
+            Look::Square => ModuleShape::Square,
+            Look::Rounded => ModuleShape::Rounded,
+            Look::Dots => ModuleShape::Dot,
+        }
+    }
+
+    /// The outline the three corner squares are given.
+    ///
+    /// Colours are left at the core's default, which is the code's own dark:
+    /// a finder in a second colour is a fourth colour control in a window
+    /// whose colour rail is already the tallest thing in it, and it is the one
+    /// part of the code that has to stay findable.
+    const fn finder(self) -> Finder {
+        let shape = match self {
+            Look::Square => FinderShape::Square,
+            Look::Rounded | Look::Dots => FinderShape::Rounded,
+        };
+        Finder {
+            shape,
+            ring: None,
+            center: None,
+        }
+    }
+}
+
+/// How much of the code the picture in the middle of it takes up.
+///
+/// Three named sizes rather than a number, because the useful range is narrow
+/// and its top end is not a constant. A logo has to stay clear of the three
+/// finder patterns, which sit eight modules in from each edge whatever the
+/// code's version — so on the smallest code there is, twenty-one modules
+/// across, the largest picture that fits is a shade over a fifth of the width,
+/// while on anything longer than a few characters it is a third. A percentage
+/// field would spend most of its range on values that only work for some of
+/// what somebody might type.
+///
+/// [`Medium`] is [`Logo::DEFAULT_SIZE`] and always fits: that is what
+/// `the_default_logo_fits_even_the_smallest_code` in `qrnew-core` checks.
+/// [`Large`] does not always fit, and the app draws it at the middle size when
+/// it does not — see `Drawn::capped`.
+///
+/// [`Medium`]: InsetSize::Medium
+/// [`Large`]: InsetSize::Large
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum InsetSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+impl InsetSize {
+    /// The three, in the order the row offers them.
+    const ALL: [Self; 3] = [Self::Small, Self::Medium, Self::Large];
+
+    /// The name this size goes by in the markup, for the tests to select on.
+    const fn slug(self) -> &'static str {
+        match self {
+            InsetSize::Small => "small",
+            InsetSize::Medium => "medium",
+            InsetSize::Large => "large",
+        }
+    }
+
+    /// Side of the picture as a fraction of the code's width, quiet zone not
+    /// counted — which is exactly what [`Logo::size`] means.
+    ///
+    /// An eighth and a quarter around the core's own sixth. They are spaced so
+    /// that each step is a visible change in the preview rather than a nudge:
+    /// a quarter is twice the *area* of an eighth.
+    fn fraction(self) -> f32 {
+        match self {
+            InsetSize::Small => 1.0 / 8.0,
+            InsetSize::Medium => Logo::DEFAULT_SIZE,
+            InsetSize::Large => 1.0 / 4.0,
+        }
+    }
+}
+
+/// The code as it was actually drawn.
+///
+/// The second field is here because one of the app's controls can ask for
+/// something the code in front of it cannot give: [`InsetSize::Large`] does
+/// not fit a twenty-one-module code, and a twenty-one-module code is what a
+/// few characters plus an inset produces. `qrnew-core` refuses that outright —
+/// deliberately, since only the caller knows whether to give up the size or
+/// the picture — and this app is the caller, and it gives up the size. Drawing
+/// nothing would be the one answer that is certainly wrong: the text is fine,
+/// the picture is fine, and the placeholder would say neither.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Drawn {
+    qr: Qr,
+    /// Whether the picture had to be drawn at [`InsetSize::Medium`] because
+    /// the size that was asked for did not fit.
+    capped: bool,
+}
+
 /// Which palette the window is painted in, and who decides.
 ///
 /// [`Theme::System`] is the default and the only one of the three that is an
@@ -413,6 +584,7 @@ pub fn App() -> Element {
     let mut dark = use_signal(|| Rgb::BLACK);
     let mut light = use_signal(|| Rgb::WHITE);
     let mut margin = use_signal(|| DEFAULT_MARGIN);
+    let mut look = use_signal(Look::default);
     // The stepper's field keeps its own text for the same reason the hex field
     // does: half-typed input is not a number, and a field rewritten from the
     // value on every keystroke cannot be emptied to type a new one into.
@@ -434,6 +606,7 @@ pub fn App() -> Element {
             .and_then(|Inlay(path)| Inset::read(std::path::Path::new(&path)))
     });
     let mut inset_error = use_signal(|| false);
+    let mut inset_size = use_signal(InsetSize::default);
     let mut editing = use_signal(|| Well::Dark);
     let mut about = use_signal(|| false);
     let mut theme = use_signal(|| {
@@ -452,11 +625,56 @@ pub fn App() -> Element {
     // is what lets the same component run in both, the way `Fill` and `Inlay`
     // already do.
     let window = use_hook(dioxus_core::try_consume_context::<Arc<dyn WinitWindow>>);
+    let windowed = window.is_some();
     use_effect(move || {
         if let Some(window) = &window {
             window.set_theme(theme().window());
         }
     });
+
+    // **Escape closes whichever sheet is open.** A modal is the one place in
+    // this window where the next click has to land somewhere in particular,
+    // and the key that means "not this" is the one everybody reaches for
+    // first: the scrim and the Close button were the only two ways out, and a
+    // scrim is a thing you have to guess is clickable.
+    //
+    // It is answered twice, because the two answers cover different halves of
+    // the same question — *where the keyboard is when the key is pressed*.
+    //
+    //   * `onkeydown` on `.app`, below. Blitz sends a key to the focused node
+    //     and lets it bubble, so this catches every keystroke made while the
+    //     keyboard is anywhere inside the interface. It is also the half the
+    //     headless tests can drive, which is why the sheets take the keyboard
+    //     when they open — see the `autofocus` on their Close buttons.
+    //
+    //   * This one, on the window itself. `clicking_a_chip_blurs_the_field`
+    //     records the upstream rule that makes it necessary: a click that
+    //     matches none of Blitz's known controls *clears* the focus, and a
+    //     plain `<button>` matches none of them — so after clicking a theme in
+    //     the sheet the keyboard is on `<html>`, which is above `.app` and
+    //     bubbles away from it rather than through it. A winit key event is
+    //     delivered before any of that applies.
+    //
+    // Setting a signal that is already false is nothing, so the overlap on the
+    // keystrokes both of them see costs a comparison.
+    //
+    // The hook is gated on there being a window at all, and the gate is a
+    // constant for the life of this component — `window` comes from a
+    // `use_hook` — so the hook order does not change under it. Upstream's
+    // `use_window_event` consumes the window context rather than trying for
+    // it, and there is no window in a test.
+    if windowed {
+        dioxus_native::use_window_event(move |event, _| {
+            if let WindowEvent::KeyboardInput { event, .. } = event
+                && event.state == ElementState::Pressed
+                && !event.repeat
+                && event.logical_key == WinitKey::Named(NamedKey::Escape)
+            {
+                theme_sheet.set(false);
+                about.set(false);
+            }
+        });
+    }
 
     // The one generated code, which everything downstream is a view of. A memo
     // rather than a signal written from four handlers: the inputs say what the
@@ -466,26 +684,47 @@ pub fn App() -> Element {
         if text.is_empty() {
             return None;
         }
-        let style = QrStyle {
+        let picture = inset.read().as_ref().map(|chosen| chosen.bytes.clone());
+        let asked = inset_size().fraction();
+        let mut style = QrStyle {
             dark: dark(),
             light: light(),
             quiet_zone: margin(),
-            // The default placement, always: a sixth of the code's width with
-            // half a module of air, which `the_default_logo_fits_even_the_
-            // smallest_code` in `qrnew-core` shows clears the finder patterns
-            // on a 21-module code. That is what lets the app offer an inset
-            // with no size control and no way to be turned down — the two
-            // rules `Qr::new` enforces are ones this placement cannot break.
-            logo: inset
-                .read()
-                .as_ref()
-                .map(|chosen| Logo::new(chosen.bytes.clone())),
-            ..QrStyle::default()
+            module: look().module(),
+            finder: look().finder(),
+            // Padding and clearing stay at the core's defaults — half a module
+            // of air and a square cut-out. The size is the one of the three
+            // worth a control: it is the one somebody looks at the preview and
+            // wants a different answer to.
+            logo: picture.clone().map(|bytes| Logo {
+                size: asked,
+                ..Logo::new(bytes)
+            }),
+            // No `..QrStyle::default()`: every field of it is written here,
+            // and the shape row is what filled the last two. A struct update
+            // that updates nothing is a line that would go on looking like the
+            // app is leaving something to the core.
         };
-        // `Err` is an input past what the densest code can hold. The libcosmic
-        // build showed the placeholder for that and said nothing, and so does
-        // this.
-        Qr::new(&text, ec(), &style).ok()
+        match Qr::new(&text, ec(), &style) {
+            Ok(qr) => Some(Drawn { qr, capped: false }),
+            // The picture does not fit *this* code — which is a statement
+            // about how short the text is, not about the picture. Redrawn at
+            // the size that fits every code there is, and the row says so.
+            //
+            // Guarded on the size actually being the larger one, so that a
+            // logo failure that is not about size cannot send the app round
+            // the same encode twice for the same answer.
+            Err(QrError::Logo(_)) if asked > Logo::DEFAULT_SIZE => {
+                style.logo = picture.map(Logo::new);
+                Qr::new(&text, ec(), &style)
+                    .ok()
+                    .map(|qr| Drawn { qr, capped: true })
+            }
+            // An input past what the densest code can hold. The libcosmic
+            // build showed the placeholder for that and said nothing; the line
+            // under the field says it now.
+            Err(_) => None,
+        }
     });
 
     // Kept apart from `code` so that a re-render that changes neither the text
@@ -493,7 +732,7 @@ pub fn App() -> Element {
     let preview = use_memo(move || {
         code()
             .as_ref()
-            .map(|qr| data_url("image/svg+xml", qr.svg().as_bytes()))
+            .map(|drawn| data_url("image/svg+xml", drawn.qr.svg().as_bytes()))
     });
 
     // The chosen picture, as something an `<img>` can point at. A memo for the
@@ -556,7 +795,7 @@ pub fn App() -> Element {
     };
 
     let save_png = move |_| {
-        let Some(qr) = code() else { return };
+        let Some(Drawn { qr, .. }) = code() else { return };
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
                 .add_filter("PNG Image", &["png"])
@@ -573,7 +812,7 @@ pub fn App() -> Element {
     };
 
     let save_svg = move |_| {
-        let Some(qr) = code() else { return };
+        let Some(Drawn { qr, .. }) = code() else { return };
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
                 .add_filter("SVG Image", &["svg"])
@@ -588,7 +827,7 @@ pub fn App() -> Element {
     };
 
     let copy = move |_| {
-        let Some(qr) = code() else { return };
+        let Some(Drawn { qr, .. }) = code() else { return };
         let Ok(raster) = qr.to_rgba(EXPORT_SCALE) else {
             return;
         };
@@ -644,6 +883,34 @@ pub fn App() -> Element {
     // markup.
     let has_inset = inset.read().is_some();
     let shown_ec = if has_inset { ErrorCorrection::High } else { ec() };
+    // The largest inset the code on screen can carry, as the fraction of its
+    // width that [`InsetSize::fraction`] is measured in — and `None` while
+    // there is no code to measure.
+    //
+    // The number moves with the text, because the rule behind it is a number
+    // of *modules* and the module count is what the text decides. So the row
+    // has to ask the code in front of it rather than knowing the answer: the
+    // sizes it can offer at all are the sizes this code can take.
+    //
+    // `size_in_modules` counts the quiet zone, which the fraction does not.
+    let room = code.read().as_ref().map(|drawn| {
+        let modules = drawn.qr.size_in_modules() - 2 * margin();
+        qrnew_core::largest_logo_size(Logo::DEFAULT_PADDING, modules)
+    });
+    // Whether the size the row is pointing at is the size the code was drawn
+    // at. Read out of the memo rather than recomputed: the encode that already
+    // happened is the only thing that actually knows, and `room` above is the
+    // app's own arithmetic about the same rule. The two agree, and where a
+    // rounding at the boundary makes them disagree the memo is the one that is
+    // right — which is why the chip is dimmed by either of them.
+    let capped = code.read().as_ref().is_some_and(|drawn| drawn.capped);
+    // Whether a size in the row is one the code in front of it cannot take: it
+    // does not fit, or it is the one that was asked for and did not fit. The
+    // second half is what covers a code that *shrank* — text deleted out from
+    // under a size that was fine when it was chosen.
+    let held = move |choice: InsetSize| {
+        room.is_some_and(|room| choice.fraction() > room) || (capped && inset_size() == choice)
+    };
 
     // The line under the field. The prompt while the field is empty, nothing
     // at all while a code is being drawn, and — the one failure the app could
@@ -687,7 +954,17 @@ pub fn App() -> Element {
         // and both sheets are inside it rather than beside it: a custom
         // property is inherited, so anything painted in the app's colours has
         // to be a descendant of the element the palette is written on.
-        div { class: "app theme-{theme().slug()}",
+        div {
+            class: "app theme-{theme().slug()}",
+            // Escape, for every keystroke made while the keyboard is inside
+            // the interface. The other half is on the window; the whole story
+            // is above `use_window_event` in this component.
+            onkeydown: move |event| {
+                if event.key() == Key::Escape && (theme_sheet() || about()) {
+                    theme_sheet.set(false);
+                    about.set(false);
+                }
+            },
 
             header { class: "topbar",
                 div { class: "brand",
@@ -926,14 +1203,101 @@ pub fn App() -> Element {
                         // larger than the sentence below it, because the one
                         // line here that says a code might not scan should not
                         // be the smallest thing in the card.
+                        //
+                        // It also *replaces* the hint rather than joining it,
+                        // which is what pays for it. The hint says what the
+                        // control does, and somebody who has driven the number
+                        // below two has already found that out by doing it;
+                        // the caution is the same sentence's worth of room
+                        // spent on the thing that now matters more. Two
+                        // paragraphs here is what pushed this card off the
+                        // bottom of the rail in the wider face a Linux machine
+                        // picks for `system-ui` — see the budget in `ui.css`.
                         if margin() < SAFE_MARGIN {
                             p { class: "warn", "data-margin-warning": "true",
                                 {glyph(Glyph::Alert, Ink::Warn, "glyph")}
                                 span { {fl!("margin-warning")} }
                             }
+                        } else {
+                            p { class: "hint", {fl!("margin-hint")} }
                         }
-                        p { class: "hint", {fl!("margin-hint")} }
                     }
+                    // Last in the rail, under the margin, which is the order
+                    // the two read in: what the code is made of, after how
+                    // much air is around it, both downstream of what it says.
+                    //
+                    // The cost of being last is that this card's caution is
+                    // the lower of the two, in a column that scrolls — and it
+                    // is the likelier of the two to appear, needing one click
+                    // where the margin's needs somebody to walk under the
+                    // app's own default. So the room it needs was found rather
+                    // than borrowed from the position: a point off every
+                    // card's padding and two off the gap between them, which
+                    // is what keeps the banner on screen at the shortest
+                    // window in the widest face. `a_caution_is_never_the_
+                    // thing_that_scrolls` is the promise; what goes under the
+                    // fold there is this card's own bottom edge, below the
+                    // sentence rather than instead of it.
+                    //
+                    // It is in this rail rather than beside the colours, where
+                    // it arguably belongs by subject, because that is the rail
+                    // with no room: the picker leaves it a few dozen points of
+                    // slack at the height `no_control_is_below_the_fold` holds
+                    // the window to, and this card is a hundred and six of them
+                    // before it says anything.
+                    div { class: "card",
+                        div { class: "card-head",
+                            {glyph(Glyph::Shape, Ink::Accent, "glyph")}
+                            span { {fl!("section-shape")} }
+                        }
+                        div { class: "segments segments-3",
+                            for choice in Look::ALL {
+                                button {
+                                    key: "{choice.slug()}",
+                                    class: chip_class(look() == choice, false),
+                                    "data-look": "{choice.slug()}",
+                                    aria_pressed: if look() == choice { "true" } else { "false" },
+                                    onclick: move |_| look.set(choice),
+                                    // In a `<span>`, like every other chip in
+                                    // the window: bare text inside a `<button>`
+                                    // keeps the ink it was first painted in
+                                    // when the theme changes under it.
+                                    span {
+                                        match choice {
+                                            Look::Square => fl!("shape-square"),
+                                            Look::Rounded => fl!("shape-rounded"),
+                                            Look::Dots => fl!("shape-dots"),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // The one thing the test suite cannot tell anybody.
+                        // All three shapes decode — `every_combination_of_
+                        // shapes_scans` proves it with a real reader — but
+                        // decoding in a test is not the same experience as
+                        // holding a phone up to one: a rounded or dotted code
+                        // gives the camera fewer clean edges, so it takes
+                        // longer to focus and longer to lock on. That is a
+                        // real cost, it is invisible from inside the repo, and
+                        // the person paying it is standing in front of a
+                        // printed code wondering whether it works.
+                        //
+                        // Written the way the margin caution is written, for
+                        // the same reason: a caveat printed permanently is
+                        // read once and then stops being read, and this one
+                        // has nothing to say while the code is square. It is
+                        // the same banner and the same ink, because it is the
+                        // same kind of statement — the app volunteering that a
+                        // choice it is perfectly willing to make has a price.
+                        if look() != Look::Square {
+                            p { class: "warn", "data-shape-warning": "true",
+                                {glyph(Glyph::Alert, Ink::Warn, "glyph")}
+                                span { {fl!("shape-warning")} }
+                            }
+                        }
+                    }
+
                 }
 
                 section { class: "rail rail-colors",
@@ -1025,6 +1389,47 @@ pub fn App() -> Element {
                                     },
                                     {glyph(Glyph::Close, Ink::Plain, "glyph")}
                                     span { {fl!("inset-remove")} }
+                                }
+                            }
+                            // How big the picture is drawn, and only once
+                            // there is one to draw: a size control over an
+                            // empty card is a question about nothing, and the
+                            // card is in the taller of the two rails.
+                            //
+                            // A size this code has no room for is dimmed and
+                            // inert, the same way the error-correction row is
+                            // while an inset holds it at 30%. It is the honest
+                            // shape for it: the row's top end is set by the
+                            // code's module count, the module count is set by
+                            // how much text there is, and a chip that took the
+                            // click and changed nothing would be the app
+                            // pretending otherwise. A few more characters and
+                            // it comes back.
+                            div { class: "segments segments-3",
+                                for choice in InsetSize::ALL {
+                                    button {
+                                        key: "{choice.slug()}",
+                                        class: chip_class(inset_size() == choice, held(choice)),
+                                        "data-inset-size": "{choice.slug()}",
+                                        aria_pressed: if inset_size() == choice { "true" } else { "false" },
+                                        onclick: move |_| {
+                                            if !held(choice) {
+                                                inset_size.set(choice);
+                                            }
+                                        },
+                                        // In a `<span>`, like every other chip
+                                        // in the window: bare text inside a
+                                        // `<button>` keeps the ink it was
+                                        // first painted in when the theme
+                                        // changes under it.
+                                        span {
+                                            match choice {
+                                                InsetSize::Small => fl!("inset-small"),
+                                                InsetSize::Medium => fl!("inset-medium"),
+                                                InsetSize::Large => fl!("inset-large"),
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         } else {
@@ -1151,6 +1556,11 @@ pub fn App() -> Element {
                         div { class: "sheet-actions",
                             button {
                                 class: "btn theme-close",
+                                // The keyboard comes into the sheet with the
+                                // sheet: it is what a modal should do, and it
+                                // is what lets the element half of the Escape
+                                // handling see the key at all.
+                                autofocus: true,
                                 onclick: move |_| theme_sheet.set(false),
                                 {glyph(Glyph::Close, Ink::Plain, "glyph")}
                                 span { {fl!("close")} }
@@ -1184,6 +1594,11 @@ pub fn App() -> Element {
                             }
                             button {
                                 class: "btn about-close",
+                                // The keyboard comes into the sheet with the
+                                // sheet: it is what a modal should do, and it
+                                // is what lets the element half of the Escape
+                                // handling see the key at all.
+                                autofocus: true,
                                 onclick: move |_| about.set(false),
                                 {glyph(Glyph::Close, Ink::Plain, "glyph")}
                                 span { {fl!("close")} }
@@ -1423,6 +1838,17 @@ fn Picker(color: Signal<Rgb>) -> Element {
                         }
                         draft.set(text);
                     },
+                    // The same rule the margin field follows, and for the same
+                    // reason: half-typed text may sit in a field while it is
+                    // being typed, but it cannot outlive the keyboard. The
+                    // code is still drawn in the last colour that parsed, so a
+                    // field left reading `#2f6` — or reading nothing — would be
+                    // the window showing one colour and the field claiming
+                    // another. Whatever is applied is what comes back.
+                    onblur: move |_| {
+                        draft.set(color().to_hex());
+                        valid.set(true);
+                    },
                 }
             }
         }
@@ -1441,7 +1867,7 @@ fn Picker(color: Signal<Rgb>) -> Element {
 /// are measured against; `ui.css` sets `background-origin: border-box` so that
 /// the layers agree.
 const SQUARE_W: f64 = 310.0;
-const SQUARE_H: f64 = 170.0;
+const SQUARE_H: f64 = 158.0;
 const STRIP_H: f64 = 22.0;
 
 /// A colour as the picker holds it: hue in degrees, the rest in 0..=1.
@@ -1509,7 +1935,7 @@ impl Ink {
 /// The icons, as the paths that draw them on a 24×24 grid.
 ///
 /// Hand-drawn rather than pulled from an icon font, for the reason the whole
-/// app exists: a font is a file to ship and a licence to honour, and seventeen
+/// app exists: a font is a file to ship and a licence to honour, and nineteen
 /// icons is less of both. They are stroked, round-capped and unfilled, which
 /// is the one decision that keeps them looking like a set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1536,6 +1962,11 @@ enum Glyph {
     /// shape filled — the two sit in the same column and have to be told apart
     /// at a glance.
     Inset,
+    /// Four modules in the three outlines the app can draw them in: the
+    /// shape row, drawn as the thing it changes. No box around them, which is
+    /// what keeps it apart from [`Frame`](Glyph::Frame) and
+    /// [`Inset`](Glyph::Inset) two cards up the same rail.
+    Shape,
     /// A triangle with a bang in it, for the one warning in the window.
     Alert,
     Minus,
@@ -1588,6 +2019,17 @@ impl Glyph {
             Glyph::Inset => &[
                 "M4.4 4.4 H19.6 V19.6 H4.4 Z",
                 "M15.2 12 A3.2 3.2 0 1 1 8.8 12 A3.2 3.2 0 1 1 15.2 12",
+            ],
+            // Two cells across and two down: a square, a rounded square and
+            // two dots. Three outlines rather than four shapes' worth of
+            // information, because the fourth cell empty reads as a mistake
+            // and the dot is the one worth showing twice.
+            Glyph::Shape => &[
+                "M4 4 H11 V11 H4 Z",
+                "M15.2 4 H17.8 A2.2 2.2 0 0 1 20 6.2 V8.8 A2.2 2.2 0 0 1 17.8 11 \
+                 H15.2 A2.2 2.2 0 0 1 13 8.8 V6.2 A2.2 2.2 0 0 1 15.2 4 Z",
+                "M11 16.5 A3.5 3.5 0 1 1 4 16.5 A3.5 3.5 0 1 1 11 16.5",
+                "M20 16.5 A3.5 3.5 0 1 1 13 16.5 A3.5 3.5 0 1 1 20 16.5",
             ],
             Glyph::Alert => &["M12 3.9 L21.2 19.9 H2.8 Z", "M12 10 V14.3", "M12 17 h0.4"],
             Glyph::Minus => &["M6.2 12 H17.8"],
@@ -1815,10 +2257,23 @@ fn from_hsv(hsv: Hsv) -> Rgb {
 }
 
 /// `#rrggbb`, `rrggbb`, `#rgb` or `rgb`, in either case.
+///
+/// **Bytes rather than a string slice, and that is a crash rather than a
+/// preference.** This reads whatever is in the hex field on every keystroke,
+/// the field takes any text somebody can type, and the length it switched on
+/// was `str::len` — a count of bytes — while the slices it then took were
+/// expected to be characters. Three bytes is `abc` and it is also `aé`, and
+/// `&text[1..2]` inside that second one is not a character boundary: the field
+/// panics, and a panic in a Dioxus event handler takes the window with it.
+/// Every path below now indexes a byte and asks whether that byte is a hex
+/// digit, which anything outside ASCII simply is not.
 fn parse_hex(text: &str) -> Option<Rgb> {
-    let text = text.trim().trim_start_matches('#');
-    let digit = |at: usize| u8::from_str_radix(&text[at..at + 1], 16).ok();
-    let pair = |at: usize| u8::from_str_radix(&text[at..at + 2], 16).ok();
+    let text = text.trim().trim_start_matches('#').as_bytes();
+    // A byte at or above 0x80 becomes a Latin-1 character here, and none of
+    // those is a hex digit — so a multi-byte character is refused one byte at
+    // a time rather than sliced through.
+    let digit = |at: usize| char::from(text[at]).to_digit(16).map(|value| value as u8);
+    let pair = |at: usize| Some(digit(at)? * 16 + digit(at + 1)?);
 
     match text.len() {
         3 => Some(Rgb::new(digit(0)? * 17, digit(1)? * 17, digit(2)? * 17)),
@@ -2024,6 +2479,20 @@ mod tests {
         assert_eq!(parse_hex("#2f6f4"), None);
         assert_eq!(parse_hex("#zzzzzz"), None);
         assert_eq!(parse_hex(""), None);
+    }
+
+    /// **The hex field takes anything a keyboard can produce, so this must
+    /// too.**
+    ///
+    /// Each of these is three or six *bytes* and fewer than that in
+    /// characters, which is the shape that used to slice through the middle of
+    /// one and panic — in an event handler, on a keystroke, taking the window
+    /// with it. `aé` is the whole bug in two characters.
+    #[test]
+    fn hex_refuses_text_that_is_not_ascii_instead_of_panicking() {
+        for text in ["aé", "éa", "ééé", "ff€", "€ff", "«»f", "ﬀ", "２ｆ６"] {
+            assert_eq!(parse_hex(text), None, "{text:?}");
+        }
     }
 
     #[test]

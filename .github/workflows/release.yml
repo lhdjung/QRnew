@@ -62,6 +62,11 @@ jobs:
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
+          # The bundle's version comes from `Cargo.toml`, which is the one copy
+          # of it `cargo` actually builds against. It used to be typed into the
+          # plist below and into the `justfile`, so a tag that bumped the crate
+          # shipped an app still calling itself whatever was written here last.
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           rm -rf QRnew.app
           mkdir -p QRnew.app/Contents/MacOS QRnew.app/Contents/Resources
           cp target/release/qrnew QRnew.app/Contents/MacOS/qrnew
@@ -75,7 +80,7 @@ jobs:
           done
           iconutil -c icns -o QRnew.app/Contents/Resources/AppIcon.icns "$iconset"
           rm -rf "$iconset"
-          cat > QRnew.app/Contents/Info.plist << 'PLIST'
+          cat > QRnew.app/Contents/Info.plist << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -83,8 +88,8 @@ jobs:
           <key>CFBundleName</key><string>QRnew</string>
           <key>CFBundleDisplayName</key><string>QRnew</string>
           <key>CFBundleIdentifier</key><string>dev.lhdjung.QRnew</string>
-          <key>CFBundleVersion</key><string>0.1.0</string>
-          <key>CFBundleShortVersionString</key><string>0.1.0</string>
+          <key>CFBundleVersion</key><string>${version}</string>
+          <key>CFBundleShortVersionString</key><string>${version}</string>
           <key>CFBundleExecutable</key><string>qrnew</string>
           <key>CFBundleIconFile</key><string>AppIcon</string>
           <key>CFBundlePackageType</key><string>APPL</string>

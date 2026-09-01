@@ -56,6 +56,52 @@ fn modules_across(svg: &str) -> u32 {
         .expect("the viewBox is written in whole modules")
 }
 
+/// The `d` of every `<path>` in a generated code, in document order.
+///
+/// `draw.rs` writes the modules first, then the finder rings, then the finder
+/// centres, so the first and last of these are the two halves of a shape
+/// question: whether the modules are curved, and whether the corners followed
+/// them.
+fn outlines(svg: &str) -> Vec<&str> {
+    svg.split(r#"<path fill=""#)
+        .skip(1)
+        .filter_map(|path| path.split_once(r#" d=""#))
+        .filter_map(|(_, data)| data.split_once('"'))
+        .map(|(data, _)| data)
+        .collect()
+}
+
+/// Whether a path is drawn with curves.
+///
+/// `draw.rs` writes every curve in this document as an arc command and uses no
+/// other curve command, so one letter answers it.
+/// The width of the picture in the middle of the code, in module units.
+///
+/// `draw.rs` writes the logo as an `<image>` whose box is in the same
+/// coordinates as the modules, so this number is comparable across codes only
+/// when they are the same size — every test below either holds the code still
+/// or compares against itself.
+fn image_width(svg: &str) -> f32 {
+    let attrs = svg
+        .split_once("<image ")
+        .expect("the code carries a picture")
+        .1;
+    let width = attrs
+        .split_once("width=\"")
+        .expect("the picture has a width")
+        .1;
+    width
+        .split_once('"')
+        .unwrap()
+        .0
+        .parse()
+        .expect("the width is a number")
+}
+
+fn curved(path: &str) -> bool {
+    path.contains('a') || path.contains('A')
+}
+
 fn decode_base64(text: &str) -> Vec<u8> {
     let value = |byte: u8| -> u32 {
         match byte {
@@ -96,6 +142,18 @@ fn decode_base64(text: &str) -> Vec<u8> {
 fn app() -> Harness<dioxus_native::DioxusDocument> {
     let mut harness = Harness::from_component(App);
     harness.set_viewport_size(1280, 860);
+    harness.pump();
+    harness
+}
+
+/// The app after a few clicks, for the states a control has to be used to
+/// reach. The viewport is whatever `app` opens at until a caller says
+/// otherwise.
+fn app_after(clicks: &[&str]) -> Harness<dioxus_native::DioxusDocument> {
+    let mut harness = app();
+    for click in clicks {
+        harness.click(click);
+    }
     harness.pump();
     harness
 }
@@ -260,6 +318,198 @@ fn high_correction_makes_a_denser_code() {
     );
 }
 
+/// **The shape row reaches the code, and the finders follow the modules.**
+///
+/// `ModuleShape` and `FinderShape` have been in `qrnew-core` since before the
+/// rewrite — drawn, decoded and held by `every_combination_of_shapes_scans` —
+/// and until now there was no way to ask for either of them from the window.
+/// This is the test that says the row is wired to the code rather than only to
+/// its own `aria-pressed`.
+///
+/// The finders are asserted separately from the modules because the app couples
+/// them: one control sets both, and a shape that softened the modules and left
+/// three square corners behind is the exact fault that coupling exists to
+/// prevent. `draw.rs` writes the finder centres last, so the last `<path>` in
+/// the document is theirs — a circle where the code is rounded, a plain
+/// rectangle where it is square.
+#[test]
+fn the_shape_row_redraws_the_code_and_its_finders() {
+    let mut harness = app_filled("https://example.org");
+    let mut drawn: Vec<(&str, String)> = Vec::new();
+
+    for look in ["square", "rounded", "dots"] {
+        harness.click(&format!("[data-look=\"{look}\"]"));
+        harness.pump();
+        assert_eq!(
+            harness
+                .attr(&format!("[data-look=\"{look}\"]"), "aria-pressed")
+                .as_deref(),
+            Some("true"),
+            "the row says which shape the code is drawn in"
+        );
+
+        let svg = preview(&harness).expect("a code survives changing its shape");
+        let paths = outlines(&svg);
+        let modules = paths.first().expect("the modules are the first path");
+        let centers = paths.last().expect("the finder centres are the last");
+        assert_eq!(
+            curved(modules),
+            look != "square",
+            "{look}: the modules are curved exactly when they should be"
+        );
+        assert_eq!(
+            curved(centers),
+            look != "square",
+            "{look}: the finder centres follow the modules"
+        );
+        drawn.push((look, svg));
+    }
+
+    for (a, b) in [(0, 1), (1, 2), (0, 2)] {
+        assert_ne!(
+            drawn[a].1, drawn[b].1,
+            "{} and {} are different codes",
+            drawn[a].0, drawn[b].0
+        );
+    }
+}
+
+/// The shape the app opens on is the one the standard describes.
+///
+/// Somebody who never finds this card gets a plain code, and a plain code is
+/// drawn with no curve anywhere in it — finders included.
+#[test]
+fn the_code_is_square_until_somebody_says_otherwise() {
+    let harness = app_filled("https://example.org");
+    let svg = preview(&harness).unwrap();
+
+    for path in outlines(&svg) {
+        assert!(!curved(path), "nothing in an untouched code is curved: {path}");
+    }
+    assert_eq!(
+        harness.attr("[data-look=\"square\"]", "aria-pressed").as_deref(),
+        Some("true")
+    );
+}
+
+/// **Escape closes whichever sheet is open.**
+///
+/// Both of them, from wherever the keyboard happens to be. The handler sits on
+/// the root element and Blitz bubbles a key event up from the focused node, so
+/// this is as much a test of that route as of the app — and in particular of
+/// the `autofocus` on each Close button, without which the focus after opening
+/// a sheet is `<html>` (see `clicking_a_chip_blurs_the_field`) and a keystroke
+/// bubbles away from the app rather than through it.
+#[test]
+fn escape_closes_a_sheet() {
+    for (open, panel) in [(".about-open", ".about"), (".theme-open", ".theme-sheet")] {
+        let mut harness = app();
+        harness.click(open);
+        harness.pump();
+        assert!(harness.query(panel).is_some(), "{panel} opened");
+
+        harness.press(keyboard_types::Key::Escape);
+        harness.pump();
+        assert!(harness.query(panel).is_none(), "{panel} closed on Escape");
+    }
+}
+
+/// **A sheet opens with the keyboard in it, and loses it to its own buttons.**
+///
+/// Both halves matter, and together they are why Escape is answered twice.
+/// The first is what the element handler needs: a key event goes to the
+/// focused node and bubbles, so the keyboard has to be somewhere under `.app`
+/// for the handler there to see it, and `autofocus` on the Close button is
+/// what puts it there.
+///
+/// The second is the reason that is not enough. Clicking a theme clears the
+/// focus to `<html>` — the same upstream rule `clicking_a_chip_blurs_the_field`
+/// records — which is *above* `.app`, so from there a keystroke bubbles away
+/// from the app rather than through it. That case is caught by the winit
+/// handler in `App`, which no harness can reach: there is no window here to
+/// deliver a `WindowEvent`.
+///
+/// **If the second assertion starts failing, upstream has stopped clearing the
+/// focus** and the window half of the Escape handling can go.
+#[test]
+fn a_sheet_takes_the_keyboard_and_its_own_buttons_take_it_away() {
+    let mut harness = app();
+    harness.click(".theme-open");
+    harness.pump();
+    assert_eq!(
+        harness.focused(),
+        harness.query(".theme-close"),
+        "the sheet opens with the keyboard in it"
+    );
+
+    harness.click("[data-theme=\"dark\"]");
+    harness.pump();
+    assert_ne!(
+        harness.focused(),
+        harness.query(".theme-close"),
+        "and a click on one of its own chips takes it out again"
+    );
+}
+
+/// Escape with nothing open is not a keystroke the window has any use for.
+#[test]
+fn escape_with_nothing_open_leaves_the_window_alone() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("https://example.org");
+    harness.pump();
+    let before = preview(&harness).unwrap();
+
+    harness.press(keyboard_types::Key::Escape);
+    harness.pump();
+    assert_eq!(preview(&harness).unwrap(), before);
+}
+
+/// The hex field fills itself back in when the keyboard leaves it.
+///
+/// The same rule as `an_emptied_margin_field_restores_what_is_applied`, and it
+/// is the same fault underneath: half-typed text is allowed in the field while
+/// it is being typed, the code goes on being drawn in the last colour that
+/// parsed, and a field left reading `#2f` is the window showing one colour and
+/// the field claiming another.
+#[test]
+fn a_half_typed_hex_field_restores_what_is_applied() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("https://example.org");
+    harness.pump();
+
+    harness.click("[data-swatch=\"#8b1a1a\"]");
+    harness.pump();
+    let picked = preview(&harness).unwrap();
+
+    // One character past a colour, rather than a field emptied on the way to
+    // one: deleting `#8b1a1a` back to nothing passes through `8b1a1a` and
+    // `a1a`, and both of those are colours the field is right to apply.
+    harness.click("[data-hex]");
+    harness.press(keyboard_types::Key::End);
+    harness.type_text("f");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-hex]", "value").as_deref(),
+        Some("#8b1a1af"),
+        "half-typed text may sit in the field"
+    );
+    assert_eq!(
+        preview(&harness).unwrap(),
+        picked,
+        "and the code is still drawn in the colour that parsed"
+    );
+
+    // Anywhere else will do; the field simply has to lose the keyboard.
+    harness.click(".field");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-hex]", "value").as_deref(),
+        Some("#8b1a1a")
+    );
+}
+
 #[test]
 fn a_swatch_recolors_the_code() {
     let mut harness = app();
@@ -407,7 +657,7 @@ fn the_square_is_the_size_the_maths_assumes() {
     let harness = app();
 
     let square = harness.layout_rect("[data-square]");
-    assert_eq!((square.width, square.height), (310.0, 170.0));
+    assert_eq!((square.width, square.height), (310.0, 158.0));
     let strip = harness.layout_rect("[data-strip]");
     assert_eq!((strip.width, strip.height), (310.0, 22.0));
 
@@ -752,6 +1002,186 @@ fn working_the_picker_does_not_move_the_code() {
     );
 }
 
+/// **The one cost of the shape row that no decoding test can see.**
+///
+/// All three shapes scan — `every_combination_of_shapes_scans` decodes each of
+/// them with a real reader — but decoding a rendered image is not the same
+/// thing as holding a phone up to a printed one. A rounded or dotted code
+/// gives a camera fewer clean edges, and it takes measurably longer to focus
+/// and lock on. That is a cost paid outside the repo, so the window says it,
+/// and it says it only when it applies.
+#[test]
+fn anything_but_square_says_what_it_costs() {
+    let mut harness = app_filled("https://example.org");
+
+    assert!(
+        harness.query("[data-shape-warning]").is_none(),
+        "a square code has nothing to warn about"
+    );
+
+    for look in ["rounded", "dots"] {
+        harness.click(&format!("[data-look=\"{look}\"]"));
+        harness.pump();
+        assert!(
+            harness.query("[data-shape-warning]").is_some(),
+            "{look} is cautioned about"
+        );
+        assert!(
+            !harness.text_content("[data-shape-warning]").trim().is_empty(),
+            "{look}: and the caution says something"
+        );
+    }
+
+    harness.click("[data-look=\"square\"]");
+    harness.pump();
+    assert!(
+        harness.query("[data-shape-warning]").is_none(),
+        "and it goes away again with the shape that caused it"
+    );
+}
+
+/// The two cautions are one banner, and they come in the rail's own order.
+///
+/// The same box is the load-bearing half. A window with two ways of saying
+/// "this still works, and here is what it costs" has two things to learn
+/// instead of one, and the second one is read as something else. The order is
+/// the cards' order — margin, then shape — and it is pinned here so that
+/// moving a card is a decision somebody makes rather than one that happens.
+#[test]
+fn the_two_cautions_are_the_same_banner() {
+    let harness = app_after(&[
+        "[data-look=\"dots\"]",
+        "[data-margin-less]",
+        "[data-margin-less]",
+    ]);
+
+    let margin = harness.layout_rect("[data-margin-warning]");
+    let shape = harness.layout_rect("[data-shape-warning]");
+    assert!(
+        margin.y + margin.height <= shape.y,
+        "the margin caution is above the shape's: {} against {}",
+        margin.y + margin.height,
+        shape.y
+    );
+    assert_eq!(
+        shape.height, margin.height,
+        "and they are the same box, not two ideas of what a caution looks like"
+    );
+}
+
+/// **The inset's size is a control now, and it reaches the drawn code.**
+///
+/// `qrnew-core` has carried `Logo::size` since before the rewrite and the
+/// window had no way to ask for anything but the default. The picture's own
+/// box in the SVG is what says it arrived — `draw.rs` writes it as an
+/// `<image>` whose `width` is in module units, so the three sizes are three
+/// different numbers and the order they come in is the order the row offers.
+#[test]
+fn the_inset_row_draws_the_picture_at_the_size_it_asks_for() {
+    let mut harness = app_with_inset("https://example.org/a-long-enough-address", "fold");
+    let mut widths = Vec::new();
+
+    for size in ["small", "medium", "large"] {
+        harness.click(&format!("[data-inset-size=\"{size}\"]"));
+        harness.pump();
+        assert_eq!(
+            harness
+                .attr(&format!("[data-inset-size=\"{size}\"]"), "aria-pressed")
+                .as_deref(),
+            Some("true"),
+            "the row says which size the picture is drawn at"
+        );
+        let svg = preview(&harness).expect("a code survives resizing its picture");
+        widths.push((size, image_width(&svg)));
+    }
+
+    assert!(
+        widths[0].1 < widths[1].1 && widths[1].1 < widths[2].1,
+        "each size is bigger than the one before it: {widths:?}"
+    );
+}
+
+/// A size the code has no room for is offered as held rather than as a lie.
+///
+/// The ceiling is not a constant: a logo has to stay eight modules clear of
+/// every edge, which is a fixed *number of modules* and so a share of the code
+/// that grows with it. On the smallest code there is — a few characters, which
+/// with an inset is all a 21-module code holds — a quarter of the width does
+/// not fit, and one line of text later it does. The row asks the code in front
+/// of it, so it can only offer what that code can take.
+#[test]
+fn a_code_too_small_for_a_size_does_not_offer_it() {
+    let mut harness = app_with_inset("hi", "fold");
+
+    assert_eq!(
+        modules_across(&preview(&harness).expect("a short input still draws")),
+        21 + 2 * 2,
+        "two characters and a picture is the smallest code there is"
+    );
+    let large = harness
+        .attr("[data-inset-size=\"large\"]", "class")
+        .expect("the row is on screen");
+    assert!(large.contains("off"), "the largest size is held: {large:?}");
+
+    harness.click("[data-inset-size=\"large\"]");
+    harness.pump();
+    assert_eq!(
+        harness
+            .attr("[data-inset-size=\"medium\"]", "aria-pressed")
+            .as_deref(),
+        Some("true"),
+        "and clicking it changes nothing, which is what held means"
+    );
+
+    harness.click(".field");
+    harness.type_text("https://example.org");
+    harness.pump();
+    let large = harness.attr("[data-inset-size=\"large\"]", "class").unwrap();
+    assert!(
+        !large.contains("off"),
+        "a longer address is a bigger code, and it has the room: {large:?}"
+    );
+}
+
+/// Text deleted out from under a size that fitted leaves a code, not a hole.
+///
+/// This is the half the row cannot prevent: the size is chosen against one
+/// code and the next keystroke makes a different one. `qrnew-core` refuses a
+/// logo that does not fit rather than shrinking it — deliberately, since only
+/// the caller knows which of the two to give up — and the app is the caller,
+/// and it gives up the size. Drawing nothing would be the one answer that is
+/// certainly wrong: the text is fine and the picture is fine.
+#[test]
+fn a_shrinking_code_keeps_its_picture_and_says_the_size_is_held() {
+    let mut harness = app_with_inset("https://example.org", "fold");
+    harness.click("[data-inset-size=\"large\"]");
+    harness.pump();
+    let asked = image_width(&preview(&harness).expect("a code with a large picture"));
+
+    // Cleared from the front with Home and Delete rather than with Backspace,
+    // for the reason `the_hex_field_recolors_the_code` sets out: Backspace
+    // reaches `blitz-dom` through AppKit on macOS and never from a headless
+    // harness. Two characters are left, which is a 21-module code.
+    harness.click(".field");
+    harness.press(keyboard_types::Key::Home);
+    for _ in 0.."https://example.org".len() - 2 {
+        harness.press(keyboard_types::Key::Delete);
+    }
+    harness.pump();
+
+    let svg = preview(&harness).expect("the code is still drawn, at a size that fits");
+    assert_eq!(modules_across(&svg), 21 + 2 * 2, "down to the smallest code");
+    assert!(
+        image_width(&svg) < asked,
+        "the picture was drawn smaller rather than not at all"
+    );
+    let large = harness.attr("[data-inset-size=\"large\"]", "class").unwrap();
+    assert!(
+        large.contains("on") && large.contains("off"),
+        "and the row shows the size it asked for as held: {large:?}"
+    );
+}
+
 /// Everything is on screen at once: neither rail has to be scrolled to reach
 /// the bottom of it.
 ///
@@ -769,10 +1199,29 @@ fn working_the_picker_does_not_move_the_code() {
 /// the smaller one. It did not, when the Inset card was first written: the
 /// colours rail went over by fifteen pixels and quietly scrolled, which is how
 /// the picker came to be thirty pixels shorter than it was.
+///
+/// **And the margin caution**, which is what this test was missing: it only
+/// ever looked at states nobody had touched a control to reach, so that
+/// caution had been overflowing the rail at 820 since it was written and no
+/// run said so. It fits now — a `<p>` that never zeroed the user agent's own
+/// margin was thirty points of it, and the card shows its hint or its caution
+/// rather than both.
+///
+/// The shape caution is the one state a rail cannot always take, and
+/// `a_caution_is_never_the_thing_that_scrolls` is what covers it instead: it
+/// is a card's worth of addition with no hint to trade for it, and in the
+/// wider face a Linux machine picks for `system-ui` the Shape card ends five
+/// points past the rail at 820. Five points of a bottom edge, under a sentence
+/// that is itself fully on screen — which is the line that test holds, and as
+/// close to this one as the room in that rail goes.
 #[test]
 fn no_control_is_below_the_fold() {
     for height in [860, 820] {
-        for mut harness in [app(), app_with_inset("https://example.org", "fold")] {
+        for (state, mut harness) in [
+            ("as it opens", app()),
+            ("with a picture in it", app_with_inset("https://example.org", "fold")),
+            ("cautioning about the margin", app_after(&["[data-margin-less]"; 2])),
+        ] {
             harness.set_viewport_size(1280, height);
             harness.pump();
             for rail in [".rail-main", ".rail-colors"] {
@@ -780,11 +1229,49 @@ fn no_control_is_below_the_fold() {
                 let last = harness.layout_rect(&format!("{rail} .card:last-child"));
                 assert!(
                     last.y + last.height <= box_.y + box_.height,
-                    "{rail} fits without scrolling at {height}: ends at {} against {}",
+                    "{rail} fits without scrolling at {height} {state}: \
+                     ends at {} against {}",
                     last.y + last.height,
                     box_.y + box_.height
                 );
             }
+        }
+    }
+}
+
+/// Whatever else a rail has to scroll, the caution is not it.
+///
+/// This is the weaker promise that survives where `no_control_is_below_the_
+/// fold` cannot reach: a caution is a banner of sixty-odd points appearing in
+/// a rail that is already nearly full, and the shape's has no hint to take the
+/// room from the way the margin's does. So the guarantee is about the one box
+/// that matters rather than about the whole column — the sentence saying a
+/// code may be slower to scan is on screen at the moment it becomes true, and
+/// anything that has to go under the fold goes under it from further down.
+///
+/// Each caution on its own, which is how they arrive. Both at once, at 820 in
+/// a wide face, is twenty-five points past what the rail holds; the shape's is
+/// the lower of the two and it is the one that would go under, and the answer
+/// to that state is the scrollbar the rail already has.
+#[test]
+fn a_caution_is_never_the_thing_that_scrolls() {
+    for height in [860, 820] {
+        for (caution, mut harness) in [
+            ("[data-shape-warning]", app_after(&["[data-look=\"dots\"]"])),
+            ("[data-margin-warning]", app_after(&["[data-margin-less]"; 2])),
+        ] {
+            harness.set_viewport_size(1280, height);
+            harness.pump();
+            let rail = harness.layout_rect(".rail-main");
+            let warn = harness.layout_rect(caution);
+            assert!(
+                warn.y >= rail.y && warn.y + warn.height <= rail.y + rail.height,
+                "{caution} is on screen at {height}: {} to {} inside {} to {}",
+                warn.y,
+                warn.y + warn.height,
+                rail.y,
+                rail.y + rail.height,
+            );
         }
     }
 }

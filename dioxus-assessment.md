@@ -704,6 +704,114 @@ black under both themes.
   face and present here — fails the same test with the same numbers. That
   stand-in is worth keeping in mind as the cheapest way to ask a
   font-sensitivity question without waiting ten minutes for a runner.
+- **The core's shapes are reachable now, and the rail paid for them.**
+  `ModuleShape` and `FinderShape` have been in `qrnew-core` since before the
+  rewrite — drawn, decoded and held by `every_combination_of_shapes_scans` —
+  and no build of QRnew has ever been able to ask for either. A Shape card at
+  the foot of the control rail now does, as **one** choice rather than two: the
+  three that are a *look* (Square, Rounded, Dots), with the finders following
+  the modules. Six independent pairings is not a question worth putting to
+  somebody making one code, and rounded modules inside square finders is the
+  one nobody picks on purpose.
+
+  What it cost is the interesting part, and it is the same height budget
+  `f2673d4` was about. In the wide face a Linux machine picks for `system-ui` —
+  stood in for by Verdana here, which is the trick that section recommends and
+  it works — the control rail had about a hundred points to spare and the card
+  wanted a hundred and forty. Two points came off every card's padding, one off
+  every gap inside a card, and two off the gap between them — and then the same
+  again, for the caution below.
+
+  Still not reachable, and deliberately: the finder's own two colours, and the
+  logo's padding and clearing. The first is a fourth colour control in the rail
+  that has none to spare, on the one part of a code that has to stay findable.
+- **The shapes scan, and they do not scan *fast* — which no test here can
+  say.** Reported from a phone rather than from a runner: a rounded or dotted
+  code has to be held still and focused on, where a square one is read as soon
+  as it is pointed at. `every_combination_of_shapes_scans` decodes all three
+  with a real reader and is right to; decoding a rendered image is simply not
+  the same measurement as a camera hunting for edges in a printed one. **This
+  is the class of defect the test suite is structurally unable to find**, and
+  the only honest answer is to write it down where the choice is made: the
+  Shape card now carries the same caution banner the margin does, as soon as
+  anything but square is chosen.
+
+  The card had been left without a hint on the argument that the app keeps its
+  promises by only offering answers that hold — which was a good argument about
+  the promise it was actually making ("these all scan") and no argument at all
+  about the one it was not ("these all scan as well as each other"). Worth
+  remembering as a failure mode: a guarantee proved by tests is easy to mistake
+  for the whole of what a person needs to know.
+
+  Two cautions in one rail is what the height budget then had to answer, and
+  two things paid for it. `.warn` **had never zeroed the user agent's own
+  paragraph margin** — thirty points of nothing on every caution in the window,
+  which is why the *margin* caution had been overflowing the rail at 820 since
+  it was written with no test to say so. And the Margin card now shows its hint
+  or its caution rather than both, which is what buys the room the caution
+  takes. `no_control_is_below_the_fold` covers that state now, having only ever
+  looked at states nobody had touched a control to reach.
+
+  The Shape card is last, under the Margin card, which is the order the two
+  read in and the order that was asked for. It is not the order the height
+  budget would have picked: the shape caution is then the lower of the two in a
+  column that scrolls, and it is the likelier of the two to appear. So the room
+  was found instead of borrowed — two more points off every card's padding,
+  three off the gap between them — and at 820 in the wide face the caution is
+  on screen with the card's own bottom edge five points under the fold.
+  `a_caution_is_never_the_thing_that_scrolls` is the promise that holds there.
+  Both cautions at once is twenty-five points over, and that state's answer is
+  the scrollbar. **Worth noting for the next control that wants this rail:
+  there is no third round of this. The padding and the gaps have been shaved
+  twice and the saturation square twice, and what is left to give is a card.**
+- **The inset has a size now, and the ceiling on it is not a constant.**
+  `Logo::size` has been in the core since before the rewrite with no way to
+  ask for it. Three sizes — an eighth, the core's sixth, a quarter — and the
+  interesting part is that the largest is not always available. A logo has to
+  stay `FINDER_CLEARANCE` modules clear of every edge, which is a fixed number
+  of *modules* and so a share of the code that grows with it: twenty-one
+  modules leave barely a fifth of the width, twenty-five leave a third. A few
+  characters plus a picture is a twenty-one-module code, so this is reachable
+  rather than theoretical.
+
+  `qrnew_core::largest_logo_size` is new and is what the row asks, rather than
+  the app copying two rules that would then drift out of step with the ones
+  enforced. A size the code cannot take is dimmed and inert, the way the
+  error-correction row is while an inset holds it at 30%. The other half is a
+  code that *shrinks* — text deleted out from under a size that fitted — and
+  there the app redraws at the size that fits every code and marks the chip
+  held. The core refuses rather than shrinking, on the grounds that only the
+  caller knows which to give up; the app is the caller, and drawing nothing is
+  the one answer that is certainly wrong.
+
+  The row cost the saturation square twelve more points, on top of the thirty
+  the Inset card took. That column is where the height in this window comes
+  from, and the square is still the largest control in the app.
+
+  Still not reachable, and deliberately: the logo's padding and clearing, and
+  any way to refuse the raise to 30% error correction.
+- **The hex field crashed the window on a keystroke — closed.** `parse_hex`
+  switched on `str::len`, a count of bytes, and then sliced what it assumed
+  were characters: three bytes is `abc` and it is also `aé`, and `&text[1..2]`
+  inside that second one is not a character boundary. Typing an accented letter
+  into the colour field panicked in an event handler, which takes the window
+  with it. It reads bytes now and asks whether each one is a hex digit, which
+  nothing outside ASCII is. There is a test with eight ways of writing it.
+- **Escape closes a sheet, and it takes two handlers.** A modal is the one
+  place in this window where the next click has to land somewhere in
+  particular, and the scrim and the Close button were the only two ways out.
+  What makes it two handlers is where the keyboard is when the key is pressed.
+  An `onkeydown` on `.app` catches everything typed while the focus is inside
+  the interface, and is the half `tests/interface.rs` can drive — the sheets
+  take the keyboard when they open, which is what a modal should do anyway.
+  But `clicking_a_chip_blurs_the_field` records the rule that stops that being
+  enough: a click matching none of Blitz's known controls *clears* the focus to
+  `<html>`, which is above `.app`, so after choosing a theme in the sheet a
+  keystroke bubbles away from the app rather than through it. Upstream's
+  `use_window_event` catches that one at the winit level, before any of it
+  applies. **The window half cannot be tested here** — the harness has no
+  window to deliver a `WindowEvent` from — so what the test holds instead is
+  the fact that makes the second handler necessary, and it says so.
 - **Text fields are painted in a font nobody asked for.** `create_text_editor`
   hands the `parley` editor behind every `<input>` three properties — size,
   line height, brush — and drops the rest of the computed style, so
@@ -762,3 +870,25 @@ black under both themes.
 - **Packaging itself.** Unchanged and unhelped: `codesign --sign -` is still an
   ad-hoc signature, there is still no notarization, and the README still warns
   about the first launch.
+
+  Three things about the release path are worth knowing before this branch
+  merges, none of them blocking:
+
+  - **Merging does not produce release assets.** `build.yml` tests and builds
+    on all three platforms and uploads the bare executables as workflow
+    artifacts, which expire. The `.zip` and `.tar.gz` in Releases come only
+    from `release.yml`, which fires on a `v*` tag. So: merge, watch Build go
+    green, then tag.
+  - **The bundle's version is no longer typed in.** It was written into
+    `release.yml`'s plist and into the `justfile`, both saying `0.1.0`, neither
+    of them the copy `cargo` builds against. Both read `Cargo.toml` now. A tag
+    still has to agree with `Cargo.toml` by hand — nothing checks that.
+  - **`macos-latest` is Apple silicon**, so the macOS asset is arm64 only.
+    That was already true of `v0.0.1`. A universal binary needs
+    `aarch64-apple-darwin` and `x86_64-apple-darwin` built and `lipo`'d, which
+    is a real change to the workflow rather than a flag.
+
+  `build.yml` also still lists `dioxus-native` among the branches it fires on.
+  That is harmless after the merge — pull requests are covered separately —
+  but the comment above it stops being true, and the line can come out with
+  the branch.

@@ -6,7 +6,9 @@ Small, simple, and offline-only, so user data remain private. Create a QR code i
 
 QRnew reads QR codes as well. Open an image file — PNG, JPEG, GIF, WebP or SVG — and the text inside it appears next to the button, with one click to copy it.
 
-A picture can sit in the middle of a code, too. Choose one and it is drawn into the middle of the modules; error correction rises to 30% while it is there, which is what pays for the part it covers.
+The code does not have to be drawn in squares. *Shape* offers rounded modules or dots, and the three corner squares a scanner looks for soften along with them. Every one of them still scans — that is what `qrnew-core`'s tests check, with a real decoder, for each shape in turn. Scanning *quickly* is a different question, and one no test can answer: a camera has fewer clean edges to work with, so it takes a moment longer to focus and lock on. The card says so as soon as you choose anything but square, because square is what to use when the code has to be read fast and every time.
+
+A picture can sit in the middle of a code, too. Choose one and it is drawn into the middle of the modules; error correction rises to 30% while it is there, which is what pays for the part it covers. Three sizes, and the largest is not always on offer: a picture has to stay clear of the corner squares, which sit a fixed number of modules in from each edge — so a code holding a few characters has barely room for the middle size, and one holding a web address has room for all three. The row only offers what the code in front of it can carry.
 
 The window follows the desktop's light or dark setting, and *Theme* in the corner overrules that when you want it to — and remembers, which is the only thing QRnew writes down anywhere: a code looks like a different code matted on graphite than it does on paper, and paper is usually what it ends up printed on. The dashed line around the preview is where the code ends, so the blank border that gets saved with it stays visible even when you give it the same colour as the window behind it.
 

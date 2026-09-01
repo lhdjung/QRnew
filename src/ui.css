@@ -294,17 +294,47 @@ body {
 
 /* **The bottom padding is 18 and the sides are 30, and the difference is a
  * budget rather than an oversight.** At 820 points of window — the number
- * `no_control_is_below_the_fold` holds the app to — the colours rail runs 707
- * points of content in a 724-point box, so the whole margin for error in this
- * window is the dozen points under the cards.
+ * `no_control_is_below_the_fold` holds the app to — both rails run within a
+ * few dozen points of the box they are in, so the margin for error in this
+ * window is what is left under the cards.
  *
- * That was not enough. Every box in the rail is sized by an explicit
- * `line-height`, so none of them moves when the font does; the one thing that
- * still does is where a sentence wraps, and the hint at the bottom of the
- * Inset card wraps to two lines in San Francisco and to three in the wider
- * face a Linux machine picks for `system-ui` — twenty-two points the rail did
- * not have, which is how CI found this and a laptop never would. Twelve points
- * came off this margin so that line has somewhere to go. */
+ * Every box in a rail is sized by an explicit `line-height`, so none of them
+ * moves when the font does; the one thing that still does is where a sentence
+ * wraps, and a sentence gains a line in the wider face a Linux machine picks
+ * for `system-ui`. That is how CI found this and a laptop never would, and it
+ * is why the numbers below were taken twice — once here, and once with the
+ * body's `font-family` pointed at Verdana, which is wider than the Linux face
+ * and present on this machine. It is the cheapest way to ask a
+ * font-sensitivity question without waiting on a runner.
+ *
+ * The Shape card was what the last of this budget went on, and then its
+ * caution and the inset's row of sizes wanted more than the budget had. Three
+ * things paid for them, in that order of value:
+ *
+ * - `.warn` never zeroed the user agent's own paragraph margin, so every
+ *   caution in the window was carrying thirty points of nothing. That was a
+ *   bug, and it is why the margin caution had been overflowing this rail at
+ *   820 since it was written without a test ever saying so.
+ * - The Margin card shows its hint *or* its caution, never both. Somebody who
+ *   has driven the number below two has already learnt what the stepper does.
+ * - Two points off every card's padding and every gap inside one, three off
+ *   the gap between them, and twelve off the height of the saturation square —
+ *   which is where the height in this window has always come from, and which
+ *   is still the largest control in the app. Twenty-three points in the
+ *   control rail, and none of it visible unless the two builds are put side by
+ *   side.
+ *
+ * That leaves the control rail with 68 points clear in the wide face at 820
+ * against the 27 it had before, and the colours rail 29 against 36 — the row
+ * of inset sizes is what the second number went on, and it only exists once
+ * there is a picture to size.
+ *
+ * The one state that does not fit is the shape caution at 820 in the wide
+ * face, five points over. The Shape card is last in the rail, so those five
+ * points are its own bottom edge and the sentence above it is fully on screen;
+ * `a_caution_is_never_the_thing_that_scrolls` is what holds that line. Both
+ * cautions at once is twenty-five over, and the answer to that state is the
+ * scrollbar the rail already has. */
 .body {
   display: flex;
   flex-direction: row;
@@ -330,7 +360,7 @@ body {
 .rail {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 11px;
   flex: 0 0 356px;
   min-height: 0;
   padding-right: 8px;
@@ -341,9 +371,9 @@ body {
 .card {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 9px;
   flex: 0 0 auto;
-  padding: 18px;
+  padding: 14px;
   background: linear-gradient(180deg, var(--card-top), var(--card));
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -501,16 +531,20 @@ body {
   gap: 8px;
 }
 
-/* The theme sheet's row: three wide rather than four, and roomier, because
- * one of the three is two words and a segment that only just fits its label
- * reads as a mistake. The sheet widens with it — the segments are the widest
- * thing in it, so the panel is sized by them rather than the other way. */
+/* A three-wide track, for the three rows that ask a three-way question: the
+ * shape of the code's modules, the size of the picture in the middle of it,
+ * and the theme. Only the columns and the gutter, so a row in a card is the
+ * same height as the four-wide one above it. */
 .segments-3 {
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
 
-.segments-3 .chip {
+/* The sheet's segments are roomier than a card's, because one of the three is
+ * two words and a segment that only just fits its label reads as a mistake.
+ * The sheet widens with them — they are the widest thing in it, so the panel
+ * is sized by them rather than the other way. */
+.theme-sheet .chip {
   padding: 12px 10px;
   font-size: 15px;
 }
@@ -770,7 +804,12 @@ body {
   flex-direction: row;
   align-items: center;
   gap: 10px;
-  padding: 11px 13px;
+  /* A `<p>` that did not say so carried the user agent's own 1em above and
+   * below it — thirty points of nothing, on the one box in a rail that only
+   * exists in the state where the rail is tallest. Every other paragraph in
+   * this file already zeroed it; this one was the omission. */
+  margin: 0;
+  padding: 10px 13px;
   color: var(--warn);
   font-size: 15px;
   font-weight: 500;
@@ -842,7 +881,7 @@ body {
 .picker {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 9px;
 }
 
 /* The saturation/value square and the hue strip.
@@ -858,15 +897,18 @@ body {
  * The layers themselves are set from `ui.rs`, because the marker moves.
  *
  * The square gave up thirty pixels of height, and the swatches four each, to
- * pay for the Inset card underneath. This column is where the height in this
- * window is spent: the picker was two hundred pixels tall against a rail with
- * about a hundred and eighty to spare, so a second card down here was a
- * subtraction from the square or nothing at all. A saturation/value square is
- * a surface somebody sweeps a pointer across rather than one they read, and it
- * is still the largest control in the app. */
+ * pay for the Inset card underneath, and another twelve to pay for the row of
+ * sizes inside that card. This column is where the height in this window is
+ * spent: the picker was two hundred pixels tall against a rail with about a
+ * hundred and eighty to spare, so anything else down here is a subtraction
+ * from the square or nothing at all. A saturation/value square is a surface
+ * somebody sweeps a pointer across rather than one they read, and it is still
+ * the largest control in the app.
+ *
+ * `SQUARE_H` in `ui.rs` is this number, and a test says so. */
 .sv {
   width: 310px;
-  height: 170px;
+  height: 158px;
   border: 1px solid var(--line-2);
   border-radius: 10px;
   background-origin: border-box;

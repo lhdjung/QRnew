@@ -278,6 +278,34 @@ impl Qr {
     }
 }
 
+/// The largest [`Logo::size`] a code `modules` across can carry, at `padding`
+/// modules of air around the picture.
+///
+/// The two rules a size can break are the two [`Qr::new`] enforces, and both
+/// of them turn into a ceiling on the size:
+///
+/// - the cleared box covers at most [`MAX_LOGO_AREA`] of the code, which is a
+///   fixed share and so a fixed side;
+/// - the cleared box stops [`FINDER_CLEARANCE`] modules short of every edge,
+///   which is a fixed *number of modules* and so a share that grows with the
+///   code.
+///
+/// The second is what makes this worth exposing rather than assuming. On the
+/// smallest code there is — twenty-one modules — it allows a shade over a
+/// fifth of the width; a few characters further on it allows a third. An
+/// interface offering a choice of sizes has no way to work that out from
+/// [`Logo`] alone, and the alternative is copying these two rules somewhere
+/// they can drift out of step with the ones actually enforced.
+///
+/// Zero when nothing fits, which a code cannot be small enough to reach:
+/// twenty-one modules is the floor and it has room to spare.
+pub fn largest_logo_size(padding: f32, modules: u32) -> f32 {
+    let modules = modules as f32;
+    let by_area = MAX_LOGO_AREA.sqrt() - 2.0 * padding / modules;
+    let by_finder = 1.0 - 2.0 * (FINDER_CLEARANCE + padding) / modules;
+    by_area.min(by_finder).max(0.0)
+}
+
 /// Checks a logo against the rules documented on [`Qr::new`].
 fn check_logo(logo: &Logo, modules: u32) -> Result<(), LogoError> {
     // Written as a positive test so that a NaN, which compares false against
@@ -888,6 +916,59 @@ mod tests {
         let qr = Qr::new(SHORT, ErrorCorrection::High, &style).unwrap();
 
         assert_eq!(qr.size_in_modules(), 21 + 2 * DEFAULT_QUIET_ZONE);
+    }
+
+    /// The ceiling `largest_logo_size` reports is the one `check_logo` keeps.
+    ///
+    /// Walked over every code version rather than asserted at one size,
+    /// because the point of the function is that the answer *moves*: the area
+    /// rule is a fixed share and the finder rule is a fixed number of modules,
+    /// so which of the two binds changes as the code grows. A hair under the
+    /// reported size has to pass and a hair over has to fail, at all of them.
+    #[test]
+    fn the_largest_size_that_fits_is_the_largest_size_that_is_accepted() {
+        for version in 1..=40u32 {
+            let modules = 17 + 4 * version;
+            let padding = Logo::DEFAULT_PADDING;
+            let largest = largest_logo_size(padding, modules);
+            let at = |size| {
+                check_logo(
+                    &Logo {
+                        size,
+                        padding,
+                        ..Logo::new(logo_image(GREEN))
+                    },
+                    modules,
+                )
+            };
+
+            assert!(largest > 0.0, "{modules} modules leave room for a logo");
+            assert!(
+                at(largest - 0.001).is_ok(),
+                "{modules} modules take a logo of {largest}",
+            );
+            assert!(
+                at(largest + 0.001).is_err(),
+                "{modules} modules refuse a logo past {largest}",
+            );
+        }
+    }
+
+    /// The smallest code takes the default size and not much more.
+    ///
+    /// The number itself is the interesting part: it is what says that a size
+    /// control cannot simply offer a bigger logo and be done, because on a
+    /// twenty-one-module code there is barely a fifth of the width to give.
+    #[test]
+    fn the_smallest_code_has_almost_no_room_above_the_default_logo() {
+        let largest = largest_logo_size(Logo::DEFAULT_PADDING, 21);
+
+        assert!(largest > Logo::DEFAULT_SIZE, "{largest}");
+        assert!(largest < 0.2, "{largest}");
+        assert!(
+            largest_logo_size(Logo::DEFAULT_PADDING, 25) > 0.25,
+            "one version further on there is room for a quarter",
+        );
     }
 
     #[test]
