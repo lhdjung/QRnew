@@ -314,6 +314,17 @@ pub struct Inlay(pub String);
 #[derive(Clone)]
 pub struct Tone(pub Theme);
 
+/// Somewhere to write the theme down, provided as a root context by `main.rs`.
+///
+/// The app does not do its own file writing, and this is why: a test clicks
+/// through the theme sheet several times, and a component that saved to disk
+/// would be a test suite that edited the settings of whoever ran it. `main.rs`
+/// supplies the closure, nothing supplies it in a test, and an absent context
+/// is an app that simply does not remember — which is also what a machine with
+/// no writable home gets.
+#[derive(Clone)]
+pub struct Remember(pub Arc<dyn Fn(Theme) + Send + Sync>);
+
 /// Which of the two colours the picker is pointed at.
 ///
 /// Not an `Option`: the picker is always on screen, and the wells choose what
@@ -352,7 +363,7 @@ impl Theme {
     /// themed rule in `ui.css` hangs off — and the `data-theme` a test selects
     /// its button by. One name for both, because a test that clicked on the
     /// visible label would be a test that passed in English and nowhere else.
-    const fn slug(self) -> &'static str {
+    pub const fn slug(self) -> &'static str {
         match self {
             Theme::System => "system",
             Theme::Light => "light",
@@ -421,6 +432,7 @@ pub fn App() -> Element {
         dioxus_core::try_consume_context::<Tone>().map_or(Theme::System, |Tone(seed)| seed)
     });
     let mut theme_sheet = use_signal(|| false);
+    let remember = use_hook(dioxus_core::try_consume_context::<Remember>);
 
     // The title bar belongs to the platform, and the platform will not read a
     // class off `.app` — so the one thing the stylesheet cannot reach is asked
@@ -1104,7 +1116,20 @@ pub fn App() -> Element {
                                     class: chip_class(theme() == choice, false),
                                     "data-theme": "{choice.slug()}",
                                     aria_pressed: if theme() == choice { "true" } else { "false" },
-                                    onclick: move |_| theme.set(choice),
+                                    onclick: {
+                                        let remember = remember.clone();
+                                        move |_| {
+                                            theme.set(choice);
+                                            // Written here rather than in an
+                                            // effect on `theme`, so that
+                                            // `--theme` and the saved value
+                                            // itself seed the window without
+                                            // writing themselves back.
+                                            if let Some(Remember(write)) = &remember {
+                                                write(choice);
+                                            }
+                                        }
+                                    },
                                     span {
                                         match choice {
                                             Theme::System => fl!("theme-system"),

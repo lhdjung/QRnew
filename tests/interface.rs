@@ -26,7 +26,7 @@ use blitz_test_harness::{Harness, HarnessOptions};
 use blitz_traits::events::BlitzImeEvent;
 use blitz_traits::shell::ColorScheme;
 use dioxus::prelude::VirtualDom;
-use qrnew::ui::{App, Fill};
+use qrnew::ui::{App, Fill, Remember, Theme, Tone};
 
 /// The preview's SVG, decoded back out of the `data:` URL on the `<img>`.
 ///
@@ -1500,6 +1500,59 @@ fn the_theme_is_the_desktops_until_somebody_picks_one() {
         assert_eq!(shown(&harness, ".lit"), lit, "{case}: light-ink icons shown");
         assert_eq!(shown(&harness, ".dim"), dim, "{case}: dark-ink icons shown");
     }
+}
+
+/// **A choice is written down, and nothing else is.**
+///
+/// The theme is the one thing QRnew keeps between runs, and the writing is a
+/// closure handed in as a context rather than a call into `settings` — so this
+/// can watch it happen without a file, and so the rest of the suite, which
+/// clicks through this sheet several times, cannot edit the settings of
+/// whoever runs it.
+///
+/// The negative half matters as much as the positive one. Opening the sheet is
+/// not a decision, and a window seeded by `--theme` or by the saved value
+/// itself is not somebody changing their mind; either writing back would turn
+/// a screenshot flag into a preference and make the file impossible to reason
+/// about.
+#[test]
+fn the_sheet_writes_a_choice_down_and_nothing_else() {
+    let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = std::sync::Arc::clone(&written);
+    let seen = || written.lock().unwrap().clone();
+
+    let vdom = VirtualDom::new(App)
+        .with_root_context(Fill("https://example.org".into()))
+        // Seeded, the way a saved theme or `--theme` seeds it.
+        .with_root_context(Tone(Theme::Dark))
+        .with_root_context(Remember(std::sync::Arc::new(move |theme| {
+            sink.lock().unwrap().push(theme);
+        })));
+    let mut harness = Harness::from_vdom(vdom, HarnessOptions::default());
+    harness.set_viewport_size(1280, 860);
+    harness.pump();
+    assert!(harness.query(".app.theme-dark").is_some(), "the seed took");
+    assert_eq!(seen(), vec![], "a seeded window has not been asked anything");
+
+    harness.click(".theme-open");
+    harness.pump();
+    assert_eq!(seen(), vec![], "and opening the sheet is not an answer");
+
+    harness.click("[data-theme=\"light\"]");
+    harness.pump();
+    assert_eq!(seen(), vec![Theme::Light]);
+
+    harness.click("[data-theme=\"system\"]");
+    harness.pump();
+    assert_eq!(
+        seen(),
+        vec![Theme::Light, Theme::System],
+        "going back to the desktop is a choice like any other"
+    );
+
+    harness.click(".theme-close");
+    harness.pump();
+    assert_eq!(seen().len(), 2, "and closing the sheet is not one");
 }
 
 /// **The sheet opens, chooses, and closes.**

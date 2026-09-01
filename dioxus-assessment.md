@@ -653,6 +653,14 @@ worth the next person's time:
   a *runtime* theme switch specifically, and it is why the switch is spent on
   the window rather than on anything that appears in a list.
 
+The choice is also the first thing QRnew keeps between runs. One key in one
+file, in the directory the platform keeps for it, written only from the sheet's
+own click — `--theme` seeds a window without writing itself back, and the
+component never touches a path at all: `main.rs` hands it a closure, and the
+tests, which click through the sheet repeatedly, are handed nothing. Nothing
+else in the window is saved, because nothing else in the window is about the
+person rather than about the code being made.
+
 One thing the light window needed that the dark one did not, and that survives
 the choice becoming three-way: **the mat under the code is painted in the
 code's own background colour**, and nothing stops that being the colour of the

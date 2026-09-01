@@ -7,4 +7,5 @@
 //! Both get the same component, which is the whole point of the split.
 
 pub mod i18n;
+pub mod settings;
 pub mod ui;

@@ -26,10 +26,17 @@
 //! `--theme system|light|dark` is the third of those, and the cheapest: the
 //! theme is behind a button and a sheet, so a window in any theme but the
 //! desktop's needs somebody to click twice. It seeds what the sheet would have
-//! set, which is what makes the two themes photographable.
+//! set, which is what makes the two themes photographable — and it does not
+//! write itself to `settings`, because a screenshot is not somebody changing
+//! their mind.
+
+use std::sync::Arc;
 
 use dioxus_native::{LogicalSize, WindowAttributes};
-use qrnew::{i18n, ui};
+use qrnew::{i18n, settings, ui};
+
+/// The key the theme is filed under in `settings`.
+const THEME: &str = "theme";
 
 fn main() {
     // Get the system's preferred languages, and apply the localizations.
@@ -50,7 +57,12 @@ fn main() {
             .cloned()
     };
     let fill = text("--fill").unwrap_or_default();
-    let tone = text("--theme").and_then(|name| ui::Theme::named(&name));
+    // The flag beats the file, and does not become the file: `--theme` is for
+    // photographing a window, and a screenshot is not somebody changing their
+    // mind. Only the sheet writes, and it writes from the click.
+    let tone = text("--theme")
+        .and_then(|name| ui::Theme::named(&name))
+        .or_else(|| settings::read(THEME).and_then(|name| ui::Theme::named(&name)));
     let inset = text("--inset");
     let measured = flag("--width").or_else(|| flag("--height"));
 
@@ -98,6 +110,14 @@ fn main() {
             Box::new(ui::Tone(theme)) as Box<dyn std::any::Any>
         }));
     }
+    // How the window writes a choice down. It is handed in rather than reached
+    // for, so that the tests — which click through the sheet — drive a window
+    // that cannot touch anybody's settings.
+    contexts.push(Box::new(|| {
+        Box::new(ui::Remember(Arc::new(|theme: ui::Theme| {
+            settings::write(THEME, theme.slug());
+        }))) as Box<dyn std::any::Any>
+    }));
 
     dioxus_native::launch_cfg(ui::App, contexts, vec![Box::new(attributes)]);
 }
