@@ -120,24 +120,70 @@ AtlasConfig { initial_atlas_count: 0, max_atlases: 8, atlas_size: (1024, 1024),
 
 from an app that asked for 1024.
 
-## What is not yet shown
+## What the patch does to the memory
 
-**That the saving is real.** The delivery of the setting is proven; the memory
-that ought to follow is not. The machine's screen locked partway through the
-measurements, and a locked screen defers the GPU work — every reading taken
-after that point showed a process with no window and is worthless. The numbers
-in the table above were all taken with the display awake and are good; the
-post-patch comparison has to be retaken.
+**It follows.** The first attempt at this comparison was thrown away — the
+machine's screen locked partway through, and a locked screen defers the GPU
+work, so every reading after that point was of a process with no window. Taken
+again with `caffeinate -d` holding the display awake, one release binary
+throughout, the only difference between rows being a flag:
 
-The prediction is a 1024×1024 atlas at 4 MiB against 64, so 85.2 MB of GPU dirty
-should fall to roughly 25 MB, and the 16×16 case should stop costing what the
-photograph costs.
+| inset drawn | atlas asked for | GPU dirty | footprint |
+| --- | --- | ---: | ---: |
+| none | — | 17.3 MB | 72.3, 72.1 MB |
+| 16x16 | *default 4096* | 83.5 | 138.2 |
+| 256x256 | *default 4096* | 83.5, 83.9 | 139.0, 139.6 |
+| 512x512 | *default 4096* | 83.5 | 142.1 |
+| 16x16 | **512** | 18.7 | 74.5 |
+| 256x256 | **512** | 18.7, 18.7 | 74.1, 74.3 |
+| 256x256 | **1024** | 21.7 | 77.4 |
+| 512x512 | **512** | *panics — see below* | |
+| 512x512 | **1024** | 25.2, 26.3, 29.8 | 84.3, 88.5, 87.9 |
+
+Read as deltas over the 17.3 MB baseline, the arithmetic is the atlas and
+nothing else: **+66.2 MB** for the default, which is 4096 x 4096 x RGBA8 =
+64 MiB; **+1.4 MB** at 512, which is 1 MiB; **+4.4 MB** at 1024, which is
+4 MiB. An application that asks for 512 pays 1.4 MB where it used to pay 66.2,
+and the app's Memory column goes from 139 MB to 74 — back to within two
+megabytes of never having drawn a picture at all.
+
+Two notes on reading the table. The absolute footprints are higher than the
+first table in this document because that sitting had a 24.0 MB swapchain and
+this one has 27.8 MB; the deltas are what carry across, and the +66.2 MB
+reproduces exactly. And the 512x512 default row is the one reading that had to
+be assembled rather than read: by then the machine was paging, so `dirty` shows
+96 KB with 83.4 MB `swapped` beside it, and 83.5 MB is the sum. Two runs of
+that configuration agree on it. A third was discarded for having a 14.0 MB
+swapchain instead of 27.8 — a different window is not the same measurement,
+which is the rule the first table in this document was built on.
+
+### The 512x512 row that is not a number
+
+Asking for a 512 atlas and then drawing a 512-pixel image does not draw it
+small. It ends the app:
+
+    thread 'main' panicked at vello_hybrid-0.1.0/src/render/wgpu.rs:544:
+    called `Result::unwrap()` on an `Err` value: AtlasLimitReached
+
+`auto_grow` is on and `max_atlases` is 8, and neither helps: an image the size
+of the whole atlas never fits in one, so growing produces more atlases it also
+does not fit in until the limit is reached, and the refusal is unwrapped. That
+is a second thing worth fixing upstream and a separate report — an atlas
+allocation that cannot succeed should be a drawing that does not appear, not a
+process that goes away — but it is also the shape of the advice below.
 
 ## What QRnew would ask for
 
-512, doubled once for headroom. `qrnew_core::MAX_LOGO_SIDE` is 512 and the
-inset is the only raster image the app draws — and that constant is already
-written against this atlas:
+**1024, and the doubling is not headroom — it is the difference between the app
+working and not.** `qrnew_core::MAX_LOGO_SIDE` is 512, so 512 looks like the
+exact fit, and the row above is what an exact fit does: an image the size of
+the atlas cannot be packed into it, and the app is gone. 1024 costs 4.4 MB for
+an ordinary logo and 8 to 12.5 MB for one at the app's own maximum, where the
+allocator takes two or three atlases and which it takes varies between runs.
+Against 66.2 MB either way.
+
+The inset is the only raster image the app draws, and the constant that bounds
+it is already written against this atlas:
 
 > It is also a hard limit rather than a preference. A GPU renderer keeps its
 > images in a texture atlas — `vello_hybrid`'s is 4096 pixels square — and an

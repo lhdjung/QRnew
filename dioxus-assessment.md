@@ -744,12 +744,21 @@ black under both themes.
   and it — `anyrender_vello_hybrid`, `blitz-paint`, `dioxus-native` — passes one
   through. That is an upstream ask rather than a workaround, and it is the one
   change that would put an inset back inside this document's headline.
-  `blitz-atlas.md` is that ask, written from measurements, and the plumbing is
-  proven both halves of the way: the setting arrives at
-  `Resources::new_with_config`. **What is still not shown is that the memory
-  follows** — the screen locked partway through the post-patch readings and a
-  locked screen defers the GPU work, so that comparison has to be retaken with
-  the display awake. It is the next thing to do here.
+  `blitz-atlas.md` is that ask, and it is now measured at both ends: the setting
+  arrives, **and the memory follows.** With the display held awake this time,
+  one release binary, the flag the only difference between runs — a 256x256
+  inset costs 83.5 MB of GPU dirty and 139.0 MB of footprint at the default
+  atlas, and 21.7 MB and 77.4 MB at 1024. The app with a picture in it comes
+  back to within a few megabytes of the app without one.
+
+  What the measurement also settled is the number to ask for. 512 is the
+  obvious one — `MAX_LOGO_SIDE` is 512 — and it is wrong: an image the size of
+  the whole atlas cannot be packed into it, `AtlasLimitReached` is unwrapped
+  two crates down, and the window goes away. **1024**, then, at 4.4 MB for an
+  ordinary logo and 8 to 12.5 MB for one at the app's maximum, against 66.2 MB
+  today. Nothing in QRnew can carry it until both halves land upstream: the
+  `[patch]` sections and the `--atlas` flag that took these numbers were
+  temporary and are reverted.
 - **Packaging itself.** Unchanged and unhelped: `codesign --sign -` is still an
   ad-hoc signature, there is still no notarization, and the README still warns
   about the first launch.
