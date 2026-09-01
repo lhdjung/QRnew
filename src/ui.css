@@ -907,6 +907,15 @@ body {
   gap: 10px;
 }
 
+/* **The monospace here does not arrive, and the declaration stays anyway.**
+ * `create_text_editor` builds the `parley` editor behind an `<input>` from
+ * three properties — size, line height, brush — and drops the rest of the
+ * computed style, the family included, so this field is painted in whatever
+ * `parley` defaults to. Measured: `ffffff` is 22.90 wide here and `bbbbbb` is
+ * 48.39, and in a monospace face they would be the same number. The CSS is
+ * right and the renderer is wrong, so this is left as written rather than
+ * edited to match the bug; `blitz-fonts.md` is the report and the eight-line
+ * patch that fixes it, under which the two strings both measure 52.21. */
 .hex {
   width: 132px;
   padding: 9px 10px;

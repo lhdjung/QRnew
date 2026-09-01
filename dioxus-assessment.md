@@ -677,7 +677,7 @@ black under both themes.
 
 ## What is still open
 
-- **Linux and Windows.** Still unrun, but no longer unrunnable. `build.yml`
+- **Linux and Windows — run, and one of them had something to say.** `build.yml`
   only fired on `main`, so a branch could not be checked until after it had
   been merged; it now fires on this branch and on pull requests. Its apt list
   did need widening, and in the direction nobody would have guessed from the
@@ -685,12 +685,36 @@ black under both themes.
   links it rather than dlopening it**, so the build stops in a `build.rs` with
   `pkg_config::find_library("fontconfig").unwrap()` before a line of QRnew is
   compiled. `libgtk-3-dev` came off the same list — `rfd` asks the desktop
-  portal over D-Bus and there is no GTK anywhere in the tree any more. What
-  neither can be checked from here is whether Stylo, Parley and fontique lay
+  portal over D-Bus and there is no GTK anywhere in the tree any more.
+
+  Windows builds and passes. Linux builds and failed one test, twice, and it
+  is the one this section guessed at: whether Stylo, Parley and fontique lay
   the interface out the same way on a machine whose default font is not San
-  Francisco; the tests that measure anything measure fixed CSS sizes or
-  compare two boxes with slack, which is the shape that survives a font
-  change, but that is an argument rather than a run.
+  Francisco. The argument made here was half right. **Nothing sized by CSS
+  moved** — every box in the interface takes its height from an explicit
+  `line-height`, unitless and inherited, so a line box is `1.5 x font-size` in
+  any face. What moved was where a *sentence* wrapped: the hint at the bottom
+  of the Inset card is two lines in San Francisco and three in whatever Ubuntu
+  gives `system-ui`, and the colours rail had seventeen points of room for a
+  twenty-two point line. `no_control_is_below_the_fold` said so from the
+  runner, which is exactly what it is for.
+
+  Fixed in `f2673d4`, and reproduced on this machine first rather than fixed
+  blind: pointing the body's `font-family` at Verdana — wider than the Linux
+  face and present here — fails the same test with the same numbers. That
+  stand-in is worth keeping in mind as the cheapest way to ask a
+  font-sensitivity question without waiting ten minutes for a runner.
+- **Text fields are painted in a font nobody asked for.** `create_text_editor`
+  hands the `parley` editor behind every `<input>` three properties — size,
+  line height, brush — and drops the rest of the computed style, so
+  `font-family` on a field does nothing at all. QRnew's hex field asks for
+  monospace and is painted proportional: `ffffff` measures 22.90 against
+  `bbbbbb` at 48.39, where a monospace face would give one number twice.
+  `blitz-fonts.md` is the report, with the eight-line patch that fixes it and
+  the 52.21 / 52.21 it produces. It also carries the sting in the tail — the
+  margin field's hand-rolled centring is arithmetic between Stylo's `ch` and
+  what the shaper paints, and the patch that fixes the font moves the second
+  of those, so that workaround has to be measured again when this lands.
 - **Two copies of `usvg` — closed.** `qrnew-core` is on `resvg 0.48` and the
   whole tree shares one build of `usvg`, `tiny-skia`, `png` and `base64`. It
   cost one behaviour change, and it is a change worth knowing about: **0.45
@@ -720,6 +744,12 @@ black under both themes.
   and it — `anyrender_vello_hybrid`, `blitz-paint`, `dioxus-native` — passes one
   through. That is an upstream ask rather than a workaround, and it is the one
   change that would put an inset back inside this document's headline.
+  `blitz-atlas.md` is that ask, written from measurements, and the plumbing is
+  proven both halves of the way: the setting arrives at
+  `Resources::new_with_config`. **What is still not shown is that the memory
+  follows** — the screen locked partway through the post-patch readings and a
+  locked screen defers the GPU work, so that comparison has to be retaken with
+  the display awake. It is the next thing to do here.
 - **Packaging itself.** Unchanged and unhelped: `codesign --sign -` is still an
   ad-hoc signature, there is still no notarization, and the README still warns
   about the first launch.

@@ -137,11 +137,19 @@ pub const CONFIRM_FOR: Duration = Duration::from_secs(3);
 /// Half of the width `ui.css` gives `.count`, less the one-pixel border: the
 /// point the number is centred on. It is here rather than in the stylesheet
 /// because **Blitz ignores `text-align` inside an `<input>`** — the field's
-/// text belongs to a `parley` editor that is handed a font and nothing else —
-/// so the centring is arithmetic the app does with `padding-left` and the
-/// field's own `ch`. The long version of the story is above `.count` in
-/// `ui.css`, and `the_margin_number_is_centered_in_its_field` is what stops
-/// this number and that width drifting apart.
+/// text belongs to a `parley` editor that is handed a size, a line height and
+/// a colour, and no font at all — so the centring is arithmetic the app does
+/// with `padding-left` and the field's own `ch`. The long version of the story
+/// is above `.count` in `ui.css`, and
+/// `the_margin_number_is_centered_in_its_field` is what stops this number and
+/// that width drifting apart.
+///
+/// It is arithmetic across two different answers to how wide a digit is, and
+/// `blitz-fonts.md` has both measured: Stylo resolves `1ch` here to 10.000
+/// points and the shaper paints 9.455. Half a point of the difference lands on
+/// screen, which is under the tolerance the test holds and over nothing. It is
+/// worth knowing that the day the editor is handed its font, the second number
+/// moves and this one has to be measured again.
 const COUNT_MIDDLE: f32 = 30.0;
 
 /// The colours offered in the picker.
