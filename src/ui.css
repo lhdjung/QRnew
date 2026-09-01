@@ -60,7 +60,22 @@
   --card: #fbfbfc;
   --card-top: #ffffff;
   --sunken: #f0f2f5;
-  --sunken-hi: #ffffff;
+  /* The surface a text field turns into while it holds the keyboard, and the
+   * ink written on it. Both palettes keep the field they already had; the pair
+   * is named separately from `--sunken` only because the focused field is the
+   * one surface whose ink has a second thing to clear.
+   *
+   * **That second thing is the selection, and it cannot be cleared here.**
+   * Blitz paints a text selection in one hardcoded colour — a pale blue, in
+   * `blitz-paint` — under text it then paints in the element's own colour, and
+   * there is no `::selection` to say otherwise. In the light window a dark ink
+   * on that blue reads at better than twelve to one. In the dark window a
+   * near-white ink on it is a selection nobody can read, and the only fix from
+   * out here would be to turn the field to paper — which is a brighter change
+   * to the window than the problem is worth. `blitz-mac-keys.md` carries it
+   * upstream instead, where the selection's colour is one constant. */
+  --field-lit: #ffffff;
+  --field-lit-ink: #16181d;
   --raised: #ffffff;
   --raised-hi: #eef0f4;
   /* A control the app has switched off. Barely a tint — on white it is the
@@ -88,8 +103,14 @@
   --accent-ink: #ffffff;
   --accent-dim: rgba(15, 157, 99, 0.1);
   --accent-line: rgba(15, 157, 99, 0.38);
+  /* The ring a focused text field wears: the accent at an alpha that reads
+   * as a glow rather than as a second border. `box-shadow` is painted
+   * outside the border box and takes no layout, so the loudest thing in
+   * the window is also the one that moves nothing when it appears. */
+  --accent-ring: rgba(15, 157, 99, 0.24);
 
   --danger: #c0392b;
+  --danger-ring: rgba(192, 57, 43, 0.22);
   /* A caution rather than a failure: the app will happily draw a code with a
    * one-module border, it just will not promise the code scans. */
   --warn: #8a5b06;
@@ -134,7 +155,8 @@
   --card: #1c1e22;
   --card-top: #212429;
   --sunken: #17191c;
-  --sunken-hi: #14171a;
+  --field-lit: #14171a;
+  --field-lit-ink: #edeff2;
   --raised: #272b31;
   --raised-hi: #313640;
   --off: rgba(39, 43, 49, 0.45);
@@ -151,8 +173,10 @@
   --accent-ink: #0a1a13;
   --accent-dim: rgba(78, 203, 143, 0.13);
   --accent-line: rgba(78, 203, 143, 0.45);
+  --accent-ring: rgba(78, 203, 143, 0.26);
 
   --danger: #ff9585;
+  --danger-ring: rgba(255, 149, 133, 0.24);
   /* Salmon is already spoken for by the things that did not work, so the
    * caution is gold. */
   --warn: #e9c07c;
@@ -175,7 +199,8 @@
     --card: #1c1e22;
     --card-top: #212429;
     --sunken: #17191c;
-    --sunken-hi: #14171a;
+    --field-lit: #14171a;
+    --field-lit-ink: #edeff2;
     --raised: #272b31;
     --raised-hi: #313640;
     --off: rgba(39, 43, 49, 0.45);
@@ -192,8 +217,10 @@
     --accent-ink: #0a1a13;
     --accent-dim: rgba(78, 203, 143, 0.13);
     --accent-line: rgba(78, 203, 143, 0.45);
+    --accent-ring: rgba(78, 203, 143, 0.26);
 
     --danger: #ff9585;
+    --danger-ring: rgba(255, 149, 133, 0.24);
     /* Salmon is already spoken for by the things that did not work, so the
      * caution is gold. */
     --warn: #e9c07c;
@@ -470,10 +497,53 @@ body {
   border-color: var(--raised-hi);
 }
 
-.field:focus {
-  background: var(--sunken-hi);
-  border-color: var(--accent-line);
+/* **What a field looks like when it has the keyboard**, and all three of the
+ * text fields say it the same way: the accent at full strength on the border,
+ * a ring of the same green outside it, and paper underneath.
+ *
+ * The border used to be `--accent-line` — the accent at 38% — which on a
+ * field that is already outlined in `--line-2` is a border that has changed
+ * shade rather than a field that has been picked out. Full strength plus the
+ * ring is the difference between the two, and the ring is a `box-shadow`
+ * rather than an `outline` or a thicker border because it is the only one of
+ * the three that is painted outside the border box and therefore costs no
+ * layout: nothing beside a focused field moves when it takes the keyboard.
+ *
+ * `caret-color` is the one property of the caret CSS can reach here — see
+ * `.caret-dark` below for the blink — and it is the field's own ink rather
+ * than the accent, because the caret's job is to say where the next character
+ * lands, and the character it stands in for is written in that colour. */
+.field:focus,
+.count:focus,
+.hex:focus {
+  color: var(--field-lit-ink);
+  background: var(--field-lit);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+  caret-color: var(--field-lit-ink);
   outline: none;
+}
+
+/* Half of the blink. `ui.rs` writes `caret-dark` onto `.app` for half of every
+ * beat, and takes it off while anything is being typed.
+ *
+ * **A class rather than an animation, and that is forced.** A blinking caret
+ * anywhere else is a CSS keyframe, and there are no keyframes here: the same
+ * animation clock that makes `transition` unusable in this app — it only
+ * advances while frames are being asked for, and no frame is asked for while
+ * the preview is still decoding — would stop the blink mid-beat and leave a
+ * caret that is neither on nor off. A signal toggled from a timer is a beat
+ * the app can see, and one it can stop: the class only appears while a text
+ * field holds the keyboard, so a window nobody is typing in redraws for
+ * nothing.
+ *
+ * It has to name the fields rather than sit on `.app` and inherit, because
+ * `caret-color` is inherited but the rule above sets it on the field itself,
+ * and a declaration on the element beats anything handed down to it. */
+.caret-dark .field:focus,
+.caret-dark .count:focus,
+.caret-dark .hex:focus {
+  caret-color: transparent;
 }
 
 /* Buttons carry an icon *and* a word. Neither alone: an icon on its own is a
@@ -784,12 +854,6 @@ body {
   border-color: var(--raised-hi);
 }
 
-.count:focus {
-  background: var(--sunken-hi);
-  border-color: var(--accent-line);
-  outline: none;
-}
-
 /* The caution that appears when the margin goes under two.
  *
  * It began as 12.5px of grey-gold tucked into the space left over at the end
@@ -971,13 +1035,17 @@ body {
   user-select: text;
 }
 
-.hex:focus {
-  border-color: var(--accent-line);
-  outline: none;
-}
-
+/* A hex that is not a colour yet. It outranks the focus rule above — same
+ * specificity, and it comes later — so a field being typed into wrongly says
+ * so rather than saying it has the keyboard, and the ring turns with the
+ * border so the two are never arguing. */
 .hex.bad {
   border-color: var(--danger);
+}
+
+.hex.bad:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-ring);
 }
 
 /* ------------------------------------------------------------------ stage */
@@ -986,8 +1054,15 @@ body {
  * square bitmap into an object on the page, and painting it in `light` rather
  * than in white means it still reads as one when the background is recoloured.
  *
- * It is also why the corners can be round without clipping the image: the
- * radius is carried by the mat, and the image never reaches it.
+ * **Square, and flush against the picture.** It was 18 pixels of padding and
+ * a 20-pixel radius, and both of those were the preview telling a lie about
+ * the file. The padding is painted in the code's own background colour, so it
+ * is indistinguishable from the quiet zone the code carries — about one
+ * module's worth at this window size, which made margin 0 look like margin 1
+ * and margin 1 like margin 2, when the saved document at margin 0 is 25
+ * modules across and carries nothing at all. The radius was the same lie in
+ * the other direction: a rounded edge around a square file. What is on the
+ * stage is now the document's own box, at its own size and its own shape.
  *
  * **The outline is dashed, and it is not decoration.** The mat is the code's
  * own background colour and the window behind it is `--bg`; nothing stops
@@ -1016,18 +1091,15 @@ body {
   justify-content: center;
   width: min(100%, 54vh, 470px);
   aspect-ratio: 1 / 1;
-  padding: 18px;
   border: 1px dashed var(--mat-line);
-  border-radius: 20px;
   box-shadow: 0 18px 46px var(--shadow-deep);
 }
 
 /* The two layers the code is drawn in.
  *
- * Square, because `.preview` is square and its padding is even, so this box is
- * the document's own box — which is what lets the picture be placed in
- * percentages taken straight from `Qr::inset_box` with no arithmetic in
- * between. */
+ * Square, and the same box as `.preview` now that nothing pads it — which is
+ * what lets the picture be placed in percentages taken straight from
+ * `Qr::inset_box` with no arithmetic in between. */
 .code {
   position: relative;
   width: 100%;
@@ -1064,7 +1136,6 @@ body {
   font-size: 14px;
   text-align: center;
   border: 1px dashed var(--line-2);
-  border-radius: 20px;
 }
 
 .exports {

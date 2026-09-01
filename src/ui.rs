@@ -12,26 +12,26 @@
 //! parses with `usvg` — `resvg`'s own parser, and the one `qrnew-core` already
 //! uses to rasterize. So the bytes on screen are the bytes in the saved file,
 //! through the same code, and the documented Blitz gap where CSS cannot reach
-//! inside an SVG never applies: `draw.rs` writes every colour as a
-//! presentation attribute so that an exported file stands on its own.
+//! inside an SVG never applies: `draw.rs` writes every colour as a presentation
+//! attribute so that an exported file stands on its own.
 //!
 //! **With one seam in it, and it is the renderer's fault rather than the
 //! design's.** A code with an inset reaches the screen as two layers: the
 //! document without the picture, and the picture laid into the hole the
-//! document left for it. `anyrender_vello_hybrid` keeps every image it has
-//! ever drawn in a GPU atlas, keyed by an identity counter rather than by
-//! content and freed never, so a picture arriving inside a *new* document on
-//! every keystroke is a new picture every time — 392 of them at the 512-pixel
-//! cap `shrink_logo` imposes, and then `AtlasLimitReached` unwrapped two
-//! crates down and the window is gone. Out here the picture is one `<img>`
-//! whose `src` does not change while the picture does not.
+//! document left for it. `anyrender_vello_hybrid` keeps every image it has ever
+//! drawn in a GPU atlas, keyed by an identity counter rather than by content
+//! and freed never, so a picture arriving inside a *new* document on every
+//! keystroke is a new picture every time — 392 of them at the 512-pixel cap
+//! `shrink_logo` imposes, and then `AtlasLimitReached` unwrapped two crates
+//! down and the window is gone. Out here the picture is one `<img>` whose `src`
+//! does not change while the picture does not.
 //!
 //! The seam is held shut by `Qr::inset_box`, which is the same code that drew
 //! the hole saying where it is, and by
-//! `the_picture_on_the_stage_is_where_the_document_puts_it`, which measures
-//! the result on screen — including, by hit test, that the picture is painted
-//! over the code rather than under it. What is saved and copied never went
-//! through any of this: it is `Qr::svg`, one document with everything in it.
+//! `the_picture_on_the_stage_is_where_the_document_puts_it`, which measures the
+//! result on screen — including, by hit test, that the picture is painted over
+//! the code rather than under it. What is saved and copied never went through
+//! any of this: it is `Qr::svg`, one document with everything in it.
 //!
 //! # The shape of the window
 //!
@@ -44,18 +44,18 @@
 //!
 //! The second rail is what stops the first one scrolling. One column of
 //! controls only fitted a window this tall with the picker collapsed, so the
-//! picker had to be something you opened — and the moment it was, half the
-//! form was below the fold. Split in two, everything is on screen at once, the
+//! picker had to be something you opened — and the moment it was, half the form
+//! was below the fold. Split in two, everything is on screen at once, the
 //! picker is simply *there*, and the wells above it choose which of the two
 //! colours it is editing rather than whether it exists.
 //!
 //! Both rails are now full: Content, Error correction, Margin and Shape down
-//! the first, Colors and Inset down the second. Height is the scarce thing
-//! here and the picker is what holds most of it, which is why adding the Inset
-//! card took thirty pixels off the saturation square and the row of inset
-//! sizes took twelve more, and why the Shape card was paid for out of every
-//! card's padding and every gap between them — the arithmetic is in `ui.css`,
-//! and `no_control_is_below_the_fold` checks it at the size a maximized window
+//! the first, Colors and Inset down the second. Height is the scarce thing here
+//! and the picker is what holds most of it, which is why adding the Inset card
+//! took thirty pixels off the saturation square and the row of inset sizes took
+//! twelve more, and why the Shape card was paid for out of every card's padding
+//! and every gap between them — the arithmetic is in `ui.css`, and
+//! `no_control_is_below_the_fold` checks it at the size a maximized window
 //! actually gets on a laptop screen rather than at the size the window falls
 //! back to.
 //!
@@ -73,18 +73,18 @@
 //! # Light, dark, and following the desktop
 //!
 //! Three answers and the person at the window picks, from a sheet behind the
-//! button beside About. Following the desktop is the default, because it is
-//! the answer that is right without anybody being asked — but it is only a
-//! default. Somebody comparing a code against the paper it will be printed on
-//! wants a light window at ten at night, and the desktop's setting has no
-//! opinion about that worth overriding theirs.
+//! button beside About. Following the desktop is the default, because it is the
+//! answer that is right without anybody being asked — but it is only a default.
+//! Somebody comparing a code against the paper it will be printed on wants a
+//! light window at ten at night, and the desktop's setting has no opinion about
+//! that worth overriding theirs.
 //!
 //! **The choice is a class on `.app`, not a media query**, and that is forced
 //! rather than chosen. `prefers-color-scheme` is real here — Blitz hands Stylo
 //! winit's window theme — but nothing an app can call from inside a component
 //! moves it. The one lever, `View::set_theme_override`, belongs to the shell
-//! and is not reachable from a Dioxus component; and asking winit to change
-//! the window's own theme does not stand in for it, because macOS deliberately
+//! and is not reachable from a Dioxus component; and asking winit to change the
+//! window's own theme does not stand in for it, because macOS deliberately
 //! *suppresses* the `ThemeChanged` event when the appearance was set by the
 //! program rather than by the desktop. So [`Theme`] writes `theme-system`,
 //! `theme-light` or `theme-dark` onto the root element, `ui.css` hangs both
@@ -93,15 +93,52 @@
 //! the authority and the event really does arrive.
 //!
 //! The window is still asked, mind: [`App`] calls `set_theme` on winit so the
-//! title bar matches the window under it. That is cosmetic and best-effort —
-//! a compositor may decline — and nothing in the interface depends on it.
+//! title bar matches the window under it. That is cosmetic and best-effort — a
+//! compositor may decline — and nothing in the interface depends on it.
 //!
 //! An icon is the one thing this cannot reach. Its ink is a presentation
-//! attribute on a document CSS cannot see inside, so [`glyph`] draws every
-//! icon twice, once in each palette's ink, and the stylesheet hides the one
-//! that does not apply. A node and a small usvg document per icon is what a
-//! runtime theme switch costs here, and it is why the choice is spent on the
-//! window rather than on anything smaller.
+//! attribute on a document CSS cannot see inside, so [`glyph`] draws every icon
+//! twice, once in each palette's ink, and the stylesheet hides the one that
+//! does not apply. A node and a small usvg document per icon is what a runtime
+//! theme switch costs here, and it is why the choice is spent on the window
+//! rather than on anything smaller.
+//!
+//! # The keyboard in a text field
+//!
+//! Three of the controls are `<input>`s, and everything a person expects of one
+//! — a caret that blinks, Backspace, a word jump, a readable selection — is
+//! somebody's job. Here it is split four ways, and only the first of them is
+//! really the app's.
+//!
+//! **The editing keys belong to AppKit, and had to be switched on.**
+//! [`open_the_text_input_client`] is the whole of it: on macOS a key that edits
+//! text is not delivered as a key, it is delivered as the command the system's
+//! key-binding table says it means — `deleteBackward:`, `moveWordLeft:` — and
+//! only to a window whose text input client is on. `blitz-dom` implements every
+//! one of those commands and asks for the client on focus, and at the pinned
+//! revision the request does not arrive: Backspace did nothing at all in this
+//! app until the window asked for itself. [`appkit_has_this_key`] is the other
+//! half, because `winit` then delivers the key event *as well* and Blitz acts
+//! on both, so one press of Left moved the caret twice. Cancelling the key
+//! event leaves the command holding it, which is also the right way round: the
+//! command knows what the person's own key map says, and the key event has to
+//! guess.
+//!
+//! Cmd is the exception, and it is not one this app can fix — see
+//! [`appkit_has_this_key`], which has the measurement.
+//!
+//! **The blink is the app's, because the renderer has no clock.** Blitz paints
+//! the caret on every frame it is asked for and asks for none of its own, so
+//! [`Caret`] and [`metronome`] supply the beat and `ui.css` turns `caret-color`
+//! transparent for half of it.
+//!
+//! **The selection's colour is nobody's**: it is a constant in `blitz-paint`, a
+//! pale blue, painted under text drawn in the element's own colour, with no
+//! `::selection` to say otherwise. What the app can choose is the ink, so a
+//! dark window cannot show a readable selection, and the only lever out here
+//! would be to turn the field to paper while it is focused, which is a brighter
+//! change to the window than the problem is worth. `blitz-mac-keys.md` carries
+//! it upstream instead.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -163,6 +200,127 @@ pub const MAX_MARGIN: u32 = 16;
 /// code rather than on the button, and short enough that it is gone before the
 /// next thing anybody does.
 pub const CONFIRM_FOR: Duration = Duration::from_secs(3);
+
+/// Half a blink: how long the caret is drawn, and then how long it is not.
+///
+/// 530ms is the interval every desktop toolkit landed on independently — it is
+/// what GTK, Qt and AppKit all ship — and there is no reason for this app to
+/// have an opinion of its own about a number that every other window on the
+/// screen already agrees on.
+pub const CARET_BEAT: Duration = Duration::from_millis(530);
+
+/// The blinking caret, and the two things a text field has to tell it.
+///
+/// **The blink is the app's, because the renderer does not have one.** Blitz
+/// paints the caret of the focused input on every frame it draws, in
+/// `caret-color`, and never asks for another frame on its own account — so a
+/// caret in this window is a bar that is simply there, which is the one thing a
+/// caret is not anywhere else. What is missing is the clock, and a clock is
+/// something an app can keep: [`metronome`] beats, this toggles, `.app` gains
+/// or loses `caret-dark`, and `ui.css` turns `caret-color` transparent for half
+/// of every beat.
+///
+/// The two things a field says are why this is a struct rather than a bare
+/// signal. `fields` is how many text inputs hold the keyboard — zero or one,
+/// and while it is zero there is no caret on screen, so the beat writes nothing
+/// and the window is not redrawn twice a second for a caret nobody is looking
+/// at. `struck` counts keystrokes, and a beat that finds a keystroke since the
+/// last one lights the caret rather than toggling it: a caret that blinks out
+/// mid-word is a caret that has lost the place, and every other text field on
+/// the desktop holds it solid while somebody is typing.
+#[derive(Debug, Clone, Copy)]
+struct Caret {
+    lit: Signal<bool>,
+    fields: Signal<u32>,
+    struck: Signal<u64>,
+}
+
+/// The caret, made once by [`App`] and handed to every field through a
+/// context — including the hex field, which is inside [`Picker`].
+fn use_caret() -> Caret {
+    let caret = Caret {
+        lit: use_signal(|| true),
+        // One, from the first frame. The window opens with the content field
+        // holding the keyboard — that is what `autofocus` on it means, and
+        // `the_field_holds_the_keyboard_before_anything_is_clicked` is the test
+        // that says so — and **Blitz's autofocus does not raise `focusin`**: it
+        // moves the focus from inside the mutator, after the tree is built,
+        // rather than through the path that generates the event. So the one
+        // field that has the keyboard before anybody has touched anything is
+        // the one field that never announces it, and counting from zero would
+        // leave the caret solid until the first click somewhere else.
+        fields: use_signal(|| 1u32),
+        struck: use_signal(|| 0u64),
+    };
+    use_context_provider(|| caret);
+
+    // The beat. One task and one thread for the life of the window, writing
+    // only while there is a caret on screen to write about.
+    use_future(move || async move {
+        let clock = metronome(CARET_BEAT);
+        let mut caret = caret;
+        let mut seen = 0u64;
+        loop {
+            clock.tick().await;
+            caret.beat(&mut seen);
+        }
+    });
+
+    caret
+}
+
+impl Caret {
+    /// What the class list on `.app` gains for the dark half of a beat.
+    fn class(&self) -> &'static str {
+        if *self.lit.read() { "" } else { " caret-dark" }
+    }
+
+    /// A field took the keyboard.
+    fn arrived(&mut self) {
+        *self.fields.write() += 1;
+        self.lit.set(true);
+    }
+
+    /// And gave it back. Saturating, because Blitz can clear the focus without
+    /// the field that had it ever hearing a `focusout` — see
+    /// `clicking_a_chip_blurs_the_field` — and a count that went negative
+    /// would leave the beat running over an empty window forever.
+    fn left(&mut self) {
+        let now = self.fields.peek().saturating_sub(1);
+        self.fields.set(now);
+        if now == 0 {
+            self.lit.set(true);
+        }
+    }
+
+    /// Somebody typed.
+    fn struck(&mut self) {
+        *self.struck.write() += 1;
+    }
+
+    /// One beat. `seen` is the caller's memory of the last keystroke it knew
+    /// about, which is what turns "something was typed" into "something was
+    /// typed *since the last beat*".
+    ///
+    /// Every read here is a `peek`: this runs inside a task that would
+    /// otherwise subscribe to the signals it is about to write, and wake
+    /// itself for the rest of the afternoon.
+    fn beat(&mut self, seen: &mut u64) {
+        let struck = *self.struck.peek();
+        let lit = *self.lit.peek();
+        let want = if *self.fields.peek() == 0 {
+            true
+        } else if struck != *seen {
+            *seen = struck;
+            true
+        } else {
+            !lit
+        };
+        if want != lit {
+            self.lit.set(want);
+        }
+    }
+}
 
 /// The middle of the margin field, measured from inside its left border.
 ///
@@ -593,6 +751,105 @@ impl Theme {
     }
 }
 
+/// Hand the window to macOS's text input system, which is where its editing
+/// keys live.
+///
+/// **Without this, `Backspace` does nothing at all.** AppKit does not send a
+/// window "the Backspace key"; it sends `deleteBackward:`, one of the standard
+/// key bindings it resolves from the user's own key map — and the same is true
+/// of `moveWordLeft:` for Option+Left, `deleteWordBackward:` for
+/// Option+Backspace, `moveToBeginningOfDocument:` for Home and everything else
+/// a Mac text field is expected to do. Blitz implements all of them, and never
+/// hears any of them, because AppKit only resolves a key event into a command
+/// for a window whose text input client is switched on. `blitz-dom` asks for
+/// that on focus, through `ShellProvider::set_ime_enabled` — and at the pinned
+/// revision the request does not arrive: `Window::ime_capabilities()` is still
+/// `None` while a field holds the keyboard and the caret is blinking in it.
+/// Measured, on this app, before any of this was written: three presses of
+/// Backspace on "hello world" left "hello world".
+///
+/// So the app asks, once, for the window it was given. It is the same request
+/// `blitz-dom` makes and the same one `winit` grants — `ImeCapabilities::new()`
+/// declares no extras, which is exactly what Blitz declares — and asking early
+/// rather than on focus costs nothing, because the request that would turn it
+/// off again on blur is a no-op in `winit` at this revision anyway: a window
+/// whose text input client has been switched on keeps it. What arrives with it
+/// is the rest of the platform for free — dead keys and a composition window
+/// included, which is the path `composed_text_reaches_the_field` already tests
+/// and which nothing was feeding.
+///
+/// It is `let _`: a window that has already been asked answers
+/// `ImeRequestError::AlreadyEnabled`, which is not a failure and not this
+/// function's business either way.
+#[cfg(target_os = "macos")]
+fn open_the_text_input_client(window: &Arc<dyn WinitWindow>) {
+    use dioxus_native::winit::window::{ImeCapabilities, ImeEnableRequest, ImeRequest};
+
+    let asking = ImeEnableRequest::new(ImeCapabilities::new(), Default::default())
+        .expect("a request that declares no capabilities asks for nothing it did not declare");
+    let _ = window.request_ime_update(ImeRequest::Enable(asking));
+}
+
+/// Let AppKit be the only thing editing a text field, on the keys it has an
+/// opinion about.
+///
+/// The other half of [`open_the_text_input_client`], and it is needed because
+/// **`winit` delivers such a key twice**: once as the command it resolved, and
+/// again as a plain `KeyboardInput`, deliberately, so that an app which does
+/// not implement the command still sees the key. Blitz implements both paths,
+/// so with the text input client on, one press of Left moves the caret two
+/// characters — the command moved it, and then the key event moved it again.
+///
+/// Cancelling the key event's default action leaves the command holding it
+/// alone, which is the right way round: the command is the one that knows what
+/// the *user's* key map says Option+Left means — and Blitz's key handling has
+/// to guess, from a table that reads the same on every platform.
+///
+/// The list is exactly the keys AppKit resolves into an editing command. `Tab`
+/// is not on it, because Blitz moves the focus on `Tab` before it looks at the
+/// field at all and cancelling would strand the keyboard; nor is `Escape`,
+/// which closes this app's sheets.
+///
+/// **Nothing held with Cmd is on it either, and that is the one thing this
+/// cannot fix.** `NSTextInputContext` declines to interpret a key event with
+/// the Command key down — those belong to the menu bar, as far as AppKit is
+/// concerned — so no command arrives for Cmd+Left, even though
+/// `moveToLeftEndOfLine:` is what the system's own key-binding table says it
+/// means, and even though `blitz-dom` implements that command. Measured the
+/// same way as everything else here: Ctrl+A jumps to the start of the line and
+/// Cmd+Backspace does nothing at all. So a key held with Cmd is left to Blitz —
+/// where Cmd is the "action" modifier and moves by word, which is the Windows
+/// and Linux binding rather than the Mac one — because leaving it alone at
+/// least leaves it doing something. The alternative is a key that does nothing
+/// whatever, and the only way past that is upstream: `blitz-dom` reading Cmd as
+/// the end of the line on macOS rather than as its cross- platform "action"
+/// modifier. `blitz-mac-keys.md` is the report and the patch that does it, and
+/// with that patch applied this function can be deleted.
+#[cfg(target_os = "macos")]
+fn appkit_has_this_key(event: &Event<KeyboardData>) {
+    if event.modifiers().contains(Modifiers::SUPER) {
+        return;
+    }
+    if matches!(
+        event.key(),
+        Key::ArrowLeft
+            | Key::ArrowRight
+            | Key::ArrowUp
+            | Key::ArrowDown
+            | Key::Home
+            | Key::End
+            | Key::Backspace
+            | Key::Delete
+            | Key::Enter
+    ) {
+        event.prevent_default();
+    }
+}
+
+/// Everywhere else, the key event is all there is and it is already right.
+#[cfg(not(target_os = "macos"))]
+fn appkit_has_this_key(_: &Event<KeyboardData>) {}
+
 #[component]
 pub fn App() -> Element {
     let mut input = use_signal(|| {
@@ -631,6 +888,7 @@ pub fn App() -> Element {
         dioxus_core::try_consume_context::<Tone>().map_or(Theme::System, |Tone(seed)| seed)
     });
     let mut theme_sheet = use_signal(|| false);
+    let mut caret = use_caret();
     let remember = use_hook(dioxus_core::try_consume_context::<Remember>);
 
     // The title bar belongs to the platform, and the platform will not read a
@@ -644,6 +902,19 @@ pub fn App() -> Element {
     // already do.
     let window = use_hook(dioxus_core::try_consume_context::<Arc<dyn WinitWindow>>);
     let windowed = window.is_some();
+    // The editing keys, on the one platform that does not send them as keys.
+    // Before the effect below rather than after it, only because that one takes
+    // the window; there is no window in a test, which is what the `Option` is
+    // for here and in every other hook that asks for one.
+    #[cfg(target_os = "macos")]
+    {
+        let asking = window.clone();
+        use_hook(move || {
+            if let Some(window) = &asking {
+                open_the_text_input_client(window);
+            }
+        });
+    }
     use_effect(move || {
         if let Some(window) = &window {
             window.set_theme(theme().window());
@@ -1007,7 +1278,7 @@ pub fn App() -> Element {
         // property is inherited, so anything painted in the app's colours has
         // to be a descendant of the element the palette is written on.
         div {
-            class: "app theme-{theme().slug()}",
+            class: "app theme-{theme().slug()}{caret.class()}",
             // Escape, for every keystroke made while the keyboard is inside
             // the interface. The other half is on the window; the whole story
             // is above `use_window_event` in this component.
@@ -1058,6 +1329,12 @@ pub fn App() -> Element {
                                 read_error.set(None);
                                 input.set(event.value());
                             },
+                            onkeydown: move |event| {
+                                caret.struck();
+                                appkit_has_this_key(&event);
+                            },
+                            onfocusin: move |_| caret.arrived(),
+                            onfocusout: move |_| caret.left(),
                         }
                         // **Blitz has no `placeholder`.** There is no such
                         // attribute in `blitz-dom` at all, so setting one — as
@@ -1238,6 +1515,12 @@ pub fn App() -> Element {
                                 // another. Whatever is applied is what comes
                                 // back.
                                 onblur: move |_| margin_draft.set(margin().to_string()),
+                                onkeydown: move |event| {
+                                    caret.struck();
+                                    appkit_has_this_key(&event);
+                                },
+                                onfocusin: move |_| caret.arrived(),
+                                onfocusout: move |_| caret.left(),
                             }
                             button {
                                 class: "step",
@@ -1734,6 +2017,10 @@ fn ColorWell(
 /// all, so the square stays its own target no matter where the marker is.
 #[component]
 fn Picker(color: Signal<Rgb>) -> Element {
+    // The blink, from the context `App` provides. The hex field is a text
+    // field like the other two and blinks like them; it is only in a different
+    // component because the colour picker is.
+    let mut caret = use_context::<Caret>();
     // The hex field keeps its own text, because half-typed hex is not a
     // colour: "#2f6" is three characters short of one, and a field that
     // rewrote itself from `color` on every keystroke could not be typed into.
@@ -1920,6 +2207,12 @@ fn Picker(color: Signal<Rgb>) -> Element {
                         draft.set(color().to_hex());
                         valid.set(true);
                     },
+                    onkeydown: move |event| {
+                        caret.struck();
+                        appkit_has_this_key(&event);
+                    },
+                    onfocusin: move |_| caret.arrived(),
+                    onfocusout: move |_| caret.left(),
                 }
             }
         }
@@ -2388,6 +2681,69 @@ fn data_url(mime: &str, bytes: &[u8]) -> String {
     out
 }
 
+/// A beat every `period`, for as long as the window is open.
+///
+/// [`after`] is a countdown and this is a clock, and the difference is a
+/// thread: `after` starts one per wait and lets it die, which is right for a
+/// confirmation that is claimed a few times an hour and wrong for a caret that
+/// is claimed twice a second. One thread is started here and sleeps between
+/// beats for the life of the process — it is never joined, because the only
+/// thing that ends it is the process ending, and a caret that stops blinking
+/// while the window is still up is a bug rather than a saving.
+///
+/// It beats whether or not anybody is waiting. A beat nobody took is dropped on
+/// the next one — `done` is a flag rather than a count — so a task that falls
+/// behind resumes on the current beat instead of catching up through a backlog
+/// of stale ones, which for a blink is the only sensible answer.
+fn metronome(period: Duration) -> Metronome {
+    let beat = Arc::new(Mutex::new(Countdown::default()));
+    let keeping = Arc::clone(&beat);
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(period);
+            // Woken outside the lock, for the reason `after` gives: the waker
+            // runs the app's own code on the way through.
+            let waker = {
+                let mut countdown = keeping.lock().unwrap();
+                countdown.done = true;
+                countdown.waker.take()
+            };
+            if let Some(waker) = waker {
+                waker.wake();
+            }
+        }
+    });
+    Metronome { beat }
+}
+
+struct Metronome {
+    beat: Arc<Mutex<Countdown>>,
+}
+
+impl Metronome {
+    /// The next beat.
+    fn tick(&self) -> Tick<'_> {
+        Tick(&self.beat)
+    }
+}
+
+struct Tick<'a>(&'a Arc<Mutex<Countdown>>);
+
+impl Future for Tick<'_> {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut countdown = self.0.lock().unwrap();
+        if countdown.done {
+            countdown.done = false;
+            Poll::Ready(())
+        } else {
+            countdown.waker = Some(cx.waker().clone());
+            Poll::Pending
+        }
+    }
+}
+
 /// A future that completes once `delay` has passed.
 ///
 /// **There is no timer in the dependency list to borrow one from**, and that
@@ -2627,5 +2983,44 @@ mod tests {
             "the waiter was woken rather than left to poll again on its own"
         );
         assert_eq!(timer.as_mut().poll(&mut cx), Poll::Ready(()));
+    }
+
+    /// **The clock behind the caret, which has to beat more than once.**
+    ///
+    /// That is the whole difference between it and the countdown above, and it
+    /// is the part a blink depends on: a metronome that fired once and stopped
+    /// would leave a caret that vanished and never came back. It is also why
+    /// the beat has to survive being read — a `Tick` that returned `Ready`
+    /// twice for one beat would blink at whatever rate the runtime happened to
+    /// poll at.
+    #[test]
+    fn a_metronome_beats_again_and_again() {
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(waker);
+
+        let period = Duration::from_millis(60);
+        let clock = metronome(period);
+
+        assert_eq!(
+            std::pin::pin!(clock.tick()).poll(&mut cx),
+            Poll::Pending,
+            "the first beat has not happened yet"
+        );
+
+        for beat in 1..=3 {
+            // Slack in one direction only, as above: a sleeping thread may
+            // oversleep, and what is asserted is that it did not undersleep.
+            std::thread::sleep(period * 3);
+            assert_eq!(
+                std::pin::pin!(clock.tick()).poll(&mut cx),
+                Poll::Ready(()),
+                "beat {beat} arrived"
+            );
+            assert_eq!(
+                std::pin::pin!(clock.tick()).poll(&mut cx),
+                Poll::Pending,
+                "and was taken, rather than staying on the counter for beat {beat} to be read again"
+            );
+        }
     }
 }

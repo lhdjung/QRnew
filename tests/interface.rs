@@ -23,10 +23,39 @@
 //! what is checked is the SVG the app would also save to disk.
 
 use blitz_test_harness::{Harness, HarnessOptions};
-use blitz_traits::events::BlitzImeEvent;
+use blitz_traits::events::{BlitzImeEvent, UiEvent};
 use blitz_traits::shell::ColorScheme;
 use dioxus::prelude::VirtualDom;
 use qrnew::ui::{App, Fill, Remember, Theme, Tone};
+
+/// Press a key that edits text, the way the platform running the test delivers
+/// it.
+///
+/// **On macOS such a key arrives twice.** AppKit resolves it against the
+/// system's key-binding table and hands the window the command it means —
+/// `moveToBeginningOfDocument:` for Home, `deleteForward:` for Delete — and
+/// then `winit` delivers the key event as well, so that an app which does not
+/// implement the command still sees the key. `ui.rs` cancels the second of the
+/// two, because Blitz acts on both and one press would otherwise do the thing
+/// twice; the whole story is above `appkit_has_this_key` there.
+///
+/// A harness that sent only the key event would therefore not be a Mac, and the
+/// app it drove would sit still. Everywhere else there is no command to send
+/// and the key event is the whole story.
+fn edit(
+    harness: &mut Harness<dioxus_native::DioxusDocument>,
+    key: keyboard_types::Key,
+    command: &str,
+) {
+    #[cfg(target_os = "macos")]
+    {
+        harness.dispatch(UiEvent::AppleStandardKeybinding(command.into()));
+        harness.pump();
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = command;
+    harness.press(key);
+}
 
 /// The preview's SVG, decoded back out of the `data:` URL on the `<img>`.
 ///
@@ -466,7 +495,11 @@ fn a_half_typed_hex_field_restores_what_is_applied() {
     // one: deleting `#8b1a1a` back to nothing passes through `8b1a1a` and
     // `a1a`, and both of those are colours the field is right to apply.
     harness.click("[data-hex]");
-    harness.press(keyboard_types::Key::End);
+    edit(
+        &mut harness,
+        keyboard_types::Key::End,
+        "moveToEndOfDocument:",
+    );
     harness.type_text("f");
     harness.pump();
     assert_eq!(
@@ -603,9 +636,13 @@ fn the_hex_field_recolors_the_code() {
     // and which a headless harness cannot produce, so a Backspace here is a
     // no-op on one platform and works on the other two. Home and Delete go
     // through `apply_keypress_event` everywhere.
-    harness.press(keyboard_types::Key::Home);
+    edit(
+        &mut harness,
+        keyboard_types::Key::Home,
+        "moveToBeginningOfDocument:",
+    );
     for _ in 0.."#ffffff".len() {
-        harness.press(keyboard_types::Key::Delete);
+        edit(&mut harness, keyboard_types::Key::Delete, "deleteForward:");
     }
     assert_eq!(harness.attr("[data-hex]", "value").as_deref(), Some(""));
     // Typed in capitals on purpose. Every hex the *app* writes is lower case —
@@ -849,6 +886,121 @@ fn composed_text_reaches_the_field() {
     .expect("three characters fit in a code")
     .into_svg();
     assert_eq!(svg, expected);
+}
+
+/// **One press of an arrow key moves the caret one character.**
+///
+/// It is a test about a *number*, and the number is one. On macOS the app
+/// receives such a key twice — the command AppKit resolved it into, and the key
+/// event behind it — and Blitz acts on both, so a field that does not cancel
+/// one of them moves two characters for every press. `edit` above delivers the
+/// pair the way the platform does; what is asserted here is that only one of
+/// them lands.
+#[test]
+fn an_arrow_moves_the_caret_one_character() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("abcd");
+    harness.pump();
+
+    edit(&mut harness, keyboard_types::Key::ArrowLeft, "moveLeft:");
+    edit(&mut harness, keyboard_types::Key::ArrowLeft, "moveLeft:");
+    harness.type_text("X");
+    harness.pump();
+
+    assert_eq!(
+        harness.attr(".field", "value").as_deref(),
+        Some("abXcd"),
+        "two presses, two characters"
+    );
+}
+
+/// **Backspace deletes**, which on macOS it did not.
+///
+/// `blitz-dom` leaves `Backspace` out of its key handling on macOS on purpose,
+/// because AppKit is supposed to send `deleteBackward:` instead and nothing was
+/// switching on the part of the window that receives it, so three presses of
+/// Backspace on "hello world" left "hello world". `open_the_text_input_client`
+/// in `ui.rs` is the fix and this is what it is for.
+#[test]
+fn backspace_deletes_the_character_before_the_caret() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("abcd");
+    harness.pump();
+
+    edit(
+        &mut harness,
+        keyboard_types::Key::Backspace,
+        "deleteBackward:",
+    );
+    harness.pump();
+
+    assert_eq!(harness.attr(".field", "value").as_deref(), Some("abc"));
+}
+
+/// And when something is selected, it takes the selection whole rather than the
+/// one character before it.
+#[test]
+fn backspace_takes_a_selection_whole() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("abcd");
+    harness.pump();
+
+    harness.press_with(
+        keyboard_types::Key::Character("a".into()),
+        action_modifier(),
+    );
+    edit(
+        &mut harness,
+        keyboard_types::Key::Backspace,
+        "deleteBackward:",
+    );
+    harness.pump();
+
+    assert_eq!(harness.attr(".field", "value").as_deref(), Some(""));
+}
+
+/// **Option and an arrow jump a word**, which is what a Mac keyboard means by
+/// them, and it is AppKit rather than the app that decides so.
+///
+/// The app's part is to stay out of the way: `moveWordLeft:` is what the
+/// system's key-binding table resolves Option+Left into, `blitz-dom` already
+/// implements it, and cancelling the key event that arrives beside it is what
+/// stops the caret moving a word *and* a character. There is no equivalent
+/// binding to test anywhere else, which is why this one is macOS only.
+#[cfg(target_os = "macos")]
+#[test]
+fn option_and_an_arrow_jump_a_word() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("alpha beta");
+    harness.pump();
+
+    harness.dispatch(UiEvent::AppleStandardKeybinding("moveWordLeft:".into()));
+    harness.pump();
+    harness.press_with(
+        keyboard_types::Key::ArrowLeft,
+        keyboard_types::Modifiers::ALT,
+    );
+    harness.type_text("X");
+    harness.pump();
+
+    assert_eq!(
+        harness.attr(".field", "value").as_deref(),
+        Some("alpha Xbeta"),
+        "one word, and not a word and a character"
+    );
+}
+
+/// Select-all, on whichever key the platform spells it with.
+fn action_modifier() -> keyboard_types::Modifiers {
+    if cfg!(target_os = "macos") {
+        keyboard_types::Modifiers::SUPER
+    } else {
+        keyboard_types::Modifiers::CONTROL
+    }
 }
 
 /// A click on a button takes the keyboard away from the field.
@@ -1142,9 +1294,13 @@ fn a_shrinking_code_keeps_its_picture_and_says_the_size_is_held() {
     // reaches `blitz-dom` through AppKit on macOS and never from a headless
     // harness. Two characters are left, which is a 21-module code.
     harness.click(".field");
-    harness.press(keyboard_types::Key::Home);
+    edit(
+        &mut harness,
+        keyboard_types::Key::Home,
+        "moveToBeginningOfDocument:",
+    );
     for _ in 0.."https://example.org".len() - 2 {
-        harness.press(keyboard_types::Key::Delete);
+        edit(&mut harness, keyboard_types::Key::Delete, "deleteForward:");
     }
     harness.pump();
 
@@ -1467,9 +1623,13 @@ fn the_margin_field_clamps_what_it_is_given() {
     harness.pump();
 
     harness.click("[data-margin]");
-    harness.press(keyboard_types::Key::Home);
+    edit(
+        &mut harness,
+        keyboard_types::Key::Home,
+        "moveToBeginningOfDocument:",
+    );
     for _ in 0..4 {
-        harness.press(keyboard_types::Key::Delete);
+        edit(&mut harness, keyboard_types::Key::Delete, "deleteForward:");
     }
     harness.type_text("6");
     harness.pump();
@@ -1535,9 +1695,13 @@ fn an_emptied_margin_field_restores_what_is_applied() {
     harness.pump();
 
     harness.click("[data-margin]");
-    harness.press(keyboard_types::Key::Home);
+    edit(
+        &mut harness,
+        keyboard_types::Key::Home,
+        "moveToBeginningOfDocument:",
+    );
     for _ in 0..4 {
-        harness.press(keyboard_types::Key::Delete);
+        edit(&mut harness, keyboard_types::Key::Delete, "deleteForward:");
     }
     harness.pump();
     assert_eq!(
@@ -1640,9 +1804,13 @@ fn the_margin_number_is_centered_in_its_field() {
     // formula that is right for one width is not necessarily right for both.
     for expected in ["16", "4"] {
         harness.click("[data-margin]");
-        harness.press(keyboard_types::Key::Home);
+        edit(
+            &mut harness,
+            keyboard_types::Key::Home,
+            "moveToBeginningOfDocument:",
+        );
         for _ in 0..4 {
-            harness.press(keyboard_types::Key::Delete);
+            edit(&mut harness, keyboard_types::Key::Delete, "deleteForward:");
         }
         harness.type_text(expected);
         harness.pump();
@@ -1820,7 +1988,7 @@ fn text_too_long_with_an_inset_says_the_inset_can_go() {
     assert!(preview(&harness).is_none(), "no code was drawn");
     let note = harness.text_content(".note.bad");
     assert!(
-        note.contains("inset"),
+        note.contains("image"),
         "the way out includes the picture: {note:?}"
     );
 }
