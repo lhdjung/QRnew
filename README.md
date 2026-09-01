@@ -18,7 +18,11 @@ The window follows the desktop's light or dark setting, and *Theme* in the corne
 
 Go to [Releases][releases] and download the asset for your operating system, then double-click to unpack.
 
+The topmost entry there is *Development build*: whatever is on `main` right now, rebuilt on every push and replaced by the next one. The numbered releases below it are the ones that stay put.
+
 > **macOS first launch:** macOS will block the app because it is not notarized. After the warning appears, open *System Settings → Privacy & Security*, scroll down to the *Security* section, and click *Open Anyway*.
+
+> **Windows first launch:** SmartScreen will block the app for the same reason — nobody has paid for a certificate it recognizes. Click *More info* on the warning, then *Run anyway*.
 
 ## Dev build
 

@@ -1,3 +1,7 @@
+# The gate: does it compile and do the tests pass, on all three platforms.
+# What comes *out* of a push to `main` is in `release.yml`, which packages the
+# three assets and publishes them.
+
 name: Build
 
 on:
@@ -56,9 +60,16 @@ jobs:
 
       - run: cargo test --workspace --locked
 
-      - run: cargo build --release --locked
+      # Only on pull requests. A push to `main` builds release binaries in
+      # `release.yml`, packages them and publishes them where somebody can
+      # actually click on them, and doing it twice on the same commit is ten
+      # minutes of a runner spent on a file that expires. A pull request has
+      # nowhere to publish to, so this is where its build lives.
+      - if: github.event_name == 'pull_request'
+        run: cargo build --release --locked
 
-      - uses: actions/upload-artifact@v4
+      - if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
         with:
           name: qrnew-${{ runner.os }}
           path: target/release/${{ matrix.binary }}

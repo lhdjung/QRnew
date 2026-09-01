@@ -871,14 +871,26 @@ black under both themes.
   ad-hoc signature, there is still no notarization, and the README still warns
   about the first launch.
 
-  Three things about the release path are worth knowing before this branch
-  merges, none of them blocking:
+  **A push to `main` now publishes assets somebody can download.** It did not
+  before, and the distinction was easy to miss: `build.yml` uploaded the bare
+  executables on every push, but a *workflow artifact* is not a download. It
+  expires, it cannot be fetched without a GitHub account, and GitHub re-zips
+  it — so what came down for macOS was a `.zip` of the `.app` bundle's
+  contents rather than a bundle. The only thing that has ever been clickable
+  by a stranger is a release asset, and those came only from a `v*` tag.
 
-  - **Merging does not produce release assets.** `build.yml` tests and builds
-    on all three platforms and uploads the bare executables as workflow
-    artifacts, which expire. The `.zip` and `.tar.gz` in Releases come only
-    from `release.yml`, which fires on a `v*` tag. So: merge, watch Build go
-    green, then tag.
+  `release.yml` now fires on `main` as well as on tags, and the two paths
+  share one set of packaging steps, because packaging is the part that is easy
+  to get subtly wrong in two places at once — as the version number was. A tag
+  publishes a numbered release; a push to `main` deletes and recreates a
+  rolling `nightly` prerelease titled *Development build*. Deleting and
+  recreating rather than moving is why a separate `open` job goes first: three
+  matrix jobs racing to create the same release is a coin flip, and one job
+  creating it and three uploading into it is not. `build.yml` keeps its own
+  release build for pull requests only, which have nowhere to publish to.
+
+  Still true, and still not blocking:
+
   - **The bundle's version is no longer typed in.** It was written into
     `release.yml`'s plist and into the `justfile`, both saying `0.1.0`, neither
     of them the copy `cargo` builds against. Both read `Cargo.toml` now. A tag
@@ -887,6 +899,9 @@ black under both themes.
     That was already true of `v0.0.1`. A universal binary needs
     `aarch64-apple-darwin` and `x86_64-apple-darwin` built and `lipo`'d, which
     is a real change to the workflow rather than a flag.
+  - **Nothing is signed by a certificate anybody's operating system has heard
+    of.** macOS refuses the first launch and so does SmartScreen; the README
+    now says what to click in both, where it used to mention only macOS.
 
   `build.yml` also still lists `dioxus-native` among the branches it fires on.
   That is harmless after the merge — pull requests are covered separately —
