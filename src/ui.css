@@ -1106,7 +1106,43 @@ body {
   height: 100%;
 }
 
+/* Both of them, and **`position: absolute` is load-bearing rather than
+ * tidiness.** An in-flow replaced element whose width or height is a
+ * percentage is laid out against nothing the first time an ancestor's
+ * *inherited* style changes: the box comes back zero-high, the code goes off
+ * the stage, and the mat behind it — painted in the code's own background
+ * colour — is all that is left. Which looks exactly like the foreground of the
+ * code being deleted, and lasts until something rebuilds the node, in practice
+ * the next character typed. Changing the theme back does not bring it back.
+ *
+ * The one thing in this app that changes an inherited property on an ancestor
+ * is the theme: `.theme-dark` and `.theme-system` redefine the custom
+ * properties at the top of this file, a custom property is inherited, so
+ * picking a theme restyles every node in the window at once.
+ *
+ * Measured against the pinned Blitz on a document cut down to a flex column
+ * holding a percentage-sized `<img>`, which is where the three halves of that
+ * sentence come from: a plain inherited property (`color`) does not do it and a
+ * non-inherited one (`background`) does not either — a *custom* property does;
+ * only a *replaced* child is affected, a `<div>` at the same percentages keeps
+ * its box; and an *absolutely positioned* one comes back right, because it is
+ * laid out against its containing block in a pass of its own. The percentages
+ * below are the same percentages, resolved somewhere that resolves them.
+ *
+ * So both layers are positioned against `.code`, which is what its
+ * `position: relative` above is now for. The code fills it; the inset's own
+ * `left`, `top`, `width` and `height` arrive inline from `Qr::inset_box` and
+ * override the four written here. Paint order is document order — neither
+ * layer has a `z-index` — so the picture is still drawn over the code, which
+ * `the_picture_on_the_stage_is_where_the_document_puts_it` hit-tests.
+ *
+ * `the_theme_does_not_take_the_code_off_the_stage` is the regression test, and
+ * it needs a net provider to be one: the preview is a `data:` URL, and a
+ * harness with no way to fetch one lays out an `<img>` that never loaded. */
 .code > img {
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 100%;
   height: 100%;
 }
@@ -1119,7 +1155,6 @@ body {
  * letterboxed in its box here exactly as it is in the file. That is the whole
  * of what keeps two layers looking like the one thing they are. */
 .code > .inset {
-  position: absolute;
   object-fit: contain;
 }
 

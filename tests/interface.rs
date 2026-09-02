@@ -24,9 +24,10 @@
 
 use blitz_test_harness::{Harness, HarnessOptions};
 use blitz_traits::events::{BlitzImeEvent, UiEvent};
+use blitz_traits::net::{Bytes, NetHandler, NetProvider, Request};
 use blitz_traits::shell::ColorScheme;
 use dioxus::prelude::VirtualDom;
-use qrnew::ui::{App, Fill, Remember, Theme, Tone};
+use qrnew::ui::{App, Fill, Inlay, Remember, Theme, Tone};
 
 /// Press a key that edits text, the way the platform running the test delivers
 /// it.
@@ -239,8 +240,57 @@ fn app_with_inset(text: &str, name: &str) -> Harness<dioxus_native::DioxusDocume
 fn app_with_picture(text: &str, image: &std::path::Path) -> Harness<dioxus_native::DioxusDocument> {
     let vdom = VirtualDom::new(App)
         .with_root_context(Fill(text.to_string()))
-        .with_root_context(qrnew::ui::Inlay(image.to_string_lossy().into_owned()));
+        .with_root_context(Inlay(image.to_string_lossy().into_owned()));
     let mut harness = Harness::from_vdom(vdom, HarnessOptions::default());
+    harness.set_viewport_size(1280, 860);
+    harness.pump();
+    harness
+}
+
+/// The one resource this app ever loads, and the only fetcher it needs.
+///
+/// It is `blitz_shell::DataUriNetProvider` in four lines, because that one is
+/// behind a feature of a crate the app does not depend on directly and this
+/// one has to decode exactly one shape: the base64 `data:` URL [`data_url`] in
+/// `ui.rs` writes. The window gets a provider of the same kind from
+/// `dioxus-native`'s `data-uri` feature; the harness is handed nothing and
+/// fetches nothing, which is why every test above this line lays out an
+/// `<img>` that never loaded.
+struct DataUri;
+
+impl NetProvider for DataUri {
+    fn fetch(&self, _doc_id: usize, request: Request, handler: Box<dyn NetHandler>) {
+        let url = request.url.to_string();
+        let Some((_, payload)) = url.split_once(";base64,") else {
+            return;
+        };
+        let bytes = Bytes::from(decode_base64(payload));
+        handler.bytes(url.clone(), bytes);
+    }
+}
+
+/// The app with the preview actually **decoded and laid out**, rather than
+/// standing in the document as an `<img>` whose `src` nothing ever fetched.
+///
+/// Everything about the code as a *document* — what is in the SVG, what is
+/// saved, what is copied — is checked off the `data:` URL by [`preview`] and
+/// needs none of this. What needs it is the code as a *box on the stage*: an
+/// image that never loaded has no intrinsic size, so it is laid out by the
+/// stylesheet alone and cannot show a bug in how the two are combined. The
+/// theme once did exactly that — see
+/// `the_theme_does_not_take_the_code_off_the_stage`.
+fn app_drawn(text: &str, image: Option<&std::path::Path>) -> Harness<dioxus_native::DioxusDocument> {
+    let mut vdom = VirtualDom::new(App).with_root_context(Fill(text.to_string()));
+    if let Some(image) = image {
+        vdom = vdom.with_root_context(Inlay(image.to_string_lossy().into_owned()));
+    }
+    let mut harness = Harness::from_vdom(
+        vdom,
+        HarnessOptions {
+            net_provider: Some(std::sync::Arc::new(DataUri)),
+            ..HarnessOptions::default()
+        },
+    );
     harness.set_viewport_size(1280, 860);
     harness.pump();
     harness
@@ -2217,6 +2267,54 @@ fn the_theme_is_the_desktops_until_somebody_picks_one() {
         let (lit, dim) = if wanted == "dark" { (0, pairs) } else { (pairs, 0) };
         assert_eq!(shown(&harness, ".lit"), lit, "{case}: light-ink icons shown");
         assert_eq!(shown(&harness, ".dim"), dim, "{case}: dark-ink icons shown");
+    }
+}
+
+/// **Changing the theme does not take the code off the stage.**
+///
+/// It did. Picking a theme left the preview `<img>` — and the picture laid
+/// over it — with a box 458 points wide and *nothing high*, so the code
+/// vanished and the mat behind it, which is painted in the code's own
+/// background colour, was all that was left on the stage. Which looks like the
+/// foreground of the code being deleted, and lasts until the next keystroke
+/// builds a new `<img>`: changing the theme back does not bring it back.
+///
+/// The cause and the fix are above `.code > img` in `ui.css`. What matters
+/// here is that the check has to be made on the *box*, not on the document:
+/// the SVG in the `data:` URL was right the whole time, so [`preview`] — which
+/// every other test in this file goes through — says the app is fine. Hence
+/// [`app_drawn`], which is the only harness in this suite that actually
+/// fetches the preview it is looking at.
+///
+/// Both layers, and both directions: away from the default and back to it.
+#[test]
+fn the_theme_does_not_take_the_code_off_the_stage() {
+    let image = an_image("theme-stage");
+    let mut harness = app_drawn("https://example.org", Some(&image));
+
+    let square = |harness: &Harness<dioxus_native::DioxusDocument>, selector: &str, when: &str| {
+        let rect = harness.layout_rect(selector);
+        assert!(rect.width > 1.0, "{when}: {selector} has no width");
+        assert!(
+            (rect.height - rect.width).abs() < 1.0,
+            "{when}: {selector} is {}x{}, and the code and its inset are square",
+            rect.width,
+            rect.height,
+        );
+        rect.width
+    };
+
+    let code = square(&harness, "[data-preview]", "before the sheet is opened");
+    let inset = square(&harness, "[data-preview-inset]", "before the sheet is opened");
+
+    harness.click(".theme-open");
+    harness.pump();
+    for pick in ["dark", "light", "system"] {
+        harness.click(&format!("[data-theme=\"{pick}\"]"));
+        harness.pump();
+        let when = format!("with {pick} picked");
+        assert_eq!(square(&harness, "[data-preview]", &when), code);
+        assert_eq!(square(&harness, "[data-preview-inset]", &when), inset);
     }
 }
 
