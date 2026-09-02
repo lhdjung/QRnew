@@ -908,6 +908,42 @@ fn reset_puts_black_and_white_back() {
     assert_eq!(harness.text_content("[data-well=\"dark\"]"), "Foreground#000000");
 }
 
+/// **And it follows a reset that takes the colour caution down with it.**
+///
+/// The same promise as the test above, in the one state where the window has
+/// two things to redraw at once. The picker follows an outside colour through
+/// an effect of its own, and the caution is the other half of what a reset
+/// changes — so this is the state where a caution written as a second effect
+/// starves the first: the code goes black, the banner goes away, and the hex
+/// field is left reading the colour that has just been reset. It is why the
+/// held caution is written from the picker's pointer handlers instead.
+#[test]
+fn the_picker_follows_a_reset_that_takes_the_caution_down() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("hello");
+    harness.pump();
+
+    // White on white: a blank square, and the card says so.
+    harness.click("[data-well=\"dark\"]");
+    harness.pump();
+    harness.click("[data-swatch=\"#ffffff\"]");
+    harness.pump();
+    assert!(harness.query("[data-color-warning]").is_some());
+
+    harness.click("[data-reset]");
+    harness.pump();
+    assert!(
+        harness.query("[data-color-warning]").is_none(),
+        "the caution goes with the colours that earned it"
+    );
+    assert_eq!(
+        harness.attr("[data-hex]", "value").as_deref(),
+        Some("#000000"),
+        "and the hex field still says what the code is actually painted with"
+    );
+}
+
 /// Composed text reaches the field.
 ///
 /// `dioxus-assessment.md` named this the one honest blocker for QRnew: with no
@@ -1360,6 +1396,57 @@ fn the_colors_card_says_when_a_scanner_could_not_tell_them_apart() {
     assert!(
         harness.query("[data-color-warning]").is_none(),
         "resetting to black and white takes the caution back"
+    );
+}
+
+/// **The square holds still under the hand that is drawing on it.**
+///
+/// The colour caution is a banner between the wells and the picker, so it
+/// moves the picker every time it comes or goes, and a drag is the one way of
+/// changing a colour where a pointer is on the picker while that happens. The
+/// jump is the visible half; the other half is that `element_coordinates` are
+/// measured against the square, so a square that has moved hands the same
+/// pointer a different colour and the rest of the drag lands somewhere nobody
+/// aimed at — and the colour that moved it can move it back.
+///
+/// So the caution is settled at the ends of a drag and not during one. The
+/// wait costs nothing: the pointer is still on the colour that earned the
+/// banner when the banner arrives.
+#[test]
+fn the_caution_waits_for_the_drag_to_finish() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("hello");
+    harness.pump();
+    harness.click("[data-well=\"dark\"]");
+    harness.pump();
+
+    // The square's left edge runs from black at the bottom to white at the
+    // top, and the background is white: drawing up that edge takes the
+    // foreground to the one colour a scanner could not tell the paper from.
+    let square = harness.layout_rect("[data-square]");
+    let x = square.x + 4.0;
+    harness.mouse_down_at(x, square.y + square.height - 4.0);
+    harness.move_mouse_to(x, square.y + 4.0);
+
+    assert!(
+        harness.query("[data-color-warning]").is_none(),
+        "the caution is not drawn while the square is being dragged"
+    );
+    assert_eq!(
+        harness.layout_rect("[data-square]").y,
+        square.y,
+        "so the square is where the pointer left it"
+    );
+
+    harness.mouse_up_at(x, square.y + 4.0);
+    assert!(
+        harness.query("[data-color-warning]").is_some(),
+        "and it arrives when the button comes up"
+    );
+    assert!(
+        harness.layout_rect("[data-square]").y > square.y,
+        "which is when the picker is allowed to move"
     );
 }
 

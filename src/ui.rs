@@ -917,6 +917,22 @@ pub fn App() -> Element {
     let mut inset_error = use_signal(|| false);
     let mut inset_size = use_signal(InsetSize::default);
     let mut editing = use_signal(|| Well::Dark);
+    // **What the colour caution said when a pointer took hold of the picker**,
+    // or `None` whenever nothing is holding it — which is when the caution is
+    // read live off the two wells instead. The argument for freezing it is
+    // beside the banner, down in the colours rail.
+    //
+    // It is written from `Picker`'s pointer handlers and not from an effect
+    // watching the colours. An effect here would run on every colour change in
+    // the window, and `reset_puts_black_and_white_back` is what says why that
+    // is not free: the picker follows an outside colour through an effect of
+    // its own, and a second effect writing a signal `App` renders from starves
+    // it for a frame — the code went black and the hex field went on reading
+    // the old colour, which is the exact bug that effect was written to fix.
+    let mut held_caution = use_signal(|| None::<bool>);
+    let take_the_caution = move |holding: bool| {
+        held_caution.set(holding.then(|| contrast(dark(), light()) < SAFE_CONTRAST));
+    };
     let mut about = use_signal(|| false);
     let mut theme = use_signal(|| {
         dioxus_core::try_consume_context::<Tone>().map_or(Theme::System, |Tone(seed)| seed)
@@ -1714,7 +1730,23 @@ pub fn App() -> Element {
                         // and it still fits, at 820 as well as at 860, which
                         // is `no_control_is_below_the_fold` rather than the
                         // weaker promise the shape caution has to settle for.
-                        if contrast(dark(), light()) < SAFE_CONTRAST {
+                        //
+                        // It is held while the picker is being dragged,
+                        // because it is *above* the picker: a banner arriving
+                        // under a pointer that is drawing on the square drops
+                        // the square half an inch mid-stroke, and a pointer's
+                        // `element_coordinates` are measured against the
+                        // square — so a hand that has not moved is suddenly on
+                        // a different colour, which can cross back over the
+                        // threshold and move the square again. Nothing is lost
+                        // by the wait: the banner arrives when the button
+                        // comes up, with the pointer still on the colour that
+                        // earned it, and every other way into these two
+                        // colours is one change that moves the picker once,
+                        // which is what a click does everywhere else here.
+                        if held_caution()
+                            .unwrap_or_else(|| contrast(dark(), light()) < SAFE_CONTRAST)
+                        {
                             p { class: "warn", "data-color-warning": "true",
                                 {glyph(Glyph::Alert, Ink::Warn, "glyph")}
                                 span { {fl!("color-warning")} }
@@ -1729,9 +1761,9 @@ pub fn App() -> Element {
                         // position — but two arms of an `if` are two different
                         // nodes, and swapping them mounts a fresh one.
                         if editing() == Well::Dark {
-                            Picker { color: dark }
+                            Picker { color: dark, onhold: take_the_caution }
                         } else {
-                            Picker { color: light }
+                            Picker { color: light, onhold: take_the_caution }
                         }
                         button {
                             class: "btn wide",
@@ -2101,8 +2133,12 @@ fn ColorWell(
 /// relative to the marker instead of the square, and `pointer-events: none` —
 /// the usual answer — is not implemented. A background layer has no hit box at
 /// all, so the square stays its own target no matter where the marker is.
+///
+/// `onhold` says when a pointer has taken hold of the square or the strip and
+/// when it has let go. It is the picker's own business except that the colour
+/// caution above it holds still in between; the argument is beside the banner.
 #[component]
-fn Picker(color: Signal<Rgb>) -> Element {
+fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>) -> Element {
     // The blink, from the context `App` provides. The hex field is a text
     // field like the other two and blinks like them; it is only in a different
     // component because the colour picker is.
@@ -2120,6 +2156,12 @@ fn Picker(color: Signal<Rgb>) -> Element {
     // strand whoever was dragging it.
     let mut hsv = use_signal(|| to_hsv(color()));
     let mut dragging = use_signal(|| false);
+    // Taking hold and letting go are the same two words to the square, to the
+    // strip, and to the caution a rail-width above them.
+    let mut hold = move |holding: bool| {
+        dragging.set(holding);
+        onhold.call(holding);
+    };
 
     // The last colour this picker itself wrote, so that a colour arriving from
     // anywhere else can be told apart from one of its own. "Reset to black &
@@ -2220,7 +2262,7 @@ fn Picker(color: Signal<Rgb>) -> Element {
                     background-size: {square_mark.size}, auto, auto, auto; \
                     background-repeat: no-repeat",
                 onpointerdown: move |event| {
-                    dragging.set(true);
+                    hold(true);
                     pick_in_square(event);
                 },
                 onpointermove: move |event| {
@@ -2228,8 +2270,8 @@ fn Picker(color: Signal<Rgb>) -> Element {
                         pick_in_square(event);
                     }
                 },
-                onpointerup: move |_| dragging.set(false),
-                onpointerleave: move |_| dragging.set(false),
+                onpointerup: move |_| hold(false),
+                onpointerleave: move |_| hold(false),
             }
             div {
                 class: "strip",
@@ -2240,7 +2282,7 @@ fn Picker(color: Signal<Rgb>) -> Element {
                     background-size: {strip_mark.size}, auto; \
                     background-repeat: no-repeat",
                 onpointerdown: move |event| {
-                    dragging.set(true);
+                    hold(true);
                     pick_in_strip(event);
                 },
                 onpointermove: move |event| {
@@ -2248,8 +2290,8 @@ fn Picker(color: Signal<Rgb>) -> Element {
                         pick_in_strip(event);
                     }
                 },
-                onpointerup: move |_| dragging.set(false),
-                onpointerleave: move |_| dragging.set(false),
+                onpointerup: move |_| hold(false),
+                onpointerleave: move |_| hold(false),
             }
             div { class: "palette",
                 for swatch in PALETTE {
