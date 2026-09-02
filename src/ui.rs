@@ -8,12 +8,23 @@
 //! That is the same single-SVG arrangement the libcosmic build had — the only
 //! thing that changed is who draws it.
 //!
-//! The preview reaches the screen as a `data:` URL on an `<img>`, which Blitz
-//! parses with `usvg` — `resvg`'s own parser, and the one `qrnew-core` already
-//! uses to rasterize. So the bytes on screen are the bytes in the saved file,
-//! through the same code, and the documented Blitz gap where CSS cannot reach
-//! inside an SVG never applies: `draw.rs` writes every colour as a presentation
-//! attribute so that an exported file stands on its own.
+//! The preview reaches the screen as **the document's own markup**, dropped
+//! into the stage, which Blitz parses into an `<svg>` element and hands to
+//! `usvg` — `resvg`'s own parser, and the one `qrnew-core` already uses to
+//! rasterize. So the bytes on screen are the bytes in the saved file, through
+//! the same code, and the documented Blitz gap where CSS cannot reach inside an
+//! SVG never applies: `draw.rs` writes every colour as a presentation attribute
+//! so that an exported file stands on its own.
+//!
+//! It was a `data:` URL on an `<img>` until the memory said otherwise. Blitz
+//! caches a fetched image by its URL, in a map with no eviction in it at all,
+//! and a preview rebuilt on every keystroke is a new URL every time: three
+//! hundred characters typed cost seventeen megabytes that never came back, and
+//! a minute in the colour picker is worse. Markup goes to the node and is
+//! replaced with the node, so the same three hundred characters now cost two
+//! megabytes of code that is actually on screen. `blitz-atlas.md` has both
+//! measurements; `the_code_on_the_stage_is_the_code_in_the_file` is what holds
+//! the round trip through the DOM to changing nothing `usvg` can see.
 //!
 //! **With one seam in it, and it is the renderer's fault rather than the
 //! design's.** A code with an inset reaches the screen as two layers: the
@@ -1017,7 +1028,7 @@ pub fn App() -> Element {
     });
 
     // Kept apart from `code` so that a re-render that changes neither the text
-    // nor the colours does not re-encode the SVG into base64.
+    // nor the colours does not rebuild the document.
     //
     // **Without the picture in it**, which is not a smaller preview but a
     // different arrangement of the same one: the code's document already
@@ -1035,13 +1046,11 @@ pub fn App() -> Element {
     // two crates down. Out here the picture is one `<img>` whose `src` does
     // not change while the picture does not, so it is uploaded once.
     //
-    // It is also simply less work: the inset used to be base64'd into the
-    // document and then base64'd again with it, twice per keystroke.
-    let preview = use_memo(move || {
-        code()
-            .as_ref()
-            .map(|drawn| data_url("image/svg+xml", drawn.qr.svg_without_inset().as_bytes()))
-    });
+    // The document itself is **markup rather than a `data:` URL**, and that is
+    // the second leak of the same family — `blitz-atlas.md` has the
+    // measurement. It is handed to the stage as it comes off `qrnew-core`, no
+    // base64 in between, which is also simply less work per keystroke.
+    let preview = use_memo(move || code().as_ref().map(|drawn| drawn.qr.svg_without_inset()));
 
     // The chosen picture, as something an `<img>` can point at. A memo for the
     // same reason: the bytes are base64'd once per choice rather than once per
@@ -1793,7 +1802,7 @@ pub fn App() -> Element {
                 }
 
                 section { class: "stage",
-                    if let Some(src) = preview() {
+                    if let Some(document) = preview() {
                         // The mat is painted in the code's own background
                         // colour, so the rounded corners belong to the mat and
                         // the image never has to be clipped to them.
@@ -1805,7 +1814,31 @@ pub fn App() -> Element {
                             // and a percentage inside it is a fraction of the
                             // document — which is the unit `inset_box` speaks.
                             div { class: "code",
-                                img { "data-preview": "true", src: "{src}", alt: fl!("app-title") }
+                                // The document, dropped in whole. `Blitz`
+                                // parses the markup, sees an `<svg>`, and hands
+                                // that element's own serialization to `usvg` —
+                                // the same parser a `data:` URL would have
+                                // reached, and `the_code_on_the_stage_is_the_
+                                // code_in_the_file` is what holds the two
+                                // documents to being one.
+                                //
+                                // `dangerous_inner_html` is the only way in,
+                                // and the name is about markup from somewhere
+                                // else. This markup is `draw.rs`'s, built from
+                                // an escaped string a line above where the
+                                // code was encoded.
+                                //
+                                // The name the `<img>` carried as its `alt`
+                                // moves here with it: a `<div>` full of paths
+                                // is not a picture to anything reading the
+                                // window aloud unless it says so.
+                                div {
+                                    class: "doc",
+                                    "data-preview": "true",
+                                    role: "img",
+                                    aria_label: fl!("app-title"),
+                                    dangerous_inner_html: "{document}",
+                                }
                                 if let (Some(spot), Some(picture)) = (spot.as_ref(), thumbnail()) {
                                     // No `alt`: the code above already names
                                     // the whole thing, and a screen reader

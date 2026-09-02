@@ -1107,13 +1107,14 @@ body {
 }
 
 /* Both of them, and **`position: absolute` is load-bearing rather than
- * tidiness.** An in-flow replaced element whose width or height is a
- * percentage is laid out against nothing the first time an ancestor's
- * *inherited* style changes: the box comes back zero-high, the code goes off
- * the stage, and the mat behind it — painted in the code's own background
- * colour — is all that is left. Which looks exactly like the foreground of the
- * code being deleted, and lasts until something rebuilds the node, in practice
- * the next character typed. Changing the theme back does not bring it back.
+ * tidiness.** An in-flow replaced element — an `<img>`, or an `<svg>`, which
+ * Blitz treats as one — whose width or height is a percentage is laid out
+ * against nothing the first time an ancestor's *inherited* style changes: the
+ * box comes back zero-high, the code goes off the stage, and the mat behind
+ * it — painted in the code's own background colour — is all that is left.
+ * Which looks exactly like the foreground of the code being deleted, and lasts
+ * until something rebuilds the node, in practice the next character typed.
+ * Changing the theme back does not bring it back.
  *
  * The one thing in this app that changes an inherited property on an ancestor
  * is the theme: `.theme-dark` and `.theme-system` redefine the custom
@@ -1129,17 +1130,34 @@ body {
  * laid out against its containing block in a pass of its own. The percentages
  * below are the same percentages, resolved somewhere that resolves them.
  *
- * So both layers are positioned against `.code`, which is what its
+ * So every layer is positioned against `.code`, which is what its
  * `position: relative` above is now for. The code fills it; the inset's own
  * `left`, `top`, `width` and `height` arrive inline from `Qr::inset_box` and
- * override the four written here. Paint order is document order — neither
- * layer has a `z-index` — so the picture is still drawn over the code, which
+ * override the four written here. Paint order is document order — no layer has
+ * a `z-index` — so the picture is still drawn over the code, which
  * `the_picture_on_the_stage_is_where_the_document_puts_it` hit-tests.
  *
- * `the_theme_does_not_take_the_code_off_the_stage` is the regression test, and
- * it needs a net provider to be one: the preview is a `data:` URL, and a
- * harness with no way to fetch one lays out an `<img>` that never loaded. */
+ * `the_theme_does_not_take_the_code_off_the_stage` is the regression test. */
+.code > .doc,
 .code > img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* The `<svg>` inside `.doc` is the document itself, parsed out of the markup
+ * `ui.rs` drops in — so it is not an element the app writes and cannot be
+ * given a class of its own.
+ *
+ * The percentages are what make it fill the box: the document declares a
+ * `width` and a `height` in points, and left alone it would be drawn at those
+ * rather than at the size of the stage. The `position` is the rule above,
+ * applied to the one replaced element in this file that is not written by the
+ * app — it is not known to collapse behind the wrapper, which is a block box
+ * and keeps its own height, but nothing is gained by being the exception. */
+.code > .doc > svg {
   position: absolute;
   left: 0;
   top: 0;

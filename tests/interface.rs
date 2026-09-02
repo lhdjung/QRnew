@@ -19,8 +19,9 @@
 //! about the interface, not about `qrnew-core` — the core's own tests already
 //! hold the encoding, the shapes and the round trip.
 //!
-//! Assertions go against the *decoded* preview rather than its data URL, so
-//! what is checked is the SVG the app would also save to disk.
+//! Assertions go against the preview's own document, read back out of the
+//! stage, so what is checked is the SVG the app would also save to disk —
+//! which `the_code_on_the_stage_is_the_code_in_the_file` is the proof of.
 
 use blitz_test_harness::{Harness, HarnessOptions};
 use blitz_traits::events::{BlitzImeEvent, UiEvent};
@@ -58,14 +59,36 @@ fn edit(
     harness.press(key);
 }
 
-/// The preview's SVG, decoded back out of the `data:` URL on the `<img>`.
+/// The preview's SVG, read back off the stage.
+///
+/// The app drops the document into `.doc` as markup, so what comes back here
+/// is the `<svg>` element Blitz parsed out of it, re-serialized — which is
+/// also, exactly, what Blitz hands `usvg` to draw. So this is the document on
+/// screen rather than a copy of it, and
+/// `the_code_on_the_stage_is_the_code_in_the_file` is what says it is still
+/// the document in the file.
 ///
 /// `None` when there is no code on screen, which is the placeholder state.
 fn preview(harness: &Harness<dioxus_native::DioxusDocument>) -> Option<String> {
-    harness.query("[data-preview]")?;
-    let src = harness.attr("[data-preview]", "src")?;
-    let payload = src.strip_prefix("data:image/svg+xml;base64,")?;
-    Some(String::from_utf8(decode_base64(payload)).expect("the preview is a UTF-8 document"))
+    let node = harness.query("[data-preview] svg")?;
+    Some(harness.base().get_node(node)?.outer_html())
+}
+
+/// One document's markup, in the one form both the stage and the file can be
+/// compared in.
+///
+/// A document that has been through the DOM differs from the file it came from
+/// in exactly two ways, and `the_code_on_the_stage_is_the_code_in_the_file` is
+/// what holds it to those two: the XML declaration is not an element, so it
+/// does not survive being parsed into one; and Blitz's serializer writes a
+/// space before the slash of an empty element. Neither is a difference `usvg`
+/// can see, and nothing else moves.
+fn body(document: &str) -> String {
+    document
+        .split_once("?>")
+        .map_or(document, |(_, rest)| rest)
+        .trim()
+        .replace(" />", "/>")
 }
 
 /// The number of modules across the code, read off the SVG's own `viewBox`.
@@ -318,8 +341,7 @@ fn typing_generates_a_code() {
     harness.pump();
 
     let svg = preview(&harness).expect("typing draws a code");
-    assert!(svg.starts_with("<?xml"), "{}", &svg[..40.min(svg.len())]);
-    assert!(svg.contains("<svg "));
+    assert!(svg.starts_with("<svg "), "{}", &svg[..40.min(svg.len())]);
     assert!(harness.query(".placeholder").is_none());
 }
 
@@ -935,7 +957,7 @@ fn composed_text_reaches_the_field() {
     )
     .expect("three characters fit in a code")
     .into_svg();
-    assert_eq!(svg, expected);
+    assert_eq!(body(&svg), body(&expected));
 }
 
 /// **One press of an arrow key moves the caret one character.**
@@ -2270,23 +2292,88 @@ fn the_theme_is_the_desktops_until_somebody_picks_one() {
     }
 }
 
+/// **The code on the stage is the code in the file.**
+///
+/// The preview is markup dropped into the stage rather than a `data:` URL on
+/// an `<img>`, so what `usvg` draws is the `<svg>` element Blitz parsed out of
+/// that markup and then serialized again — not the bytes `qrnew-core` handed
+/// over. This is the test that the round trip changes nothing, and it is what
+/// every assertion in this file that goes through [`preview`] rests on.
+///
+/// The two differences it does allow are the two [`body`] normalizes, and they
+/// are checked here rather than taken on trust: the XML declaration is not an
+/// element and does not survive being parsed into one, and Blitz writes a
+/// space before the slash of an empty element. The second is counted, so a
+/// third difference cannot hide inside the substitution.
+#[test]
+fn the_code_on_the_stage_is_the_code_in_the_file() {
+    // A style with something in every field the document can carry: a colour
+    // that is not black, curves rather than squares, and a hole in the middle
+    // for a picture.
+    const TEXT: &str = "https://example.org/a-url-long-enough-to-need-a-few-versions";
+    let image = an_image("same-document");
+    let mut harness = app_with_picture(TEXT, &image);
+    harness.click("[data-look=\"rounded\"]");
+    harness.click("[data-swatch=\"#1b3f8f\"]");
+    harness.pump();
+
+    let on_screen = preview(&harness).expect("a code is on the stage");
+    let in_the_file = qrnew_core::Qr::new(
+        TEXT,
+        // An inset holds the level at 30% whatever the row says.
+        qrnew_core::ErrorCorrection::High,
+        &qrnew_core::QrStyle {
+            dark: qrnew_core::Rgb::new(0x1b, 0x3f, 0x8f),
+            quiet_zone: qrnew::ui::DEFAULT_MARGIN,
+            module: qrnew_core::ModuleShape::Rounded,
+            finder: qrnew_core::Finder {
+                shape: qrnew_core::FinderShape::Rounded,
+                ring: None,
+                center: None,
+            },
+            logo: Some(qrnew_core::Logo::new(std::fs::read(&image).unwrap())),
+            ..qrnew_core::QrStyle::default()
+        },
+    )
+    .expect("the core draws the same code")
+    // The stage carries the document with the hole and without the picture;
+    // the picture is the layer over it. What is *saved* is `Qr::svg`, which is
+    // this document with the picture in it.
+    .svg_without_inset();
+
+    assert_eq!(body(&on_screen), body(&in_the_file), "the same document");
+
+    // And the allowance is exactly the two things named above. The declaration
+    // is the head of the file and nothing else went missing; every other byte
+    // of difference is a space before a slash, one per empty element.
+    assert!(in_the_file.starts_with("<?xml"), "the file is an XML document");
+    assert!(!on_screen.contains("?>"), "and the stage is not");
+    let empty_elements = body(&on_screen).matches("/>").count();
+    assert!(empty_elements > 1, "there are empty elements to count");
+    assert_eq!(
+        on_screen.trim().len(),
+        in_the_file.split_once("?>").unwrap().1.trim().len() + empty_elements,
+        "one space per empty element, and nothing else",
+    );
+}
+
 /// **Changing the theme does not take the code off the stage.**
 ///
-/// It did. Picking a theme left the preview `<img>` — and the picture laid
-/// over it — with a box 458 points wide and *nothing high*, so the code
-/// vanished and the mat behind it, which is painted in the code's own
-/// background colour, was all that was left on the stage. Which looks like the
-/// foreground of the code being deleted, and lasts until the next keystroke
-/// builds a new `<img>`: changing the theme back does not bring it back.
+/// It did. Picking a theme left the code — and the picture laid over it — with
+/// a box 458 points wide and *nothing high*, so the code vanished and the mat
+/// behind it, which is painted in the code's own background colour, was all
+/// that was left on the stage. Which looks like the foreground of the code
+/// being deleted, and lasts until the next keystroke builds the node again:
+/// changing the theme back does not bring it back.
 ///
-/// The cause and the fix are above `.code > img` in `ui.css`. What matters
+/// The cause and the fix are above `.code > .doc` in `ui.css`. What matters
 /// here is that the check has to be made on the *box*, not on the document:
-/// the SVG in the `data:` URL was right the whole time, so [`preview`] — which
-/// every other test in this file goes through — says the app is fine. Hence
-/// [`app_drawn`], which is the only harness in this suite that actually
-/// fetches the preview it is looking at.
+/// the markup was right the whole time, so [`preview`] — which every other
+/// test in this file goes through — says the app is fine. Both layers are
+/// checked, and the picture is an `<img>` with a `data:` URL on it, which is
+/// what [`app_drawn`] is for.
 ///
-/// Both layers, and both directions: away from the default and back to it.
+/// Both directions, too: away from the default and back to it.
 #[test]
 fn the_theme_does_not_take_the_code_off_the_stage() {
     let image = an_image("theme-stage");
@@ -2304,7 +2391,7 @@ fn the_theme_does_not_take_the_code_off_the_stage() {
         rect.width
     };
 
-    let code = square(&harness, "[data-preview]", "before the sheet is opened");
+    let code = square(&harness, "[data-preview] svg", "before the sheet is opened");
     let inset = square(&harness, "[data-preview-inset]", "before the sheet is opened");
 
     harness.click(".theme-open");
@@ -2313,7 +2400,7 @@ fn the_theme_does_not_take_the_code_off_the_stage() {
         harness.click(&format!("[data-theme=\"{pick}\"]"));
         harness.pump();
         let when = format!("with {pick} picked");
-        assert_eq!(square(&harness, "[data-preview]", &when), code);
+        assert_eq!(square(&harness, "[data-preview] svg", &when), code);
         assert_eq!(square(&harness, "[data-preview-inset]", &when), inset);
     }
 }
