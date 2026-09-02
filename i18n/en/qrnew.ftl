@@ -53,6 +53,7 @@ inset-error = Could not read this file as an image. Supported formats: PNG, JPEG
 section-colors = Colors
 color-dark-label = Foreground
 color-light-label = Background
+color-warning = These two colors are too close for a scanner to tell apart.
 color-reset = Reset to black & white
 git-description = Git commit {$hash} on {$date}
 close = Close

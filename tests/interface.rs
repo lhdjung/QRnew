@@ -1243,23 +1243,28 @@ fn anything_but_square_says_what_it_costs() {
     );
 }
 
-/// The two cautions are one banner, and they come in the rail's own order.
+/// The three cautions are one banner, and the two in a rail come in the rail's
+/// own order.
 ///
-/// The same box is the load-bearing half. A window with two ways of saying
-/// "this still works, and here is what it costs" has two things to learn
-/// instead of one, and the second one is read as something else. The order is
-/// the cards' order — margin, then shape — and it is pinned here so that
-/// moving a card is a decision somebody makes rather than one that happens.
+/// The same box is the load-bearing half. A window with three ways of saying
+/// "this still works, and here is what it costs" has three things to learn
+/// instead of one, and the second and third are read as something else. The
+/// order is the cards' order — margin, then shape — and it is pinned here so
+/// that moving a card is a decision somebody makes rather than one that
+/// happens. The colour caution is in the other rail, so it is held to the box
+/// and not to the order.
 #[test]
-fn the_two_cautions_are_the_same_banner() {
+fn the_cautions_are_all_the_same_banner() {
     let harness = app_after(&[
         "[data-look=\"dots\"]",
         "[data-margin-less]",
         "[data-margin-less]",
+        "[data-swatch=\"#ffffff\"]",
     ]);
 
     let margin = harness.layout_rect("[data-margin-warning]");
     let shape = harness.layout_rect("[data-shape-warning]");
+    let color = harness.layout_rect("[data-color-warning]");
     assert!(
         margin.y + margin.height <= shape.y,
         "the margin caution is above the shape's: {} against {}",
@@ -1269,6 +1274,92 @@ fn the_two_cautions_are_the_same_banner() {
     assert_eq!(
         shape.height, margin.height,
         "and they are the same box, not two ideas of what a caution looks like"
+    );
+    assert_eq!(
+        color.height, margin.height,
+        "and so is the colour caution, a rail away"
+    );
+}
+
+/// **The colour caution is a caution, not a failure.**
+///
+/// `SAFE_CONTRAST` is deliberately well above where the app's own reader gives
+/// up — the argument is above the constant in `ui.rs` — and this is the half of
+/// that argument a test can hold: a code drawn at exactly the gap the app
+/// starts warning at still decodes. So the banner is the window saying it has
+/// stopped vouching, in a state where everything still works, which is the same
+/// thing the margin caution is.
+#[test]
+fn the_colour_caution_arrives_while_the_code_still_reads() {
+    // A grey foreground on white, at the threshold. The greys are equal in all
+    // three channels, so their luminance is the level itself.
+    let level = ((1.0 - qrnew::ui::SAFE_CONTRAST) * 255.0).round() as u8;
+    let png = qrnew_core::render_png(
+        "https://example.org",
+        qrnew_core::ErrorCorrection::Medium,
+        &qrnew_core::QrStyle {
+            dark: qrnew_core::Rgb::new(level, level, level),
+            light: qrnew_core::Rgb::WHITE,
+            quiet_zone: qrnew::ui::DEFAULT_MARGIN,
+            ..qrnew_core::QrStyle::default()
+        },
+        10,
+    )
+    .expect("the core draws a code in any colours");
+
+    assert!(
+        qrnew_core::read(&png).is_ok(),
+        "a code at the gap the app cautions about still reads"
+    );
+}
+
+/// **Two colours a scanner cannot tell apart are a code that does not scan,
+/// and the app is the only one in the room who knows.**
+///
+/// It is the easiest mistake the window allows. The greyscale row is eight
+/// swatches in a line and the two on the end are white and near-white; a click
+/// four pixels from the one somebody meant paints the foreground the colour of
+/// the background, and what comes out is a blank square that saves, copies and
+/// exports exactly like a code. Nothing else in the window says so — the mat's
+/// dashed outline keeps the *preview* honest about where the paper ends, which
+/// is a different question.
+///
+/// Luminance and not hue, which is the half worth testing rather than
+/// asserting: the palette's leaf green on its dark red is two colours nobody
+/// would call alike and a gap of 0.038 to a camera, which flattens the picture
+/// to grey before it looks for anything.
+#[test]
+fn the_colors_card_says_when_a_scanner_could_not_tell_them_apart() {
+    let mut harness = app();
+    assert!(
+        harness.query("[data-color-warning]").is_none(),
+        "black on white says nothing"
+    );
+
+    // The foreground well is the one the picker opens on.
+    harness.click("[data-swatch=\"#ffffff\"]");
+    harness.pump();
+    assert!(
+        harness.query("[data-color-warning]").is_some(),
+        "white on white is a blank square, and the card says so"
+    );
+
+    // Two colours that look nothing alike and read as one.
+    harness.click("[data-swatch=\"#1f5c36\"]");
+    harness.click("[data-well=\"light\"]");
+    harness.click("[data-swatch=\"#8b1a1a\"]");
+    harness.pump();
+    assert!(
+        harness.query("[data-color-warning]").is_some(),
+        "green on red is a gap of 0.038, whatever it looks like"
+    );
+
+    // And it goes away with the choice that caused it.
+    harness.click("[data-reset]");
+    harness.pump();
+    assert!(
+        harness.query("[data-color-warning]").is_none(),
+        "resetting to black and white takes the caution back"
     );
 }
 
@@ -1414,6 +1505,12 @@ fn a_shrinking_code_keeps_its_picture_and_says_the_size_is_held() {
 /// margin was thirty points of it, and the card shows its hint or its caution
 /// rather than both.
 ///
+/// **And the colour caution**, which is a banner added to the tighter rail
+/// with no hint to trade for it, and which the rail turns out to hold at both
+/// heights. That is worth a row here rather than only the weaker promise: it
+/// is the state a click on the wrong swatch reaches, so it is the caution most
+/// people will actually see.
+///
 /// The shape caution is the one state a rail cannot always take, and
 /// `a_caution_is_never_the_thing_that_scrolls` is what covers it instead: it
 /// is a card's worth of addition with no hint to trade for it, and in the
@@ -1428,6 +1525,7 @@ fn no_control_is_below_the_fold() {
             ("as it opens", app()),
             ("with a picture in it", app_with_inset("https://example.org", "fold")),
             ("cautioning about the margin", app_after(&["[data-margin-less]"; 2])),
+            ("cautioning about the colours", app_after(&["[data-swatch=\"#ffffff\"]"])),
         ] {
             harness.set_viewport_size(1280, height);
             harness.pump();
@@ -1460,16 +1558,35 @@ fn no_control_is_below_the_fold() {
 /// a wide face, is twenty-five points past what the rail holds; the shape's is
 /// the lower of the two and it is the one that would go under, and the answer
 /// to that state is the scrollbar the rail already has.
+///
+/// The colour caution is in the other rail and is held to the same promise
+/// here, though it does not need it: `no_control_is_below_the_fold` covers
+/// that rail in the same state, which is the stronger claim. It is in this
+/// list so that the day it stops being true, the failure says which of the two
+/// promises went.
 #[test]
 fn a_caution_is_never_the_thing_that_scrolls() {
     for height in [860, 820] {
-        for (caution, mut harness) in [
-            ("[data-shape-warning]", app_after(&["[data-look=\"dots\"]"])),
-            ("[data-margin-warning]", app_after(&["[data-margin-less]"; 2])),
+        for (rail, caution, mut harness) in [
+            (
+                ".rail-main",
+                "[data-shape-warning]",
+                app_after(&["[data-look=\"dots\"]"]),
+            ),
+            (
+                ".rail-main",
+                "[data-margin-warning]",
+                app_after(&["[data-margin-less]"; 2]),
+            ),
+            (
+                ".rail-colors",
+                "[data-color-warning]",
+                app_after(&["[data-swatch=\"#ffffff\"]"]),
+            ),
         ] {
             harness.set_viewport_size(1280, height);
             harness.pump();
-            let rail = harness.layout_rect(".rail-main");
+            let rail = harness.layout_rect(rail);
             let warn = harness.layout_rect(caution);
             assert!(
                 warn.y >= rail.y && warn.y + warn.height <= rail.y + rail.height,

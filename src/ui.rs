@@ -171,6 +171,29 @@ use crate::fl;
 /// Resolution of saved and copied images, in pixels per module.
 const EXPORT_SCALE: u32 = 10;
 
+/// The least the code's two colours may differ before the app says so, as a
+/// difference in [`luminance`] on 0…1.
+///
+/// **It is not the number the reader stops at, and that is the point.** The
+/// obvious place to get this from is `qrnew_core::read` — draw a code, walk the
+/// two colours together, and take the gap at which it gives up. Measured that
+/// way, on a PNG at [`EXPORT_SCALE`]: a pale foreground on white reads down to
+/// a gap of 0.196 and fails at 0.176, and a black foreground on a lightening
+/// background reads down to 0.039. Which says the app's own reader is almost
+/// unbounded here, and it should be — it is handed a clean file with square
+/// edges and an even ground, and it binarizes adaptively.
+///
+/// A camera is not handed any of that. It has the code through optics, under
+/// whatever light is in the room, off whatever the code was printed on, and it
+/// has to find the edges before it can threshold anything. So the number is
+/// more than twice the reader's own floor, which is a judgement rather than a
+/// measurement, and it is the same judgement [`SAFE_MARGIN`] is: the app draws
+/// what it is asked for and says when it has stopped vouching.
+///
+/// The one thing the sweep does settle is that this cannot be a check that the
+/// code *decodes*. It decodes long past where anybody could scan it.
+pub const SAFE_CONTRAST: f32 = 0.4;
+
 /// The narrowest border the app is prepared to vouch for, in modules.
 ///
 /// Two modules of white is enough for a phone camera to find the edge of the
@@ -1667,6 +1690,36 @@ pub fn App() -> Element {
                                 onpick: move |_| editing.set(Well::Light),
                             }
                         }
+                        // The third caution, in the same banner as the other
+                        // two and for the same reason: a choice the app is
+                        // perfectly willing to make, with a price it is the
+                        // only one in the room who knows about.
+                        //
+                        // It is the most reachable of the three. The margin's
+                        // caution takes two clicks past the app's own default
+                        // and the shape's takes one; this one is a click on a
+                        // swatch four pixels from the one somebody meant, and
+                        // the greyscale row has eight of them in a line. The
+                        // window's other answer to a colour that is nearly its
+                        // neighbour — `mat_line`, which keeps the mat's edge
+                        // visible against the page — is about the *preview*
+                        // being honest. This is about the file.
+                        //
+                        // Directly under the wells, which is what it is about,
+                        // and as high in the tighter of the two rails as it
+                        // can be put. The card has no hint to trade for the
+                        // banner the way the margin card trades for its own,
+                        // so this is the one caution of the three that is a
+                        // card's worth of addition to a rail with no slack —
+                        // and it still fits, at 820 as well as at 860, which
+                        // is `no_control_is_below_the_fold` rather than the
+                        // weaker promise the shape caution has to settle for.
+                        if contrast(dark(), light()) < SAFE_CONTRAST {
+                            p { class: "warn", "data-color-warning": "true",
+                                {glyph(Glyph::Alert, Ink::Warn, "glyph")}
+                                span { {fl!("color-warning")} }
+                            }
+                        }
                         // Two branches rather than one call with a signal
                         // chosen inside it, because switching wells has to
                         // *rebuild* the picker: its draft hex and its hue are
@@ -2534,13 +2587,7 @@ fn mat_line(mat: Rgb) -> String {
     /// And a dark one's towards white.
     const TOWARDS_WHITE: f32 = 0.44;
 
-    // The 299/587/114 weighting, which is what `read` in `qrnew-core` flattens
-    // a photograph to before handing it to `rqrr`. Deliberately the same one:
-    // if the app is going to call a colour light or dark, it should call it
-    // what its own reader would.
-    let luminance = (299.0 * f32::from(mat.r) + 587.0 * f32::from(mat.g) + 114.0 * f32::from(mat.b))
-        / 255_000.0;
-    let (target, amount) = if luminance > LIGHT_ABOVE {
+    let (target, amount) = if luminance(mat) > LIGHT_ABOVE {
         (0.0, TOWARDS_BLACK)
     } else {
         (255.0, TOWARDS_WHITE)
@@ -2548,6 +2595,29 @@ fn mat_line(mat: Rgb) -> String {
     let mix = |channel: u8| (f32::from(channel) + (target - f32::from(channel)) * amount) as u8;
 
     Rgb::new(mix(mat.r), mix(mat.g), mix(mat.b)).to_hex()
+}
+
+/// How light a colour is, on 0…1.
+///
+/// The 299/587/114 weighting, which is what `read` in `qrnew-core` flattens a
+/// photograph to before handing it to `rqrr`. Deliberately the same one: if the
+/// app is going to call a colour light or dark, it should call it what its own
+/// reader would.
+fn luminance(colour: Rgb) -> f32 {
+    (299.0 * f32::from(colour.r) + 587.0 * f32::from(colour.g) + 114.0 * f32::from(colour.b))
+        / 255_000.0
+}
+
+/// How far apart the code's two colours are, on 0…1.
+///
+/// Luminance and not hue, because a scanner has no opinion about hue: it
+/// flattens the picture to grey and looks for the step. Two colours that are
+/// nothing alike to look at can be the same colour to a camera — the palette's
+/// own leaf green on its dark red is a gap of 0.038 — which is exactly the
+/// case a window full of colour swatches has to be able to say something
+/// about. [`SAFE_CONTRAST`] is where it starts saying it.
+fn contrast(dark: Rgb, light: Rgb) -> f32 {
+    (luminance(dark) - luminance(light)).abs()
 }
 
 /// The three `background` lists that draw one position marker.
