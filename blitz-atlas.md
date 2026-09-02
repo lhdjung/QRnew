@@ -6,6 +6,11 @@ app. This is the write-up behind two upstream reports — one against
 [`dioxuslabs/anyrender`], one against [`DioxusLabs/blitz`] — and the evidence is
 QRnew's own measurements.
 
+It has since grown a second half. The atlas is not the only cache here that is
+never freed — `BaseDocument::image_cache`, one crate above it, is the other —
+and the last section is that one: same shape, different crate, and the one that
+bites an app whose images are `data:` URLs.
+
 Measured on macOS 15 (Apple Silicon), `vmmap --summary`, release build, window
 1019×762, read after fourteen seconds.
 
@@ -271,3 +276,55 @@ screen and hit-tests its centre to prove it is painted over the code and not
 under it. The saved and copied files never went through any of it — they are
 `Qr::svg`, one document, as they always were.
 
+
+## The other cache that is never freed: `BaseDocument::image_cache`
+
+**A second unbounded cache, one crate up, and it catches the app the atlas
+missed.** `blitz_dom::BaseDocument::image_cache` is a
+`HashMap<String, ImageData>` keyed by the resolved URL. It has exactly one
+`insert` — `apply_loaded_image` — two `get`s, and no `remove`, no `clear` and no
+eviction of any kind. It is `pub(crate)` with no accessor on `Document`, so an
+application cannot reach it either.
+
+That is fine for a page whose images are files. It is not fine for a `data:`
+URL rebuilt as the user types: every distinct document is a permanent entry
+holding both the URL string and the parsed `usvg` tree.
+
+Measured on QRnew's own preview, one `<img>` whose `src` is the code, RSS of
+the process after each batch:
+
+| documents drawn | `<img>` + `data:` URL | the same markup inline |
+| --- | ---: | ---: |
+| 0 | 80.8 MB | 107.6 MB |
+| 50 | 87.0 | 107.6 |
+| 100 | 93.5 | 107.6 |
+| 150 | 100.0 | 107.7 |
+| 200 | 106.5 | 107.7 |
+
+**+129 KB per document, linear, never returned** — against +64 KB *in total*
+for two hundred documents when the same markup is an inline `<svg>` instead.
+(The two columns start at different baselines because they are separate
+processes; the slopes are the measurement.) Typing three hundred characters
+into QRnew cost 16.7 MB by itself, and dragging in the colour picker produces
+documents faster than anybody types.
+
+Re-typing text that has been typed before is free, which is the confirmation
+that this is the URL cache rather than anything else: those URLs hit.
+
+The ask is the same shape as the atlas's, and the first item of it is the same
+sentence: **free what is no longer referenced, or bound the cache.** A
+`data:` URL is a particularly poor cache key — it *is* the content, so an entry
+can never be reused by anything except an identical redraw, and every entry is
+as large as the resource it stands for.
+
+**What QRnew did instead**, again: the preview stopped being an `<img>`.
+`Qr::svg_without_inset` goes into the stage as markup, Blitz parses it into an
+`<svg>` element and hands that to the same `usvg`, and the node is replaced
+with the node rather than accumulating beside it. Three hundred characters now
+cost 2.2 MB, which is the code that is actually on screen. The round trip
+through the DOM changes the document in exactly two ways — the XML declaration
+is not an element, and Blitz writes a space before the slash of an empty
+element — and `the_code_on_the_stage_is_the_code_in_the_file` counts both so a
+third cannot hide behind them. The inset is still an `<img>`, and still should
+be: its URL changes only when the picture does, which is what the section above
+needs it to do.
