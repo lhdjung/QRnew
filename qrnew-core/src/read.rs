@@ -6,6 +6,11 @@
 //! same machinery: the file is wrapped in a `data:` URL and handed to `resvg`,
 //! exactly as a logo inset is, which means every format a logo may be in is
 //! also a format a code may be read from. The decoding itself is `rqrr`'s.
+//!
+//! It is `rqrr`'s twice over when it has to be, and [`read`] says why: a code
+//! drawn light on dark is one the standard does not describe, one every phone
+//! reads anyway, and one this crate will draw the moment somebody swaps the
+//! two colours.
 
 use std::fmt;
 
@@ -60,6 +65,28 @@ impl std::error::Error for ReadError {}
 /// reliably. A picture taken at an angle, in poor light or out of focus is a
 /// harder problem than this does, and a phone camera will often succeed where
 /// this returns [`ReadError::NoCode`].
+///
+/// # Light codes on a dark ground
+///
+/// **A code drawn the other way round is read the other way round**, and it
+/// takes a second pass to do it. The standard says dark on light and `rqrr`
+/// takes it at its word: the finder patterns it looks for are dark rings, so an
+/// inverted code is not a code it decodes badly, it is a code it does not
+/// locate at all — `detect_grids` comes back empty and the answer is
+/// [`ReadError::NoCode`].
+///
+/// That is the wrong answer for the thing actually holding a phone. Both
+/// platform scanners read a light code on a dark ground without being asked,
+/// so the everyday standard is not the written one, and this crate can draw
+/// such a code — the app above it hands the colours straight through. Refusing
+/// to read back what it will happily write is the one inconsistency worth
+/// spending a second decode on, and it is a second decode only when the first
+/// one failed: an ordinary code pays nothing.
+///
+/// The inversion is in brightness, on the greyscale the decoder already works
+/// from, so it costs one pass over the buffer and no rendering. What comes back
+/// when both attempts fail is the *first* attempt's error, because the image as
+/// it was handed over is the image somebody is being told about.
 pub fn read(image: &[u8]) -> Result<String, ReadError> {
     let pixmap = rasterize(image)?;
     let (width, height) = (pixmap.width() as usize, pixmap.height() as usize);
@@ -79,6 +106,17 @@ pub fn read(image: &[u8]) -> Result<String, ReadError> {
         })
         .collect();
 
+    match decode(width, height, &luma) {
+        Ok(content) => Ok(content),
+        Err(as_given) => {
+            let inverted: Vec<u8> = luma.iter().map(|level| 255 - level).collect();
+            decode(width, height, &inverted).map_err(|_| as_given)
+        }
+    }
+}
+
+/// One decoding attempt, over a greyscale buffer of `width` × `height`.
+fn decode(width: usize, height: usize, luma: &[u8]) -> Result<String, ReadError> {
     let mut prepared =
         rqrr::PreparedImage::prepare_from_greyscale(width, height, |x, y| luma[y * width + x]);
 
@@ -179,6 +217,48 @@ mod tests {
         assert!(qr.size_in_modules() * scale > MAX_SIDE as u32);
 
         assert_eq!(read(&qr.to_png(scale).unwrap()).as_deref(), Ok(DATA));
+    }
+
+    /// **A light code on a dark ground reads.**
+    ///
+    /// `rqrr` on its own does not read one — it looks for dark finder rings,
+    /// so it does not locate the code at all — and this crate will draw one the
+    /// moment somebody swaps the two colours. Both platform scanners manage it,
+    /// which makes it a code that works everywhere except in the app that made
+    /// it. The second pass in [`read`] is what closes that.
+    #[test]
+    fn a_code_drawn_light_on_dark_reads() {
+        let inverted = Qr::new(
+            DATA,
+            ErrorCorrection::Medium,
+            &QrStyle {
+                dark: crate::Rgb::WHITE,
+                light: crate::Rgb::BLACK,
+                ..QrStyle::default()
+            },
+        )
+        .unwrap()
+        .to_png(8)
+        .unwrap();
+
+        assert_eq!(read(&inverted).as_deref(), Ok(DATA));
+    }
+
+    /// The second pass is a second chance, not a second answer: a code the
+    /// right way round is still read by the first one, and reads the same.
+    #[test]
+    fn the_second_pass_does_not_change_an_ordinary_code() {
+        assert_eq!(read(&code().to_png(8).unwrap()).as_deref(), Ok(DATA));
+    }
+
+    /// And what comes back when neither pass finds anything is the first
+    /// pass's answer, about the image as it was handed over.
+    #[test]
+    fn an_image_that_reads_neither_way_reports_the_first_attempt() {
+        let mut noise = tiny_skia::Pixmap::new(600, 400).unwrap();
+        noise.fill(tiny_skia::Color::from_rgba8(120, 120, 120, 255));
+
+        assert_eq!(read(&noise.encode_png().unwrap()), Err(ReadError::NoCode));
     }
 
     #[test]

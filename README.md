@@ -4,7 +4,7 @@ Local-only QR code generator
 
 Small, simple, and offline-only, so user data remain private. Create a QR code immediately, then save it as PNG or SVG. You can also copy it, or scan it directly from screen.
 
-QRnew reads QR codes as well. Open an image file — PNG, JPEG, GIF, WebP or SVG — and the text inside it appears next to the button, with one click to copy it.
+QRnew reads QR codes as well. Open an image file — PNG, JPEG, GIF, WebP or SVG — and the text inside it appears next to the button, with one click to copy it. A code drawn light on dark reads too: the standard says dark on light and most decoding libraries stop there, but every phone manages it, so QRnew tries the image the other way round before giving up.
 
 The code does not have to be drawn in squares. *Shape* offers rounded modules or dots, and the three corner squares a scanner looks for soften along with them. Every one of them still scans — that is what `qrnew-core`'s tests check, with a real decoder, for each shape in turn. Scanning *quickly* is a different question, and one no test can answer: a camera has fewer clean edges to work with, so it takes a moment longer to focus and lock on. The card says so as soon as you choose anything but square, because square is what to use when the code has to be read fast and every time.
 
