@@ -405,6 +405,30 @@ body {
   padding-right: 8px;
   padding-bottom: 4px;
   overflow-y: auto;
+  /* **A rail scrolls up and down and must be told it does nothing else**,
+   * because `overflow-y: auto` alone makes a scroll container in both
+   * directions: `visible` on the other axis computes to `auto` the moment one
+   * axis is not `visible`, which is CSS working exactly as written. What is not
+   * as written is that there was something to scroll *to*. Nothing in this rail
+   * is wider than it — measured, the widest edge inside it stops eight points
+   * short of the far side — and it still slid fifty-five points left under a
+   * two-finger swipe, taking the Content card half off the window.
+   *
+   * The fifty-five belongs to the margin field. An `<input>` here contributes a
+   * fixed intrinsic width to its flex row's content size — the same figure
+   * whatever the font, whatever `flex-basis` or `max-width` or `size` say — and
+   * the row's *box* comes out right while the scrollable area it hands upwards
+   * does not. Cut down: a scroll container holding one flex row of
+   * button-input-button slides, the same row with a `<div>` where the input was
+   * does not, and neither button on its own does anything. That is why only
+   * this rail moved and the colours rail never did — the stepper is the one
+   * place in the window where an input sits in a row beside anything else.
+   *
+   * `hidden` rather than `clip`, because it is the one of the two Blitz
+   * implements, and nothing is being hidden in any case: there is no content
+   * out there to reach. `a_rail_does_not_slide_sideways` is the regression
+   * test. */
+  overflow-x: hidden;
 }
 
 /* The rail on the far side of the stage, which is the one the gutter is

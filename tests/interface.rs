@@ -1687,6 +1687,59 @@ fn a_caution_is_never_the_thing_that_scrolls() {
     }
 }
 
+/// **A two-finger swipe across a rail moves nothing**, in either direction.
+///
+/// It used to move the control rail fifty-five points left and leave the
+/// Content card hanging off the side of the window, and the cause is a scroll
+/// area that the boxes on screen do not justify — the whole of it is above
+/// `overflow-x` in `ui.css`. The swipe is what a person does; the wheel event
+/// is how it arrives, so that is what this sends, at a delta far past anything
+/// a touchpad produces so the assertion is about the clamp rather than about
+/// the size of the push.
+///
+/// Both rails and both directions, because the bug was in only one of each and
+/// a fix that only covered that one would be a coincidence rather than a rule.
+#[test]
+fn a_rail_does_not_slide_sideways() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("https://example.org");
+    harness.pump();
+
+    for rail in [".rail-main", ".rail-colors"] {
+        let card = format!("{rail} .card:first-child");
+        let resting = harness.layout_rect(&card).x;
+        let (x, y) = harness.center_of(rail);
+        for push in [-2000.0, 2000.0] {
+            harness.wheel_at(x, y, push, 0.0);
+            harness.pump();
+            assert_eq!(
+                harness.layout_rect(&card).x,
+                resting,
+                "{rail} stays put under a sideways push of {push}"
+            );
+        }
+    }
+
+    // And the axis a rail is a scroll container *for* still works, which is
+    // the thing `overflow-x` could plausibly have taken with it. Short enough
+    // that both rails have somewhere to go.
+    harness.set_viewport_size(1280, 560);
+    harness.pump();
+    for rail in [".rail-main", ".rail-colors"] {
+        let card = format!("{rail} .card:first-child");
+        let resting = harness.layout_rect(&card).y;
+        let (x, y) = harness.center_of(rail);
+        harness.wheel_at(x, y, 0.0, -200.0);
+        harness.pump();
+        assert!(
+            harness.layout_rect(&card).y < resting,
+            "{rail} still scrolls down: {} against {resting}",
+            harness.layout_rect(&card).y
+        );
+    }
+}
+
 /// The controls and the code are side by side, not stacked.
 ///
 /// The code is the middle column, so this is a rail on either side of it and
