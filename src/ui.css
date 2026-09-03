@@ -361,7 +361,19 @@ body {
  * points are its own bottom edge and the sentence above it is fully on screen;
  * `a_caution_is_never_the_thing_that_scrolls` is what holds that line. Both
  * cautions at once is twenty-five over, and the answer to that state is the
- * scrollbar the rail already has. */
+ * scrollbar the rail already has.
+ *
+ * **The sides are 30 and 22, and the eight between them is a scrollbar
+ * gutter.** A rail reserves eight points on the side its overlay thumb comes
+ * down; while both rails were on the same side of the stage, both of those
+ * gutters fell inside a gap and neither could be seen. The colours rail is now
+ * the right-hand edge of the window, so its gutter would otherwise read as
+ * eight points of extra air on that side alone. Taken off the window's own
+ * padding instead, the two card columns end the same 30 from their edges —
+ * which is also the topbar's, so the brand and the About button still line up
+ * with the cards under them. `.rail-colors` below is the other half of the
+ * arithmetic, and `the_stage_sits_evenly_between_the_two_rails` is what holds
+ * the two halves together. */
 .body {
   display: flex;
   flex-direction: row;
@@ -371,7 +383,7 @@ body {
   width: 100%;
   max-width: 1500px;
   margin: 0 auto;
-  padding: 4px 30px 18px;
+  padding: 4px 22px 18px 30px;
   min-height: 0;
 }
 
@@ -393,6 +405,18 @@ body {
   padding-right: 8px;
   padding-bottom: 4px;
   overflow-y: auto;
+}
+
+/* The rail on the far side of the stage, which is the one the gutter is
+ * awkward for. Eight more of basis and eight of left padding: the cards inside
+ * are the same 348 as the other rail's, and the gap between this rail's cards
+ * and the stage is the same 32 — 24 of `gap` plus the gutter — that the other
+ * rail's cards get. The eight it costs the window came off `.body`'s right
+ * padding above; without both halves the stage sits closer to one rail than
+ * the other, or the window is wider on one side. */
+.rail-colors {
+  flex-basis: 364px;
+  padding-left: 8px;
 }
 
 .card {
@@ -451,7 +475,8 @@ body {
   color: var(--danger);
 }
 
-/* The preview column.
+/* The preview column, which sits between the two rails rather than after
+ * them — the argument for that is in `ui.rs`, where the order actually lives.
  *
  * Top-aligned, not centred. Centring put the code lower than everything
  * beside it, so the window read as two columns of interface with a picture

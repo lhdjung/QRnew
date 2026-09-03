@@ -46,12 +46,21 @@
 //!
 //! # The shape of the window
 //!
-//! **Three columns, and that is the whole layout argument.** Two fixed-width
-//! rails of controls, then a stage on the right that the code sits on. Nothing
-//! in a rail can move the code, which is what the original single-column stack
-//! got wrong — opening the colour picker there pushed the preview under the
-//! bottom of the window, so the one thing somebody was adjusting the colour of
-//! was the one thing they could no longer see.
+//! **Three columns, and that is the whole layout argument.** A fixed-width
+//! rail of controls, then the stage the code sits on, then the second rail.
+//! Nothing in a rail can move the code, which is what the original
+//! single-column stack got wrong — opening the colour picker there pushed the
+//! preview under the bottom of the window, so the one thing somebody was
+//! adjusting the colour of was the one thing they could no longer see.
+//!
+//! **The code is in the middle rather than at one end**, which is where it
+//! belongs by weight: it is the largest thing in the window and the only thing
+//! any of the controls is about, and a window whose subject sits against one
+//! edge with all of its interface piled against the other reads as a form with
+//! a picture appended. A rail on either side puts the subject where the eye
+//! starts, and neither rail becomes the far one that gets looked at last.
+//! `the_controls_and_the_code_are_in_separate_columns` is what holds the three
+//! apart, in that order.
 //!
 //! The second rail is what stops the first one scrolling. One column of
 //! controls only fitted a window this tall with the picker collapsed, so the
@@ -1683,6 +1692,98 @@ pub fn App() -> Element {
 
                 }
 
+                section { class: "stage",
+                    if let Some(document) = preview() {
+                        // The mat is painted in the code's own background
+                        // colour, so the rounded corners belong to the mat and
+                        // the image never has to be clipped to them.
+                        div {
+                            class: "preview",
+                            style: "background: {light().to_hex()}; border-color: {mat_line(light())}",
+                            // Two layers, one picture. The document is square
+                            // and so is this box, so the code fills it exactly
+                            // and a percentage inside it is a fraction of the
+                            // document — which is the unit `inset_box` speaks.
+                            div { class: "code",
+                                // The document, dropped in whole. `Blitz`
+                                // parses the markup, sees an `<svg>`, and hands
+                                // that element's own serialization to `usvg` —
+                                // the same parser a `data:` URL would have
+                                // reached, and `the_code_on_the_stage_is_the_
+                                // code_in_the_file` is what holds the two
+                                // documents to being one.
+                                //
+                                // `dangerous_inner_html` is the only way in,
+                                // and the name is about markup from somewhere
+                                // else. This markup is `draw.rs`'s, built from
+                                // an escaped string a line above where the
+                                // code was encoded.
+                                //
+                                // The name the `<img>` carried as its `alt`
+                                // moves here with it: a `<div>` full of paths
+                                // is not a picture to anything reading the
+                                // window aloud unless it says so.
+                                div {
+                                    class: "doc",
+                                    "data-preview": "true",
+                                    role: "img",
+                                    aria_label: fl!("app-title"),
+                                    dangerous_inner_html: "{document}",
+                                }
+                                if let (Some(spot), Some(picture)) = (spot.as_ref(), thumbnail()) {
+                                    // No `alt`: the code above already names
+                                    // the whole thing, and a screen reader
+                                    // meeting this twice would be told about a
+                                    // picture it cannot describe anyway.
+                                    img {
+                                        class: "inset",
+                                        "data-preview-inset": "true",
+                                        src: "{picture}",
+                                        alt: "",
+                                        style: "{spot}",
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        div { class: "placeholder",
+                            {glyph(Glyph::Code, Ink::Faint, "glyph-empty")}
+                            span { {fl!("qr-placeholder")} }
+                        }
+                    }
+                    div { class: "exports",
+                        button { class: "{export_class}", onclick: save_png,
+                            {glyph(Glyph::Download, export_ink, "glyph")}
+                            span { {fl!("save-png")} }
+                        }
+                        button { class: "{export_class}", onclick: save_svg,
+                            {glyph(Glyph::Download, export_ink, "glyph")}
+                            span { {fl!("save-svg")} }
+                        }
+                        button {
+                            class: "{export_class}",
+                            "data-copy-image": "true",
+                            onclick: copy,
+                            {
+                                glyph(
+                                    if copied_image.showing() { Glyph::Check } else { Glyph::Copy },
+                                    if copied_image.showing() { Ink::Accent } else { export_ink },
+                                    "glyph",
+                                )
+                            }
+                            span {
+                                {
+                                    if copied_image.showing() {
+                                        fl!("copy-copied")
+                                    } else {
+                                        fl!("copy")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 section { class: "rail rail-colors",
 
                     div { class: "card",
@@ -1876,104 +1977,13 @@ pub fn App() -> Element {
                         // The sentence is what an empty card is for: it says
                         // what an inset is and what taking one costs. Once
                         // there is a picture the thumbnail says the first
-                        // half, and the error-correction card next door is
-                        // already saying the second in its own hint — so
+                        // half, and the error-correction card — a rail away,
+                        // but still on screen — is already saying the second
+                        // in its own hint, so
                         // keeping it here would be the same fact twice, in the
                         // one column that has no room to spare.
                         if !has_inset {
                             p { class: "hint", {fl!("inset-hint")} }
-                        }
-                    }
-                }
-
-                section { class: "stage",
-                    if let Some(document) = preview() {
-                        // The mat is painted in the code's own background
-                        // colour, so the rounded corners belong to the mat and
-                        // the image never has to be clipped to them.
-                        div {
-                            class: "preview",
-                            style: "background: {light().to_hex()}; border-color: {mat_line(light())}",
-                            // Two layers, one picture. The document is square
-                            // and so is this box, so the code fills it exactly
-                            // and a percentage inside it is a fraction of the
-                            // document — which is the unit `inset_box` speaks.
-                            div { class: "code",
-                                // The document, dropped in whole. `Blitz`
-                                // parses the markup, sees an `<svg>`, and hands
-                                // that element's own serialization to `usvg` —
-                                // the same parser a `data:` URL would have
-                                // reached, and `the_code_on_the_stage_is_the_
-                                // code_in_the_file` is what holds the two
-                                // documents to being one.
-                                //
-                                // `dangerous_inner_html` is the only way in,
-                                // and the name is about markup from somewhere
-                                // else. This markup is `draw.rs`'s, built from
-                                // an escaped string a line above where the
-                                // code was encoded.
-                                //
-                                // The name the `<img>` carried as its `alt`
-                                // moves here with it: a `<div>` full of paths
-                                // is not a picture to anything reading the
-                                // window aloud unless it says so.
-                                div {
-                                    class: "doc",
-                                    "data-preview": "true",
-                                    role: "img",
-                                    aria_label: fl!("app-title"),
-                                    dangerous_inner_html: "{document}",
-                                }
-                                if let (Some(spot), Some(picture)) = (spot.as_ref(), thumbnail()) {
-                                    // No `alt`: the code above already names
-                                    // the whole thing, and a screen reader
-                                    // meeting this twice would be told about a
-                                    // picture it cannot describe anyway.
-                                    img {
-                                        class: "inset",
-                                        "data-preview-inset": "true",
-                                        src: "{picture}",
-                                        alt: "",
-                                        style: "{spot}",
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        div { class: "placeholder",
-                            {glyph(Glyph::Code, Ink::Faint, "glyph-empty")}
-                            span { {fl!("qr-placeholder")} }
-                        }
-                    }
-                    div { class: "exports",
-                        button { class: "{export_class}", onclick: save_png,
-                            {glyph(Glyph::Download, export_ink, "glyph")}
-                            span { {fl!("save-png")} }
-                        }
-                        button { class: "{export_class}", onclick: save_svg,
-                            {glyph(Glyph::Download, export_ink, "glyph")}
-                            span { {fl!("save-svg")} }
-                        }
-                        button {
-                            class: "{export_class}",
-                            "data-copy-image": "true",
-                            onclick: copy,
-                            {
-                                glyph(
-                                    if copied_image.showing() { Glyph::Check } else { Glyph::Copy },
-                                    if copied_image.showing() { Ink::Accent } else { export_ink },
-                                    "glyph",
-                                )
-                            }
-                            span {
-                                {
-                                    if copied_image.showing() {
-                                        fl!("copy-copied")
-                                    } else {
-                                        fl!("copy")
-                                    }
-                                }
-                            }
                         }
                     }
                 }

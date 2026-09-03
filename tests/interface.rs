@@ -1688,6 +1688,10 @@ fn a_caution_is_never_the_thing_that_scrolls() {
 }
 
 /// The controls and the code are side by side, not stacked.
+///
+/// The code is the middle column, so this is a rail on either side of it and
+/// neither one touching it — which is two assertions rather than the one it
+/// was when both rails were on the same side.
 #[test]
 fn the_controls_and_the_code_are_in_separate_columns() {
     let mut harness = app();
@@ -1695,13 +1699,20 @@ fn the_controls_and_the_code_are_in_separate_columns() {
     harness.type_text("https://example.org");
     harness.pump();
 
+    let main = harness.layout_rect(".rail-main");
     let colors = harness.layout_rect(".rail-colors");
     let preview = harness.layout_rect(".preview");
     assert!(
-        colors.x + colors.width <= preview.x,
-        "the last rail ends before the code begins: {} against {}",
-        colors.x + colors.width,
+        main.x + main.width <= preview.x,
+        "the first rail ends before the code begins: {} against {}",
+        main.x + main.width,
         preview.x
+    );
+    assert!(
+        preview.x + preview.width <= colors.x,
+        "the code ends before the last rail begins: {} against {}",
+        preview.x + preview.width,
+        colors.x
     );
     assert!(
         preview.width >= 400.0,
@@ -1998,6 +2009,54 @@ fn an_emptied_margin_field_restores_what_is_applied() {
         harness.attr("[data-margin]", "value").as_deref(),
         Some(qrnew::ui::DEFAULT_MARGIN.to_string().as_str())
     );
+}
+
+/// **The window is the same width on both sides of the code**, which stopped
+/// being free the moment the stage moved into the middle.
+///
+/// A rail reserves eight points on its right for the overlay scrollbar that
+/// may or may not come down it. While both rails were on the same side of the
+/// stage, both of those gutters fell inside a gap and neither was visible;
+/// with a rail on each side, the far one's gutter is against the window's own
+/// edge, and eight points of air on one side only is the kind of thing that is
+/// seen without being noticed. `.rail-colors` and `.body`'s asymmetric padding
+/// are the two halves of the answer, and this is what says they still add up:
+/// the cards are the same width, they end the same distance from their edges,
+/// and the code is the same distance from each of them.
+///
+/// Measured at the width the window falls back to and at the narrowest it can
+/// be dragged, because the stage is the only flexible column and both numbers
+/// are its.
+#[test]
+fn the_stage_sits_evenly_between_the_two_rails() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("https://example.org");
+
+    for width in [1160, 1280] {
+        harness.set_viewport_size(width, 860);
+        harness.pump();
+
+        let body = harness.layout_rect(".body");
+        let left = harness.layout_rect(".rail-main .card:first-child");
+        let right = harness.layout_rect(".rail-colors .card:first-child");
+        let stage = harness.layout_rect(".stage");
+
+        assert_eq!(
+            left.width, right.width,
+            "the two rails hold cards of one width at {width}"
+        );
+        assert_eq!(
+            left.x - body.x,
+            body.x + body.width - (right.x + right.width),
+            "and the outer card edges are the same distance from the window's at {width}"
+        );
+        assert_eq!(
+            stage.x - (left.x + left.width),
+            right.x - (stage.x + stage.width),
+            "and the code is the same distance from each of them at {width}"
+        );
+    }
 }
 
 /// The code starts at the height the controls start at.
