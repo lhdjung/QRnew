@@ -1305,6 +1305,28 @@ body {
   width: 440px;
 }
 
+/* The top line of a sheet: what the panel is, and the way out of it.
+ *
+ * **The way out is a cross in the corner rather than a Close button at the
+ * bottom**, which is where every panel a person has shut this year has put it.
+ * The old row cost a full-width button's worth of height to say something the
+ * shape of the panel already says, and in the About sheet it sat beside *View
+ * on GitHub* wearing the same chip — two buttons of equal weight, one of which
+ * only undoes the opening. Up here the leaving and the doing stop looking
+ * alike: the cross is quiet furniture in the corner, and the one button left
+ * in the panel is the one that actually goes somewhere.
+ *
+ * It is still not the only way out. Escape closes either sheet and so does the
+ * scrim, and both of those predate this; what the corner adds is the way that
+ * needs no guessing. */
+.sheet-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .sheet h2 {
   display: flex;
   flex-direction: row;
@@ -1313,6 +1335,45 @@ body {
   margin: 0;
   font-size: 19px;
   font-weight: 600;
+}
+
+/* The cross itself: a 34-point circle with an 18-point glyph inside it, which
+ * is a target half again the size of the mark it carries — a corner button is
+ * pressed in a hurry and should not have to be aimed at.
+ *
+ * **Nothing is drawn until the pointer is over it.** At rest it is the mark
+ * alone on the panel, in the faint ink the topbar's own chrome uses, so the
+ * first thing read in this panel is its title rather than the button beside
+ * it. The hover paints the disc — round, tinted, no border — and that is the
+ * whole of the affordance, because it is the whole of what CSS can move here:
+ * an icon's colour is a presentation attribute on a document the stylesheet
+ * cannot see inside, so the *ink* cannot answer a hover and the ground has to.
+ *
+ * `border-radius` in points rather than the 50% a circle is usually written
+ * as: the number is exactly half the box, so it is the same circle, and it is
+ * a length rather than a percentage resolved against a box.
+ *
+ * The negative right margin is optical. The panel's padding is 26 and a mark
+ * centred inside it would sit 43 points from the edge, which reads as a button
+ * that has drifted inwards rather than one placed in the corner; six points
+ * back puts the disc 20 from the edge and leaves the title's own line where it
+ * was. */
+.sheet-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  margin-right: -6px;
+  padding: 0;
+  background: rgba(0, 0, 0, 0);
+  border: none;
+  border-radius: 17px;
+}
+
+.sheet-close:hover {
+  background: var(--raised-hi);
 }
 
 /* The same size and ink as a `.hint` in the window behind it, because it is

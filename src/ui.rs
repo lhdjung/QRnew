@@ -983,8 +983,8 @@ pub fn App() -> Element {
     // **Escape closes whichever sheet is open.** A modal is the one place in
     // this window where the next click has to land somewhere in particular,
     // and the key that means "not this" is the one everybody reaches for
-    // first: the scrim and the Close button were the only two ways out, and a
-    // scrim is a thing you have to guess is clickable.
+    // first: the scrim and the cross in the corner were the only two ways out,
+    // and a scrim is a thing you have to guess is clickable.
     //
     // It is answered twice, because the two answers cover different halves of
     // the same question — *where the keyboard is when the key is pressed*.
@@ -993,7 +993,7 @@ pub fn App() -> Element {
     //     and lets it bubble, so this catches every keystroke made while the
     //     keyboard is anywhere inside the interface. It is also the half the
     //     headless tests can drive, which is why the sheets take the keyboard
-    //     when they open — see the `autofocus` on their Close buttons.
+    //     when they open — see the `autofocus` on their close buttons.
     //
     //   * This one, on the window itself. `clicking_a_chip_blurs_the_field`
     //     records the upstream rule that makes it necessary: a click that
@@ -1996,9 +1996,26 @@ pub fn App() -> Element {
                         // The scrim closes on a click; the panel is not the
                         // scrim.
                         onclick: move |event| event.stop_propagation(),
-                        h2 {
-                            {glyph(Glyph::Theme, Ink::Accent, "glyph-brand")}
-                            span { {fl!("theme")} }
+                        div { class: "sheet-head",
+                            h2 {
+                                {glyph(Glyph::Theme, Ink::Accent, "glyph-brand")}
+                                span { {fl!("theme")} }
+                            }
+                            button {
+                                class: "sheet-close theme-close",
+                                // The word this button used to carry, kept
+                                // where a screen reader still reads it: an
+                                // unlabelled cross is a shape rather than a
+                                // control to anything that cannot see it.
+                                aria_label: fl!("close"),
+                                // The keyboard comes into the sheet with the
+                                // sheet: it is what a modal should do, and it
+                                // is what lets the element half of the Escape
+                                // handling see the key at all.
+                                autofocus: true,
+                                onclick: move |_| theme_sheet.set(false),
+                                {glyph(Glyph::Close, Ink::Faint, "glyph")}
+                            }
                         }
                         // The same segmented row the error-correction levels
                         // use, because it is the same shape of question: a
@@ -2035,19 +2052,6 @@ pub fn App() -> Element {
                                 }
                             }
                         }
-                        div { class: "sheet-actions",
-                            button {
-                                class: "btn theme-close",
-                                // The keyboard comes into the sheet with the
-                                // sheet: it is what a modal should do, and it
-                                // is what lets the element half of the Escape
-                                // handling see the key at all.
-                                autofocus: true,
-                                onclick: move |_| theme_sheet.set(false),
-                                {glyph(Glyph::Close, Ink::Plain, "glyph")}
-                                span { {fl!("close")} }
-                            }
-                        }
                     }
                 }
             }
@@ -2059,31 +2063,33 @@ pub fn App() -> Element {
                         // The scrim closes on a click; the panel is not the
                         // scrim.
                         onclick: move |event| event.stop_propagation(),
-                        h2 {
-                            {glyph(Glyph::Code, Ink::Accent, "glyph-brand")}
-                            span { {fl!("app-title")} }
+                        div { class: "sheet-head",
+                            h2 {
+                                {glyph(Glyph::Code, Ink::Accent, "glyph-brand")}
+                                span { {fl!("app-title")} }
+                            }
+                            button {
+                                class: "sheet-close about-close",
+                                aria_label: fl!("close"),
+                                autofocus: true,
+                                onclick: move |_| about.set(false),
+                                {glyph(Glyph::Close, Ink::Faint, "glyph")}
+                            }
                         }
                         p { {fl!("app-description")} }
                         p { class: "version", {format!("Version {}", env!("CARGO_PKG_VERSION"))} }
+                        // One button where there were two, so it takes the
+                        // width rather than sitting in half of it: the panel
+                        // now has exactly one thing to press and one way out,
+                        // and they do not look alike.
                         div { class: "sheet-actions",
                             button {
-                                class: "btn",
+                                class: "btn wide",
                                 onclick: move |_| {
                                     let _ = open::that(env!("CARGO_PKG_REPOSITORY"));
                                 },
                                 {glyph(Glyph::External, Ink::Plain, "glyph")}
                                 span { {fl!("repository")} }
-                            }
-                            button {
-                                class: "btn about-close",
-                                // The keyboard comes into the sheet with the
-                                // sheet: it is what a modal should do, and it
-                                // is what lets the element half of the Escape
-                                // handling see the key at all.
-                                autofocus: true,
-                                onclick: move |_| about.set(false),
-                                {glyph(Glyph::Close, Ink::Plain, "glyph")}
-                                span { {fl!("close")} }
                             }
                         }
                     }

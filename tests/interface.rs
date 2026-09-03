@@ -1687,6 +1687,53 @@ fn a_caution_is_never_the_thing_that_scrolls() {
     }
 }
 
+/// **A sheet is left from its own top corner**, which is where a panel has
+/// been left from for about fifteen years.
+///
+/// It used to be a Close button on a row of its own at the foot of the panel,
+/// which cost a button's worth of height to say what the panel's shape already
+/// said — and in the About sheet it sat beside *View on GitHub* wearing the
+/// same chip, so the thing that goes somewhere and the thing that undoes the
+/// opening looked alike. This is the claim that replaced it: right-hand side,
+/// on the title's own line, close enough to the edge to read as the corner.
+///
+/// The last assertion is the one that matters most and is the easiest to lose
+/// while moving a button — it still closes the sheet.
+#[test]
+fn a_sheet_closes_from_its_own_corner() {
+    for (open, sheet, close) in [
+        (".theme-open", ".theme-sheet", ".theme-close"),
+        (".about-open", ".about", ".about-close"),
+    ] {
+        let mut harness = app_after(&[open]);
+        let panel = harness.layout_rect(sheet);
+        let title = harness.layout_rect(&format!("{sheet} h2"));
+        let cross = harness.layout_rect(close);
+
+        assert!(
+            cross.x > title.x + title.width,
+            "{close} is past the end of the title, not beside its start"
+        );
+        // The panel's own padding is 26, so anything within that of the edge
+        // is in the corner rather than floating in the middle of the head.
+        let gap = panel.x + panel.width - (cross.x + cross.width);
+        assert!(
+            (0.0..=26.0).contains(&gap),
+            "{close} sits in the corner of {sheet}, {gap} from its edge"
+        );
+        assert!(
+            cross.y < title.y + title.height,
+            "and on the title's line rather than under it: {} against {}",
+            cross.y,
+            title.y + title.height
+        );
+
+        harness.click(close);
+        harness.pump();
+        assert!(harness.query(sheet).is_none(), "and {close} closes {sheet}");
+    }
+}
+
 /// **A two-finger swipe across a rail moves nothing**, in either direction.
 ///
 /// It used to move the control rail fifty-five points left and leave the
