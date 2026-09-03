@@ -782,6 +782,86 @@ fn hex(text: &str) -> (u8, u8, u8) {
     (byte(0), byte(2), byte(4))
 }
 
+/// **Swap exchanges the code's two colours**, and does not negate either.
+///
+/// The two are picked off the palette rather than left at black and white,
+/// because black and white are each other's opposite as well as each other's
+/// swap — a test run on those two would pass whichever of the two things the
+/// button did. These two are neither, so only one answer fits.
+///
+/// The last half is the round trip: pressing it twice is where it started, and
+/// a swap is the only operation that is its own undo.
+#[test]
+fn swapping_exchanges_the_two_colors() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("hello");
+    harness.pump();
+
+    harness.click("[data-well=\"dark\"]");
+    harness.pump();
+    harness.click("[data-swatch=\"#1b3f8f\"]");
+    harness.pump();
+    harness.click("[data-well=\"light\"]");
+    harness.pump();
+    harness.click("[data-swatch=\"#f5f4f2\"]");
+    harness.pump();
+    assert_eq!(
+        dark_fill(&preview(&harness).expect("a code to swap")),
+        hex("#1b3f8f")
+    );
+
+    harness.click("[data-swap]");
+    harness.pump();
+
+    assert_eq!(
+        dark_fill(&preview(&harness).expect("swaping keeps the code")),
+        hex("#f5f4f2"),
+        "the modules are painted in what the background was"
+    );
+    assert_eq!(
+        harness.text_content("[data-well=\"dark\"]"),
+        "Foreground#f5f4f2"
+    );
+    assert_eq!(
+        harness.text_content("[data-well=\"light\"]"),
+        "Background#1b3f8f"
+    );
+    // The picker is still pointed at the background well, so the field beside
+    // the button it was pressed with now reads what the foreground was — which
+    // is the outside change `Picker`'s effect exists to follow.
+    assert_eq!(
+        harness.attr("[data-hex]", "value").as_deref(),
+        Some("#1b3f8f"),
+        "and the hex field followed the colour rather than the well"
+    );
+
+    harness.click("[data-swap]");
+    harness.pump();
+    assert_eq!(
+        dark_fill(&preview(&harness).expect("swaping twice keeps the code")),
+        hex("#1b3f8f"),
+        "and twice is where it started"
+    );
+
+    // The button's height is `.hex`'s, written into `ui.css` as a number
+    // because equal padding does not give equal boxes at two type sizes. This
+    // is what stops the number falling behind the field it was taken from.
+    let field = harness.layout_rect("[data-hex]");
+    let button = harness.layout_rect("[data-swap]");
+    assert_eq!(
+        (button.height, button.y),
+        (field.height, field.y),
+        "the two halves of the hex row are one box tall"
+    );
+    let row = harness.layout_rect(".hexrow");
+    assert_eq!(
+        button.x + button.width,
+        row.x + row.width,
+        "and the button runs to the end of the row"
+    );
+}
+
 /// The square sets saturation and value; the strip sets hue.
 #[test]
 fn the_square_and_the_strip_pick_a_color() {

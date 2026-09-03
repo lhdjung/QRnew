@@ -942,6 +942,23 @@ pub fn App() -> Element {
     let take_the_caution = move |holding: bool| {
         held_caution.set(holding.then(|| contrast(dark(), light()) < SAFE_CONTRAST));
     };
+    // **The two colours change places.** A code drawn light on dark is the one
+    // variation somebody reaches for that is not a new colour at all, and
+    // reaching it by hand was four steps: read one hex, type it into the
+    // other well, remember the first one, type it back.
+    //
+    // It cannot make the code unscannable, which is what lets it sit beside
+    // the hex field rather than under a caution of its own: `contrast` is the
+    // distance between two luminances, and a distance does not care which way
+    // round it is measured. Whatever the colour caution said before the swap,
+    // it says after it. What *does* change is the code — a scanner is not
+    // symmetric, and `qrnew-core` draws and reads both ways round; the README
+    // has that story.
+    let invert = move |()| {
+        let (was_dark, was_light) = (dark(), light());
+        dark.set(was_light);
+        light.set(was_dark);
+    };
     let mut about = use_signal(|| false);
     let mut theme = use_signal(|| {
         dioxus_core::try_consume_context::<Tone>().map_or(Theme::System, |Tone(seed)| seed)
@@ -1886,9 +1903,9 @@ pub fn App() -> Element {
                         // position — but two arms of an `if` are two different
                         // nodes, and swapping them mounts a fresh one.
                         if editing() == Well::Dark {
-                            Picker { color: dark, onhold: take_the_caution }
+                            Picker { color: dark, onhold: take_the_caution, oninvert: invert }
                         } else {
-                            Picker { color: light, onhold: take_the_caution }
+                            Picker { color: light, onhold: take_the_caution, oninvert: invert }
                         }
                         button {
                             class: "btn wide",
@@ -2178,7 +2195,7 @@ fn ColorWell(
 /// when it has let go. It is the picker's own business except that the colour
 /// caution above it holds still in between; the argument is beside the banner.
 #[component]
-fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>) -> Element {
+fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, oninvert: EventHandler<()>) -> Element {
     // The blink, from the context `App` provides. The hex field is a text
     // field like the other two and blinks like them; it is only in a different
     // component because the colour picker is.
@@ -2382,6 +2399,24 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>) -> Element {
                     onfocusin: move |_| caret.arrived(),
                     onfocusout: move |_| caret.left(),
                 }
+                // Beside the hex rather than under it, in the room the row
+                // already had: the field holds seven characters and is 132
+                // points wide, so half of this row has been empty since it
+                // was written.
+                //
+                // It belongs to the card rather than to this picker — it moves
+                // both colours, and the picker only ever holds one — which is
+                // why it arrives as a handler. It is here because this is
+                // where the room is, and because a person who has just typed
+                // one of the two colours is the person most likely to want
+                // them the other way round.
+                button {
+                    class: "btn invert",
+                    "data-invert": "true",
+                    onclick: move |_| oninvert.call(()),
+                    {glyph(Glyph::Swap, Ink::Plain, "glyph")}
+                    span { {fl!("color-swap")} }
+                }
             }
         }
     }
@@ -2505,6 +2540,11 @@ enum Glyph {
     Plus,
     Close,
     External,
+    /// Two arrows passing: the button that exchanges the code's two colours.
+    /// Not a half-hatched circle, which is what "invert" usually gets drawn
+    /// as, because [`Theme`](Glyph::Theme) is already that circle and the two
+    /// are eight inches apart in the same window.
+    Swap,
 }
 
 impl Glyph {
@@ -2583,6 +2623,14 @@ impl Glyph {
                 "M14.2 4.6 H19.4 V9.8",
                 "M19.4 4.6 L11.2 12.8",
                 "M17 13.8 V19.4 H4.6 V7 H10.2",
+            ],
+            // One arrow each way, on the same two ends: what the button does,
+            // which is exchange rather than negate.
+            Glyph::Swap => &[
+                "M4.6 8 H19.4",
+                "M16.2 4.8 L19.4 8 L16.2 11.2",
+                "M19.4 16 H4.6",
+                "M7.8 12.8 L4.6 16 L7.8 19.2",
             ],
         }
     }

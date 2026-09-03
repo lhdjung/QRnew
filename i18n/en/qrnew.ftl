@@ -54,6 +54,7 @@ section-colors = Colors
 color-dark-label = Foreground
 color-light-label = Background
 color-warning = These colors might be too similar for a scanner to tell apart.
+color-swap = Swap colors
 color-reset = Reset to black & white
 git-description = Git commit {$hash} on {$date}
 close = Close

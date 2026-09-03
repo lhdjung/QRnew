@@ -1101,6 +1101,31 @@ body {
   user-select: text;
 }
 
+/* The button beside the hex field, which exchanges the code's two colours.
+ *
+ * It takes the rest of the row rather than only what its label needs: the row
+ * holds two things and nothing else to align to, so a button that stopped
+ * short would leave a gap at the end of the picker that means nothing. 176
+ * points, against the field's 132 and the ten between them, and the label is a
+ * half-point smaller than a `.btn` is elsewhere so that two words fit it with
+ * room to spare in a wider face.
+ *
+ * **The height is the field's, written down rather than arrived at.** Equal
+ * padding does not give equal boxes here — the two have different type sizes,
+ * so their line boxes differ by a point on each side — and a button two points
+ * shorter than the field beside it reads as a button leaning on it rather than
+ * as the other half of one row. 42 is what `.hex` comes out at; the padding
+ * below is horizontal only, because the flex centring does the rest.
+ * `swapping_exchanges_the_two_colors` measures the pair, so the number cannot
+ * fall behind the field it was taken from. */
+.invert {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 42px;
+  padding: 0 10px;
+  font-size: 13.5px;
+}
+
 /* A hex that is not a colour yet. It outranks the focus rule above — same
  * specificity, and it comes later — so a field being typed into wrongly says
  * so rather than saying it has the keyboard, and the ring turns with the
