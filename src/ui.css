@@ -867,6 +867,23 @@ body {
   border-color: var(--line-3);
 }
 
+/* A stepper button with nowhere to go: the minus at a margin of zero, the plus
+ * at sixteen. The same dimming the error-correction row wears while an inset
+ * holds it and the three export buttons wear with nothing to export, because
+ * it is the same statement — the control is still a fact about the number
+ * beside it, and taking it away would leave the stepper lopsided every time
+ * somebody reached an end. The hover is undone as well as the fill, or the
+ * button would go on lighting up under a pointer it has nothing to offer. */
+.step.off {
+  background: var(--off);
+  border-color: var(--line);
+}
+
+.step.off:hover {
+  background: var(--off);
+  border-color: var(--line);
+}
+
 /* **`text-align` does nothing to an `<input>` in Blitz**, which is why the
  * number in this one used to sit against its left edge with a stepper button
  * on either side, looking like a value that had slipped.

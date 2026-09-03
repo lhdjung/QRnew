@@ -1315,6 +1315,17 @@ pub fn App() -> Element {
         (fl!("input-too-long"), "note bad")
     };
 
+    // Whether either stepper button has anywhere to go. The margin is clamped
+    // at both ends — `set_margin` at the top and `saturating_sub` at the
+    // bottom — so at 0 and at [`MAX_MARGIN`] one of the two buttons was a
+    // target that answered a press by doing nothing at all, with no way to
+    // tell that from a press that had missed. Dimmed and inert instead, which
+    // is the same answer the error-correction row gives while an inset holds
+    // it and the same one the export buttons give with nothing to export: the
+    // control stays where it is and stops pretending.
+    let can_shrink = margin() > 0;
+    let can_grow = margin() < MAX_MARGIN;
+
     // How far the number in the margin field has to be pushed to sit in the
     // middle of it. Half the field, less half the text: `1ch` is the width of
     // a digit in the field's own font, so this is exact rather than tuned.
@@ -1529,11 +1540,19 @@ pub fn App() -> Element {
                         // they already know the answer to.
                         div { class: "stepper",
                             button {
-                                class: "step",
+                                class: if can_shrink { "step" } else { "step off" },
                                 "data-margin-less": "true",
                                 aria_label: fl!("margin-less"),
-                                onclick: move |_| set_margin(margin().saturating_sub(1)),
-                                {glyph(Glyph::Minus, Ink::Plain, "glyph")}
+                                // Said as well as drawn: a button that is only
+                                // dimmed is a button nothing reading the window
+                                // aloud has been told about.
+                                aria_disabled: if can_shrink { "false" } else { "true" },
+                                onclick: move |_| {
+                                    if can_shrink {
+                                        set_margin(margin() - 1);
+                                    }
+                                },
+                                {glyph(Glyph::Minus, step_ink(can_shrink), "glyph")}
                             }
                             input {
                                 class: "count",
@@ -1580,11 +1599,16 @@ pub fn App() -> Element {
                                 onfocusout: move |_| caret.left(),
                             }
                             button {
-                                class: "step",
+                                class: if can_grow { "step" } else { "step off" },
                                 "data-margin-more": "true",
                                 aria_label: fl!("margin-more"),
-                                onclick: move |_| set_margin(margin() + 1),
-                                {glyph(Glyph::Plus, Ink::Plain, "glyph")}
+                                aria_disabled: if can_grow { "false" } else { "true" },
+                                onclick: move |_| {
+                                    if can_grow {
+                                        set_margin(margin() + 1);
+                                    }
+                                },
+                                {glyph(Glyph::Plus, step_ink(can_grow), "glyph")}
                             }
                         }
                         // Only once somebody has actually gone below two: a
@@ -2570,6 +2594,17 @@ impl Glyph {
 /// and is an inset holding the row where it is — and they are spelled out
 /// rather than assembled, because a class list built by pushing strings
 /// together is a class list nothing can grep for.
+/// The ink a stepper button's sign is drawn in, given whether it can move the
+/// margin at all.
+///
+/// The two-line function exists because an icon's colour is a presentation
+/// attribute rather than a style — `ui.css` cannot reach inside the document
+/// `glyph` builds — so a dimmed button has to be told to draw a dimmer sign,
+/// where every other control in the window would simply be handed a class.
+const fn step_ink(live: bool) -> Ink {
+    if live { Ink::Plain } else { Ink::Faint }
+}
+
 const fn chip_class(selected: bool, locked: bool) -> &'static str {
     match (selected, locked) {
         (true, false) => "chip on",

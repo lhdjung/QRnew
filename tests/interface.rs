@@ -1956,6 +1956,84 @@ fn the_wells_choose_what_the_picker_edits() {
     assert_eq!(harness.attr("[data-hex]", "value").as_deref(), Some("#ffffff"));
 }
 
+/// **A stepper button says when it has nowhere to go.**
+///
+/// The margin is clamped at both ends, so at zero the minus and at sixteen the
+/// plus were full-strength targets that answered a press by doing nothing —
+/// and nothing is also what a press that missed looks like. Both are dimmed
+/// and inert at their own end and live at the other, which is the half that
+/// would be easy to lose: a control that is always off is no better than one
+/// that is always on.
+///
+/// Checked by class rather than by colour, because the ink is spread across
+/// four places — two `<svg>`s per sign, one per palette — and the class is the
+/// one fact all of them follow from.
+#[test]
+fn a_stepper_button_dims_at_its_own_end() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("hello");
+    harness.pump();
+
+    // The app opens at 2, so both ends are a walk away and both buttons are
+    // live to begin with.
+    assert!(harness.query("[data-margin-less].off").is_none());
+    assert!(harness.query("[data-margin-more].off").is_none());
+
+    for _ in 0..qrnew::ui::DEFAULT_MARGIN {
+        harness.click("[data-margin-less]");
+    }
+    harness.pump();
+    assert_eq!(harness.attr("[data-margin]", "value").as_deref(), Some("0"));
+    assert!(
+        harness.query("[data-margin-less].off").is_some(),
+        "the minus is dimmed at a margin of nothing"
+    );
+    assert_eq!(
+        harness
+            .attr("[data-margin-less]", "aria-disabled")
+            .as_deref(),
+        Some("true"),
+        "and says so to anything reading the window aloud"
+    );
+    assert!(
+        harness.query("[data-margin-more].off").is_none(),
+        "and the plus, at the same moment, is not"
+    );
+
+    // Pressing it anyway changes nothing, which is the point of dimming it —
+    // `saturating_sub` would have held the number here either way, so this is
+    // about the button rather than about the arithmetic.
+    harness.click("[data-margin-less]");
+    harness.pump();
+    assert_eq!(harness.attr("[data-margin]", "value").as_deref(), Some("0"));
+
+    for _ in 0..qrnew::ui::MAX_MARGIN {
+        harness.click("[data-margin-more]");
+    }
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-margin]", "value").as_deref(),
+        Some(qrnew::ui::MAX_MARGIN.to_string().as_str())
+    );
+    assert!(
+        harness.query("[data-margin-more].off").is_some(),
+        "and the plus is dimmed at the widest border the app will draw"
+    );
+    assert!(
+        harness.query("[data-margin-less].off").is_none(),
+        "with the minus live again"
+    );
+
+    harness.click("[data-margin-more]");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-margin]", "value").as_deref(),
+        Some(qrnew::ui::MAX_MARGIN.to_string().as_str()),
+        "and it stays where it is"
+    );
+}
+
 /// The margin control widens and narrows the blank border.
 ///
 /// `modules_across` reads the SVG's own `viewBox`, and the quiet zone is part
