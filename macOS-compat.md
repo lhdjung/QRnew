@@ -78,7 +78,7 @@ The Wayland backend's `set_window_title` accepts `(title: String, id: window::Id
 
 ---
 
-## Limitations on macOS
+## Limitations on macOS (of the libcosmic build, per the note at the top)
 
 - **No single-instance enforcement** — removing `single-instance` means multiple instances of the app can be launched simultaneously.
 - **No portal dialogs** — removing `xdg-portal` means any file/dialog functionality that went through XDG portals will not work. On macOS this would need to be replaced with native AppKit dialogs if required.

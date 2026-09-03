@@ -34,7 +34,9 @@
  * `.lit` / `.dim` at the foot of this file shows whichever one belongs. Two
  * small documents instead of one is a real cost, paid once when the tree is
  * built; it is what buys icons that are not grey-on-grey in one of the two
- * windows.
+ * windows. The same reason is why an icon that has to answer a hover is drawn
+ * four times — two palettes by two states — and that is spent on the crosses
+ * that close a sheet and nothing else. See `.ink-rest` / `.ink-hot`.
  *
  * Two things this file deliberately does without, both because Blitz at the
  * pinned revision does them wrong rather than because they are unwanted:
@@ -1118,7 +1120,7 @@ body {
  * below is horizontal only, because the flex centring does the rest.
  * `swapping_exchanges_the_two_colors` measures the pair, so the number cannot
  * fall behind the field it was taken from. */
-.invert {
+.swap {
   flex: 1 1 auto;
   min-width: 0;
   height: 42px;
@@ -1416,6 +1418,40 @@ body {
 
 .sheet-close:hover {
   background: var(--raised-hi);
+}
+
+/* ...and the mark turns with it. `glyph_hover` in `ui.rs` draws the cross
+ * twice over — once in the faint ink it rests in, once in the red every close
+ * button on the desktop turns under a pointer — and these four rules choose
+ * between the two wrappers. The theme is not asked again here: `.lit` /
+ * `.dim` at the foot of this file still picks the palette inside whichever
+ * pair is showing, which is the whole reason the swap is a wrapper rather
+ * than a fifth and sixth class on the icons themselves.
+ *
+ * `flex` rather than `block`, because the wrapper is what holds the icon: an
+ * `<svg>` is inline, and a line box inside the button would sit the cross off
+ * its centre by the descender. Measured: the mark stays in the same 18-point
+ * box at the same point either way.
+ *
+ * Four documents for one mark is the price, and it is worth paying on these
+ * two crosses and nothing else in the window: a cross is a shape rather than
+ * a word, and the colour is what says which of the several things a cross can
+ * mean this one is. */
+.ink-rest,
+.ink-hot {
+  display: flex;
+}
+
+.ink-hot {
+  display: none;
+}
+
+.sheet-close:hover .ink-rest {
+  display: none;
+}
+
+.sheet-close:hover .ink-hot {
+  display: flex;
 }
 
 /* The same size and ink as a `.hint` in the window behind it, because it is

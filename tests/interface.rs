@@ -1230,6 +1230,79 @@ fn the_about_panel_opens_and_closes() {
     assert!(harness.query(".about").is_none());
 }
 
+/// **The cross a sheet is closed by turns red under the pointer.**
+///
+/// It has to be drawn rather than styled: CSS does not reach inside an SVG in
+/// Blitz, so `glyph_hover` in `ui.rs` draws the cross in both inks and
+/// `ui.css` shows one wrapper or the other. The two halves are in different
+/// files and neither says what the other is for, which is what this is here
+/// to hold together.
+///
+/// Measured rather than read off a style, because a hidden wrapper is a
+/// wrapper with no box: the one that is showing has the icon's width, and the
+/// one that is not has nothing.
+#[test]
+fn the_close_cross_reddens_under_the_pointer() {
+    let mut harness = app();
+    harness.click(".about-open");
+    harness.pump();
+
+    let rest = harness.node(".about-close .ink-rest");
+    let hot = harness.node(".about-close .ink-hot");
+    assert!(
+        harness.layout_rect_of(rest).width > 0.0,
+        "the faint cross is the one at rest"
+    );
+    assert_eq!(
+        harness.layout_rect_of(hot).width,
+        0.0,
+        "and the red one is not drawn yet"
+    );
+
+    let cross = harness.layout_rect(".about-close");
+    harness.move_mouse_to(cross.x + cross.width / 2.0, cross.y + cross.height / 2.0);
+    harness.pump();
+
+    assert_eq!(
+        harness.layout_rect_of(rest).width,
+        0.0,
+        "the faint cross gives way"
+    );
+    assert!(harness.layout_rect_of(hot).width > 0.0, "to the red one");
+}
+
+/// **The About panel names the version the crate was built at.**
+///
+/// It was a `format!("Version {}", …)` — the one string in the window that was
+/// English rather than a translation. Fluent takes the number as an argument
+/// now, and this holds both halves of that: the key resolves, and the number
+/// in it is the one `cargo` built.
+///
+/// The isolates are Fluent's own. It wraps an interpolated argument in
+/// U+2068 / U+2069 so that a number keeps its direction inside a
+/// right-to-left sentence, and they are default-ignorable — measured on this
+/// renderer, they add exactly nothing to the painted width, where two visible
+/// characters in their place add 23 points. So they are stripped here rather
+/// than designed around.
+#[test]
+fn the_about_panel_says_which_version_this_is() {
+    let mut harness = app();
+    harness.click(".about-open");
+    harness.pump();
+
+    let line = harness.text_content(".about .version");
+    let bare: String = line
+        .chars()
+        .filter(|c| !matches!(c, '\u{2068}' | '\u{2069}'))
+        .collect();
+
+    assert_eq!(
+        bare,
+        format!("Version {}", env!("CARGO_PKG_VERSION")),
+        "{line:?}"
+    );
+}
+
 #[test]
 fn clicking_beside_the_about_panel_closes_it() {
     let mut harness = app();

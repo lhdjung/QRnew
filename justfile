@@ -38,9 +38,13 @@ appdata-src := 'resources' / 'app.metainfo.xml'
 desktop-src := 'resources' / 'app.desktop'
 icon-src := 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'icon.svg'
 
-# Install destinations
+# Install destinations. `share/metainfo` and not `share/appdata`: the latter is
+# the pre-0.9 AppStream location, deprecated for a decade and not scanned by
+# `appstreamcli refresh` on a current distribution — so the file installed
+# there was a file nothing read, under a name (`.metainfo.xml`) that already
+# said where it belonged.
 base-dir := absolute_path(clean(rootdir / prefix))
-appdata-dst := base-dir / 'share' / 'appdata' / appdata
+appdata-dst := base-dir / 'share' / 'metainfo' / appdata
 bin-dst := base-dir / 'bin' / bin
 desktop-dst := base-dir / 'share' / 'applications' / desktop
 icons-dst := base-dir / 'share' / 'icons' / 'hicolor'
@@ -172,7 +176,13 @@ vendor-extract:
     rm -rf vendor
     tar pxf vendor.tar
 
-# Bump cargo version, create git commit, and create tag
+# The `v` is the tag's and nothing else's: `release.yml` publishes a numbered
+# release for `tags: ['v*']`, and the one tag in the repository is `v0.0.1`, so
+# a tag written without it is a release nothing ever builds. The argument is
+# the bare number — `just tag 0.1.1` — because that is what goes into
+# `Cargo.toml` on the line above.
+
+# Bump cargo version, create git commit, and tag it `v<version>`
 tag version:
     find -type f -name Cargo.toml -exec sed -i '0,/^version/s/^version.*/version = "{{version}}"/' '{}' \; -exec git add '{}' \;
     cargo check
@@ -180,5 +190,5 @@ tag version:
     git add Cargo.lock
     git commit -m 'release: {{version}}'
     git commit --amend
-    git tag -a {{version}} -m ''
+    git tag -a v{{version}} -m ''
 

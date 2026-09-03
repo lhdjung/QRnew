@@ -954,7 +954,7 @@ pub fn App() -> Element {
     // it says after it. What *does* change is the code — a scanner is not
     // symmetric, and `qrnew-core` draws and reads both ways round; the README
     // has that story.
-    let invert = move |()| {
+    let swap = move |()| {
         let (was_dark, was_light) = (dark(), light());
         dark.set(was_light);
         light.set(was_dark);
@@ -1903,9 +1903,9 @@ pub fn App() -> Element {
                         // position — but two arms of an `if` are two different
                         // nodes, and swapping them mounts a fresh one.
                         if editing() == Well::Dark {
-                            Picker { color: dark, onhold: take_the_caution, oninvert: invert }
+                            Picker { color: dark, onhold: take_the_caution, onswap: swap }
                         } else {
-                            Picker { color: light, onhold: take_the_caution, oninvert: invert }
+                            Picker { color: light, onhold: take_the_caution, onswap: swap }
                         }
                         button {
                             class: "btn wide",
@@ -2055,7 +2055,7 @@ pub fn App() -> Element {
                                 // handling see the key at all.
                                 autofocus: true,
                                 onclick: move |_| theme_sheet.set(false),
-                                {glyph(Glyph::Close, Ink::Faint, "glyph")}
+                                {glyph_hover(Glyph::Close, Ink::Faint, Ink::Danger, "glyph")}
                             }
                         }
                         // The same segmented row the error-correction levels
@@ -2114,11 +2114,17 @@ pub fn App() -> Element {
                                 aria_label: fl!("close"),
                                 autofocus: true,
                                 onclick: move |_| about.set(false),
-                                {glyph(Glyph::Close, Ink::Faint, "glyph")}
+                                {glyph_hover(Glyph::Close, Ink::Faint, Ink::Danger, "glyph")}
                             }
                         }
                         p { {fl!("app-description")} }
-                        p { class: "version", {format!("Version {}", env!("CARGO_PKG_VERSION"))} }
+                        // The one line in the window that was English rather
+                        // than a translation: it was a `format!`, because the
+                        // number is not a word. Fluent takes an argument, so
+                        // it does not have to be.
+                        p { class: "version",
+                            {fl!("version", number = env!("CARGO_PKG_VERSION"))}
+                        }
                         // One button where there were two, so it takes the
                         // width rather than sitting in half of it: the panel
                         // now has exactly one thing to press and one way out,
@@ -2195,7 +2201,7 @@ fn ColorWell(
 /// when it has let go. It is the picker's own business except that the colour
 /// caution above it holds still in between; the argument is beside the banner.
 #[component]
-fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, oninvert: EventHandler<()>) -> Element {
+fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<()>) -> Element {
     // The blink, from the context `App` provides. The hex field is a text
     // field like the other two and blinks like them; it is only in a different
     // component because the colour picker is.
@@ -2411,9 +2417,9 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, oninvert: EventHandler
                 // one of the two colours is the person most likely to want
                 // them the other way round.
                 button {
-                    class: "btn invert",
-                    "data-invert": "true",
-                    onclick: move |_| oninvert.call(()),
+                    class: "btn swap",
+                    "data-swap": "true",
+                    onclick: move |_| onswap.call(()),
                     {glyph(Glyph::Swap, Ink::Plain, "glyph")}
                     span { {fl!("color-swap")} }
                 }
@@ -2454,13 +2460,14 @@ struct Hsv {
 /// is two colours rather than one: see [`glyph`], which draws both and lets
 /// the stylesheet hide the one that does not belong to the theme in force.
 ///
-/// Two of the four are a palette token written out a second time — the accent
-/// and the caution, which have to be exactly the green and the gold of the
-/// chrome they sit in, and `an_icon_is_inked_the_colour_the_stylesheet_says`
-/// keeps the two files saying the same number. The two greys are not tokens:
-/// a 1.7-pixel stroke does not carry the same weight as a line of text at the
-/// same colour, so they were matched by eye against the words beside them and
-/// land between the ink steps rather than on one.
+/// Three of the five are a palette token written out a second time — the
+/// accent, the caution and the danger, which have to be exactly the green,
+/// the gold and the red of the chrome they sit in, and
+/// `an_icon_is_inked_the_colour_the_stylesheet_says` keeps the two files
+/// saying the same number. The two greys are not tokens: a 1.7-pixel stroke
+/// does not carry the same weight as a line of text at the same colour, so
+/// they were matched by eye against the words beside them and land between
+/// the ink steps rather than on one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Ink {
     /// Section marks and the brand, in the accent.
@@ -2471,20 +2478,26 @@ enum Ink {
     Faint,
     /// The one caution the app has: a margin too narrow to vouch for.
     Warn,
+    /// A cross under the pointer, in the `--danger` the window writes a bad
+    /// hex field in. It is the colour a close button turns everywhere else on
+    /// the desktop, and on a mark that is a shape rather than a word it is
+    /// what says which of the several things a cross can mean this one is.
+    Danger,
 }
 
 impl Ink {
-    /// The four on a bright window.
+    /// The five on a bright window.
     const fn light(self) -> &'static str {
         match self {
             Ink::Accent => "#0F9D63",
             Ink::Plain => "#2B313A",
             Ink::Faint => "#838B95",
             Ink::Warn => "#8A5B06",
+            Ink::Danger => "#C0392B",
         }
     }
 
-    /// The same four on a dark one.
+    /// The same five on a dark one.
     ///
     /// Not the light inks inverted: an icon is a line drawing, and a line has
     /// to stay a shade away from the surface it is on in both directions —
@@ -2495,6 +2508,7 @@ impl Ink {
             Ink::Plain => "#D2D8E0",
             Ink::Faint => "#8C949E",
             Ink::Warn => "#E9C07C",
+            Ink::Danger => "#FF9585",
         }
     }
 }
@@ -2679,6 +2693,26 @@ fn glyph(kind: Glyph, ink: Ink, class: &'static str) -> Element {
     rsx! {
         {drawn(kind, ink.light(), format!("{class} lit"))}
         {drawn(kind, ink.dark(), format!("{class} dim"))}
+    }
+}
+
+/// One icon that answers a hover, as the same mark in two inks.
+///
+/// It costs what [`glyph`] costs, doubled: four small usvg documents for one
+/// mark on screen. That is why it is a second function rather than an
+/// argument to the first — it is worth spending on the two crosses that close
+/// a sheet and on nothing else in the window.
+///
+/// The swap is a `display` on the two wrappers, so the theme half of the
+/// choosing is not written a second time: `.lit` / `.dim` still picks inside
+/// each pair, and `ui.css` only has to say which pair the pointer is asking
+/// for. Both wrappers are flex boxes, which is what keeps the mark centred —
+/// an `<svg>` is inline by default, and a line box under a 34-point button
+/// would sit it a pixel low.
+fn glyph_hover(kind: Glyph, rest: Ink, hot: Ink, class: &'static str) -> Element {
+    rsx! {
+        span { class: "ink-rest", {glyph(kind, rest, class)} }
+        span { class: "ink-hot", {glyph(kind, hot, class)} }
     }
 }
 
@@ -3091,8 +3125,14 @@ mod tests {
         }
 
         // The two greys are left out on purpose: they are not tokens, and
-        // why they are not is on the type.
-        for (ink, token) in [(Ink::Accent, "--accent"), (Ink::Warn, "--warn")] {
+        // why they are not is on the type. `--danger` is here because the
+        // cross under the pointer has to be the red the rest of the window
+        // writes an error in, and a hover is not a state a screenshot catches.
+        for (ink, token) in [
+            (Ink::Accent, "--accent"),
+            (Ink::Warn, "--warn"),
+            (Ink::Danger, "--danger"),
+        ] {
             assert_eq!(
                 palette(token),
                 vec![
