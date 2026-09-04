@@ -2,59 +2,44 @@
 
 /* QRnew's whole appearance.
  *
- * Two palettes, and three ways of choosing between them. `.app` carries
- * `theme-system`, `theme-light` or `theme-dark`, and everything below hangs
- * off that class: light is written on `:root` and is what the file falls back
- * to, `.theme-dark` redefines the same token names and nothing else, and
- * `.theme-system` picks between them with `prefers-color-scheme`. Every colour
- * in this file is one of those names, which is what makes a second palette a
- * block rather than a rewrite.
+ * Two palettes, three ways of choosing between them. `.app` carries
+ * `theme-system`, `theme-light` or `theme-dark`, and everything below hangs off
+ * that class: light is written on `:root` and is the fallback, `.theme-dark`
+ * redefines the same token names, and `.theme-system` picks between them with
+ * `prefers-color-scheme`.
  *
  * **A class rather than a media query alone, and that is forced.**
  * `prefers-color-scheme` is real here — Blitz hands winit's window theme to
- * Stylo and re-evaluates when the desktop changes its mind — but nothing an
- * app can call from inside a component moves it, and on macOS asking winit to
- * change the window's own appearance deliberately does *not* raise the
- * `ThemeChanged` event that would. So the media query is consulted only inside
- * `.theme-system`, which is the one case where the desktop genuinely is the
- * authority; the other two are the app's own answer and are plain selectors.
- * The whole story is above `Theme` in `ui.rs`.
+ * Stylo — but nothing an app can call from inside a component moves it, and on
+ * macOS asking winit to change the window's appearance deliberately does *not*
+ * raise the `ThemeChanged` event that would. So the media query is consulted
+ * only inside `.theme-system`, the one case where the desktop is the authority.
  *
- * Because the palette lives on `.app` rather than on `:root`, it reaches the
- * rest of the window by inheritance — a custom property is an inherited
- * property — so **anything painted in these colours has to be a descendant of
- * `.app`**, the modal sheets included. That is why they are nested inside it
- * in `ui.rs` rather than sitting beside it.
+ * The palette lives on `.app` rather than `:root`, and a custom property is
+ * inherited, so **anything painted in these colours has to descend from
+ * `.app`** — the modal sheets included, which is why `ui.rs` nests them inside.
  *
- * The exception, and it is what a runtime theme switch costs: **CSS does not
- * reach inside an SVG in Blitz**, because the element is handed to `usvg` as a
- * document of its own. An icon's ink is therefore a presentation attribute,
- * and a presentation attribute cannot read a custom property or a media query.
- * So `ui.rs` draws every icon twice, once in each palette's ink, and
- * `.lit` / `.dim` at the foot of this file shows whichever one belongs. Two
- * small documents instead of one is a real cost, paid once when the tree is
- * built; it is what buys icons that are not grey-on-grey in one of the two
- * windows. The same reason is why an icon that has to answer a hover is drawn
- * four times — two palettes by two states — and that is spent on the crosses
- * that close a sheet and nothing else. See `.ink-rest` / `.ink-hot`.
+ * The exception: **CSS does not reach inside an SVG in Blitz**, because the
+ * element is handed to `usvg` as a document of its own, and a presentation
+ * attribute cannot read a custom property or a media query. So `ui.rs` draws
+ * every icon twice, once in each palette's ink, and `.lit` / `.dim` at the foot
+ * of this file shows the one that belongs. An icon that answers a hover is
+ * drawn four times, which is spent on the crosses that close a sheet and
+ * nothing else — see `.ink-rest` / `.ink-hot`.
  *
- * Two things this file deliberately does without, both because Blitz at the
- * pinned revision does them wrong rather than because they are unwanted:
+ * Two things this file does without, because Blitz at the pinned revision does
+ * them wrong:
  *
- *   * **`transition`.** A transition is resolved against an animation clock
- *     that only advances while frames are being asked for, and a frame is not
- *     asked for while an image is still loading — which, in this app, is every
- *     time the preview is re-encoded. A colour part-way through a 130ms fade
- *     then stays part-way through it: the interface reported this as an error
- *     correction button whose text had drifted towards the selected ink while
- *     its background had not, leaving unreadable text on an unchanged button.
- *     Instant state changes are always right; half-finished ones are not.
+ *   * **`transition`.** The animation clock only advances while frames are
+ *     being asked for, and no frame is asked for while an image is loading —
+ *     which here is every time the preview is re-encoded. A colour part-way
+ *     through a fade then stays there: a chip's text drifted to the selected
+ *     ink while its background did not, leaving unreadable text on a button.
  *
- *   * **`radial-gradient` anywhere its position matters.** See `marker` in
- *     `ui.rs`: Blitz resolves the centre in CSS pixels and adds it to a
- *     rectangle in device pixels, so it lands at half the offset on a 2×
- *     display. `background-position` is scaled correctly, so anything that has
- *     to be somewhere in particular is placed with that instead. */
+ *   * **`radial-gradient` anywhere its position matters.** Blitz resolves the
+ *     centre in CSS pixels and adds it to a rectangle in device pixels, so it
+ *     lands at half the offset on a 2× display. `background-position` is scaled
+ *     correctly — see `marker` in `ui.rs`. */
 :root {
   /* Surfaces. Paper and near-paper: the cards are white, the window they sit
    * on is a shade off it, and the fields are a shade under that. */
@@ -62,20 +47,16 @@
   --card: #fbfbfc;
   --card-top: #ffffff;
   --sunken: #f0f2f5;
-  /* The surface a text field turns into while it holds the keyboard, and the
-   * ink written on it. Both palettes keep the field they already had; the pair
-   * is named separately from `--sunken` only because the focused field is the
-   * one surface whose ink has a second thing to clear.
+  /* The surface a text field turns into while it holds the keyboard, and the ink
+   * on it. Named separately from `--sunken` because the focused field is the one
+   * surface whose ink has a second thing to clear.
    *
-   * **That second thing is the selection, and it cannot be cleared here.**
-   * Blitz paints a text selection in one hardcoded colour — a pale blue, in
-   * `blitz-paint` — under text it then paints in the element's own colour, and
-   * there is no `::selection` to say otherwise. In the light window a dark ink
-   * on that blue reads at better than twelve to one. In the dark window a
-   * near-white ink on it is a selection nobody can read, and the only fix from
-   * out here would be to turn the field to paper — which is a brighter change
-   * to the window than the problem is worth. `blitz-mac-keys.md` carries it
-   * upstream instead, where the selection's colour is one constant. */
+   * **That second thing is the selection, and it cannot be cleared here.** Blitz
+   * paints a selection in one hardcoded pale blue (`blitz-paint`) under text in
+   * the element's own colour, with no `::selection` to say otherwise. Dark ink
+   * on that blue reads at better than twelve to one; a near-white ink on it does
+   * not, and the only fix from out here would be to turn the field to paper.
+   * `blitz-mac-keys.md` carries it upstream. */
   --field-lit: #ffffff;
   --field-lit-ink: #16181d;
   --raised: #ffffff;
@@ -94,21 +75,18 @@
   --line-2: #d2d7de;
   --line-3: #b6bdc6;
 
-  /* The one accent: a leaf green, used for state and for section marks and
-   * for nothing else. `--accent-ink` is what goes *on* the accent — white
-   * here, because a filled button in this theme is a dark colour carrying
-   * light text, which is the opposite of what it is in the other one. The
-   * green itself is a deeper leaf than the dark theme's for the same reason
-   * the ink is: the same colour cannot carry a line of text on white and
-   * remain the same colour on graphite. */
+  /* The one accent: a leaf green, for state and section marks and nothing else.
+   * `--accent-ink` is what goes *on* the accent — white here, because a filled
+   * button in this theme is a dark colour carrying light text. The green is a
+   * deeper leaf than the dark theme's for the same reason: one colour cannot
+   * carry text on white and stay the same colour on graphite. */
   --accent: #0f9d63;
   --accent-ink: #ffffff;
   --accent-dim: rgba(15, 157, 99, 0.1);
   --accent-line: rgba(15, 157, 99, 0.38);
-  /* The ring a focused text field wears: the accent at an alpha that reads
-   * as a glow rather than as a second border. `box-shadow` is painted
-   * outside the border box and takes no layout, so the loudest thing in
-   * the window is also the one that moves nothing when it appears. */
+  /* The ring a focused text field wears: the accent at an alpha that reads as a
+   * glow rather than a second border. `box-shadow` is painted outside the border
+   * box and takes no layout, so the loudest thing in the window moves nothing. */
   --accent-ring: rgba(15, 157, 99, 0.24);
 
   --danger: #c0392b;
@@ -119,14 +97,11 @@
   --warn-dim: rgba(180, 124, 12, 0.1);
   --warn-line: rgba(138, 91, 6, 0.3);
 
-  /* The dashed outline around the mat, for the mat this file can predict: the
-   * white one the app opens at. It is the one line in the window drawn against
-   * a surface somebody else chooses, so `mat_line` in `ui.rs` derives the
-   * colour from the mat and writes it inline over this. That derivation is
-   * what makes this the one token with no entry in the dark palette below —
-   * the line is half a palette from the mat either way, which clears a dark
-   * window as readily as a light one. What stays here is what the rule is
-   * worth on its own. */
+  /* The dashed outline around the mat, for the one mat this file can predict:
+   * the white the app opens at. It is drawn against a surface somebody else
+   * chooses, so `mat_line` in `ui.rs` derives the colour from the mat and writes
+   * it inline over this — which is why it is the one token with no dark entry.
+   * What stays here is what the rule is worth on its own. */
   --mat-line: #b3b3b3;
   --shadow-deep: rgba(16, 24, 40, 0.14);
   --scrim: rgba(17, 20, 26, 0.4);
@@ -134,23 +109,17 @@
 
 /* The same names, for a dark window.
  *
- * Not a dimming of the palette above: a dark window wants more contrast
- * between its surfaces and less between its inks, so the surfaces climb in
- * steps while the greys stay close together. The green is the brighter of the
- * two, and what goes on top of it is a near-black rather than a dark green, so
- * a filled button reads as text on a colour rather than as a colour on a
- * colour.
+ * Not a dimming of the palette above: a dark window wants more contrast between
+ * its surfaces and less between its inks, so the surfaces climb in steps while
+ * the greys stay close together. The green is the brighter of the two, and what
+ * goes on top of it is a near-black, so a filled button reads as text on a
+ * colour rather than as a colour on a colour.
  *
  * **It is written twice, and that is CSS rather than carelessness.** The
- * palette applies in two unrelated situations — somebody asked for dark, or
- * somebody left the choice to a desktop that is dark — and one of those is a
- * selector while the other is a media query. There is no way to say "this
- * selector, but only inside that query" and no way to name a block and use it
- * in both, so the block is repeated. `the_dark_palette_says_the_same_thing_
- * twice` in `ui.rs` compares the two copies token by token, which is the part
- * that would otherwise rot: a colour changed in one and not the other is a
- * theme that is subtly different depending on how it was arrived at, and
- * nothing on screen would say so. */
+ * palette applies when somebody asked for dark and when somebody left the
+ * choice to a dark desktop — a selector and a media query, with no way to say
+ * "this selector, but only inside that query". `the_dark_palette_says_the_same_
+ * thing_twice` in `ui.rs` compares the two copies token by token. */
 .theme-dark {
   /* Warm-neutral graphite rather than blue-black. */
   --bg: #131417;
@@ -238,15 +207,14 @@
   box-sizing: border-box;
   /* **This is what makes the buttons work**, not a nicety.
    *
-   * Blitz turns a press that drifts more than two pixels before it comes up
-   * into a text-selection drag, and a pointer-up that ends a drag *does not
-   * dispatch a click* — so a slow press on any button, or on the scrim behind
-   * the About panel, did nothing at all and selected the label instead.
+   * Blitz turns a press that drifts more than two pixels before it comes up into
+   * a text-selection drag, and a pointer-up that ends a drag *does not dispatch
+   * a click* — so a slow press on any button, or on the scrim behind the About
+   * panel, did nothing at all and selected the label instead.
    *
    * It has to be the universal selector: `user-select` does not reach a
    * `<button>` by inheritance here, so setting it on an ancestor leaves every
-   * hit target still computing `auto`. Text worth selecting asks for it back,
-   * and a class selector outranks this one. */
+   * hit target still computing `auto`. Text worth selecting asks for it back. */
   user-select: none;
 }
 
@@ -273,15 +241,12 @@ body {
 /* The whole window: a slim header over a three-column body.
  *
  * **It paints its own background, and `body` above is only the fallback.** The
- * palette is written on this element rather than on `:root`, because the
- * theme is a class and this is the element that carries it — so `body` can
- * only ever see the light `--bg`, and a dark window would otherwise be a dark
- * app on a light page. Covering the viewport is what makes that moot, which
- * is what `height: 100vh` was already for.
+ * palette is written on this element rather than on `:root`, because the theme
+ * is a class and this is the element that carries it — so `body` can only ever
+ * see the light `--bg`. Covering the viewport is what makes that moot.
  *
- * Flat, with no wash. There was a green one off the top-left, to keep a dark
- * window from reading as a slab; a tint across the whole surround is a colour
- * the app has no business asserting behind somebody else's code. */
+ * Flat, with no wash: a tint across the whole surround is a colour the app has
+ * no business asserting behind somebody else's code. */
 .app {
   display: flex;
   flex-direction: column;
@@ -322,60 +287,32 @@ body {
 /* ------------------------------------------------------------------ body */
 
 /* **The bottom padding is 18 and the sides are 30, and the difference is a
- * budget rather than an oversight.** At 820 points of window — the number
- * `no_control_is_below_the_fold` holds the app to — both rails run within a
- * few dozen points of the box they are in, so the margin for error in this
- * window is what is left under the cards.
+ * budget.** At 820 points of window — the height
+ * `no_control_is_below_the_fold` holds the app to — both rails run within a few
+ * dozen points of the box they are in, so the margin for error is what is left
+ * under the cards.
  *
- * Every box in a rail is sized by an explicit `line-height`, so none of them
- * moves when the font does; the one thing that still does is where a sentence
- * wraps, and a sentence gains a line in the wider face a Linux machine picks
- * for `system-ui`. That is how CI found this and a laptop never would, and it
- * is why the numbers below were taken twice — once here, and once with the
- * body's `font-family` pointed at Verdana, which is wider than the Linux face
- * and present on this machine. It is the cheapest way to ask a
- * font-sensitivity question without waiting on a runner.
+ * Every box in a rail is sized by an explicit `line-height`, so the one thing
+ * that moves with the font is where a sentence wraps — and a sentence gains a
+ * line in the wider face a Linux machine picks for `system-ui`. That is how CI
+ * finds what a laptop cannot, and why these numbers were also taken with the
+ * body's `font-family` pointed at Verdana, which is wider than the Linux face.
  *
- * The Shape card was what the last of this budget went on, and then its
- * caution and the inset's row of sizes wanted more than the budget had. Three
- * things paid for them, in that order of value:
- *
- * - `.warn` never zeroed the user agent's own paragraph margin, so every
- *   caution in the window was carrying thirty points of nothing. That was a
- *   bug, and it is why the margin caution had been overflowing this rail at
- *   820 since it was written without a test ever saying so.
- * - The Margin card shows its hint *or* its caution, never both. Somebody who
- *   has driven the number below two has already learnt what the stepper does.
- * - Two points off every card's padding and every gap inside one, three off
- *   the gap between them, and twelve off the height of the saturation square —
- *   which is where the height in this window has always come from, and which
- *   is still the largest control in the app. Twenty-three points in the
- *   control rail, and none of it visible unless the two builds are put side by
- *   side.
- *
- * That leaves the control rail with 68 points clear in the wide face at 820
- * against the 27 it had before, and the colours rail 29 against 36 — the row
- * of inset sizes is what the second number went on, and it only exists once
- * there is a picture to size.
- *
- * The one state that does not fit is the shape caution at 820 in the wide
- * face, five points over. The Shape card is last in the rail, so those five
- * points are its own bottom edge and the sentence above it is fully on screen;
- * `a_caution_is_never_the_thing_that_scrolls` is what holds that line. Both
- * cautions at once is twenty-five over, and the answer to that state is the
- * scrollbar the rail already has.
+ * That leaves the control rail 68 points clear in the wide face at 820, and the
+ * colours rail 29. The one state that does not fit is the shape caution, five
+ * points over; the Shape card is last in its rail, so those five points are its
+ * own bottom edge and the sentence above it is on screen —
+ * `a_caution_is_never_the_thing_that_scrolls` holds that line. Both cautions at
+ * once is twenty-five over, and the answer to that is the rail's scrollbar.
  *
  * **The sides are 30 and 22, and the eight between them is a scrollbar
  * gutter.** A rail reserves eight points on the side its overlay thumb comes
- * down; while both rails were on the same side of the stage, both of those
- * gutters fell inside a gap and neither could be seen. The colours rail is now
- * the right-hand edge of the window, so its gutter would otherwise read as
- * eight points of extra air on that side alone. Taken off the window's own
- * padding instead, the two card columns end the same 30 from their edges —
- * which is also the topbar's, so the brand and the About button still line up
- * with the cards under them. `.rail-colors` below is the other half of the
- * arithmetic, and `the_stage_sits_evenly_between_the_two_rails` is what holds
- * the two halves together. */
+ * down, and the colours rail is the right-hand edge of the window, so its gutter
+ * would otherwise read as extra air on that side alone. Taken off the window's
+ * own padding instead, both card columns end the same 30 from their edges —
+ * which is the topbar's too, so the brand and the About button line up with the
+ * cards under them. `.rail-colors` is the other half of the arithmetic, and
+ * `the_stage_sits_evenly_between_the_two_rails` holds the two together. */
 .body {
   display: flex;
   flex-direction: row;
@@ -389,15 +326,13 @@ body {
   min-height: 0;
 }
 
-/* The two control columns. Fixed width, because a form that reflows while it
- * is being read is worse than one that scrolls — and because the widths here
- * are load-bearing: see `.sv` below.
+/* The two control columns. Fixed width, because a form that reflows while it is
+ * being read is worse than one that scrolls — and because the widths are
+ * load-bearing: see `.sv` below.
  *
- * 348 of card and 8 of gutter. Blitz draws overlay scrollbars — they take no
- * layout width — so without the gutter a thumb would sit on top of the cards
- * in the rare case that a rail is long enough to scroll at all. Splitting the
- * controls across two columns is what made that case rare: everything fits at
- * the size the window opens at, which is what the single column did not. */
+ * 348 of card and 8 of gutter. Blitz draws overlay scrollbars, which take no
+ * layout width, so without the gutter a thumb would sit on top of the cards in
+ * the rare case a rail is long enough to scroll at all. */
 .rail {
   display: flex;
   flex-direction: column;
@@ -410,36 +345,27 @@ body {
   /* **A rail scrolls up and down and must be told it does nothing else**,
    * because `overflow-y: auto` alone makes a scroll container in both
    * directions: `visible` on the other axis computes to `auto` the moment one
-   * axis is not `visible`, which is CSS working exactly as written. What is not
-   * as written is that there was something to scroll *to*. Nothing in this rail
-   * is wider than it — measured, the widest edge inside it stops eight points
-   * short of the far side — and it still slid fifty-five points left under a
-   * two-finger swipe, taking the Content card half off the window.
+   * axis is not. What is not as written is that there was anything to scroll
+   * *to* — nothing in this rail is wider than it, and it still slid fifty-five
+   * points left under a two-finger swipe.
    *
    * The fifty-five belongs to the margin field. An `<input>` here contributes a
-   * fixed intrinsic width to its flex row's content size — the same figure
-   * whatever the font, whatever `flex-basis` or `max-width` or `size` say — and
-   * the row's *box* comes out right while the scrollable area it hands upwards
-   * does not. Cut down: a scroll container holding one flex row of
-   * button-input-button slides, the same row with a `<div>` where the input was
-   * does not, and neither button on its own does anything. That is why only
-   * this rail moved and the colours rail never did — the stepper is the one
-   * place in the window where an input sits in a row beside anything else.
+   * fixed intrinsic width to its flex row's content size — whatever the font,
+   * whatever `flex-basis` or `max-width` or `size` say — and the row's *box*
+   * comes out right while the scrollable area it hands upwards does not. So only
+   * this rail moved: the stepper is the one place an input sits in a row beside
+   * anything else.
    *
    * `hidden` rather than `clip`, because it is the one of the two Blitz
-   * implements, and nothing is being hidden in any case: there is no content
-   * out there to reach. `a_rail_does_not_slide_sideways` is the regression
-   * test. */
+   * implements. `a_rail_does_not_slide_sideways` is the regression test. */
   overflow-x: hidden;
 }
 
-/* The rail on the far side of the stage, which is the one the gutter is
- * awkward for. Eight more of basis and eight of left padding: the cards inside
- * are the same 348 as the other rail's, and the gap between this rail's cards
- * and the stage is the same 32 — 24 of `gap` plus the gutter — that the other
- * rail's cards get. The eight it costs the window came off `.body`'s right
- * padding above; without both halves the stage sits closer to one rail than
- * the other, or the window is wider on one side. */
+/* The rail on the far side of the stage, which is the one the gutter is awkward
+ * for. Eight more of basis and eight of left padding: the cards inside are the
+ * same 348 as the other rail's, and the gap to the stage is the same 32. The
+ * eight it costs came off `.body`'s right padding above; without both halves the
+ * stage sits closer to one rail than the other. */
 .rail-colors {
   flex-basis: 364px;
   padding-left: 8px;
@@ -456,10 +382,8 @@ body {
   border-radius: 16px;
 }
 
-/* A section's name. Larger *and* brighter than the controls under it rather
- * than the same size in a paler ink, so the eye can find the top of a card
- * without reading it. The heads were dimmer than the labels they sat above,
- * which is exactly backwards for the one line that says where you are. */
+/* A section's name. Larger *and* brighter than the controls under it, so the eye
+ * can find the top of a card without reading it. */
 .card-head {
   display: flex;
   flex-direction: row;
@@ -471,10 +395,8 @@ body {
   letter-spacing: -0.005em;
 }
 
-/* The sentence under a control that says what it does. It was 13px in the
- * palest ink there is, which is a footnote — and a footnote is the wrong
- * shape for the only explanation the app offers. Same ink as the labels it
- * explains, so it reads as part of the control rather than as fine print. */
+/* The sentence under a control that says what it does. Same ink as the labels
+ * it explains, so it reads as part of the control rather than as fine print. */
 .hint {
   margin: 0;
   color: var(--ink-2);
@@ -483,12 +405,9 @@ body {
 }
 
 /* The line under the text field: the prompt while the field is empty, and — in
- * `.bad` — the one failure the app could not report before. In between it says
- * nothing at all. It used to count the characters typed, which is a running
- * total of nothing: a QR code has no length anybody is working towards, so the
- * number answered a question nobody had asked. `min-height` rather than
- * `height`, so a long sentence still wraps and a silent line still holds its
- * place. */
+ * `.bad` — text past what a code can hold. In between it says nothing.
+ * `min-height` rather than `height`, so a long sentence still wraps and a
+ * silent line still holds its place. */
 .note {
   margin: -4px 0 0;
   min-height: 20px;
@@ -501,12 +420,10 @@ body {
   color: var(--danger);
 }
 
-/* The preview column, which sits between the two rails rather than after
- * them — the argument for that is in `ui.rs`, where the order actually lives.
+/* The preview column, which sits between the two rails rather than after them —
+ * the argument for that is in `ui.rs`.
  *
- * Top-aligned, not centred. Centring put the code lower than everything
- * beside it, so the window read as two columns of interface with a picture
- * floating past them; starting the code at the height the cards start at
+ * Top-aligned, not centred: starting the code at the height the cards start at
  * gives the three columns one shared top edge. */
 .stage {
   display: flex;
@@ -526,14 +443,11 @@ body {
  * startup, and one of the two places worth selecting text in. */
 .field {
   width: 100%;
-  /* Symmetric, and measured rather than assumed. This was briefly 11/13, to
-   * pull the ink up off a line box that reserves descender room most strings
-   * do not use — and that was wrong. Measured on the real renderer at 2×: the
-   * field's inner box runs 94 device pixels, and with equal padding the
-   * x-height band lands on its centre to within half a pixel. Text without
-   * descenders then reads a hair high and text with them a hair low, which is
-   * what centred text does; moving it either way fixes one string and breaks
-   * the other. */
+  /* Symmetric, and measured rather than assumed. On the real renderer at 2× the
+   * field's inner box runs 94 device pixels, and with equal padding the x-height
+   * band lands on its centre to within half a pixel. Text without descenders
+   * then reads a hair high and text with them a hair low, which is what centred
+   * text does; moving it either way fixes one string and breaks the other. */
   padding: 12px 14px;
   font: inherit;
   font-size: 15px;
@@ -548,22 +462,18 @@ body {
   border-color: var(--raised-hi);
 }
 
-/* **What a field looks like when it has the keyboard**, and all three of the
- * text fields say it the same way: the accent at full strength on the border,
- * a ring of the same green outside it, and paper underneath.
+/* **What a field looks like when it has the keyboard**, and all three text
+ * fields say it the same way: the accent at full strength on the border, a ring
+ * of the same green outside it, and paper underneath.
  *
- * The border used to be `--accent-line` — the accent at 38% — which on a
- * field that is already outlined in `--line-2` is a border that has changed
- * shade rather than a field that has been picked out. Full strength plus the
- * ring is the difference between the two, and the ring is a `box-shadow`
- * rather than an `outline` or a thicker border because it is the only one of
- * the three that is painted outside the border box and therefore costs no
- * layout: nothing beside a focused field moves when it takes the keyboard.
+ * The ring is a `box-shadow` rather than an `outline` or a thicker border
+ * because it is the only one of the three painted outside the border box, so it
+ * costs no layout: nothing beside a focused field moves when it takes the
+ * keyboard.
  *
  * `caret-color` is the one property of the caret CSS can reach here — see
- * `.caret-dark` below for the blink — and it is the field's own ink rather
- * than the accent, because the caret's job is to say where the next character
- * lands, and the character it stands in for is written in that colour. */
+ * `.caret-dark` below for the blink — and it is the field's own ink, because
+ * the caret stands in for a character written in that colour. */
 .field:focus,
 .count:focus,
 .hex:focus {
@@ -578,19 +488,15 @@ body {
 /* Half of the blink. `ui.rs` writes `caret-dark` onto `.app` for half of every
  * beat, and takes it off while anything is being typed.
  *
- * **A class rather than an animation, and that is forced.** A blinking caret
- * anywhere else is a CSS keyframe, and there are no keyframes here: the same
- * animation clock that makes `transition` unusable in this app — it only
- * advances while frames are being asked for, and no frame is asked for while
- * the preview is still decoding — would stop the blink mid-beat and leave a
- * caret that is neither on nor off. A signal toggled from a timer is a beat
- * the app can see, and one it can stop: the class only appears while a text
- * field holds the keyboard, so a window nobody is typing in redraws for
- * nothing.
+ * **A class rather than an animation, and that is forced.** There are no
+ * keyframes here: the same animation clock that makes `transition` unusable in
+ * this app would stop the blink mid-beat and leave a caret neither on nor off.
+ * A signal toggled from a timer is a beat the app can see and can stop — the
+ * class only appears while a text field holds the keyboard.
  *
- * It has to name the fields rather than sit on `.app` and inherit, because
- * `caret-color` is inherited but the rule above sets it on the field itself,
- * and a declaration on the element beats anything handed down to it. */
+ * It has to name the fields rather than sit on `.app` and inherit, because the
+ * rule above sets `caret-color` on the field itself and a declaration on the
+ * element beats anything handed down to it. */
 .caret-dark .field:focus,
 .caret-dark .count:focus,
 .caret-dark .hex:focus {
@@ -624,9 +530,8 @@ body {
   width: 100%;
 }
 
-/* Dimmed rather than removed. The three export buttons live under the code and
- * are drawn from the first frame, so the stage does not rearrange itself the
- * moment somebody starts typing. */
+/* Dimmed rather than removed. The three export buttons are drawn from the first
+ * frame, so the stage does not rearrange itself when somebody starts typing. */
 .btn.off {
   color: var(--ink-3);
   background: var(--off);
@@ -638,14 +543,10 @@ body {
   border-color: var(--line);
 }
 
-/* The error-correction segments: four buttons in one track, each of them a
- * button all the way through.
- *
- * They used to be transparent pills in a sunken well, which left the three
- * unselected ones as bare text on a dark trough — legible in theory and, with
- * a half-finished transition on top of it, not in practice. Every segment now
- * carries the same raised surface as every other button in the window, and
- * being selected is a fill rather than the absence of one. */
+/* The error-correction segments: four buttons in one track, each a button all
+ * the way through. Being selected is a fill rather than the absence of one —
+ * transparent pills in a sunken well left the unselected three as bare text on
+ * a dark trough. */
 .segments {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -662,9 +563,8 @@ body {
 }
 
 /* The sheet's segments are roomier than a card's, because one of the three is
- * two words and a segment that only just fits its label reads as a mistake.
- * The sheet widens with them — they are the widest thing in it, so the panel
- * is sized by them rather than the other way. */
+ * two words and a segment that only just fits its label reads as a mistake. The
+ * sheet is sized by them rather than the other way. */
 .theme-sheet .chip {
   padding: 12px 10px;
   font-size: 15px;
@@ -701,9 +601,9 @@ body {
 }
 
 /* The four segments while an inset holds error correction at 30%. Dimmed and
- * inert rather than hidden: the level is still a fact about the code on
- * screen, and taking the row away would leave the sentence under it talking
- * about a control that is not there. */
+ * inert rather than hidden: the level is still a fact about the code on screen,
+ * and taking the row away would leave the sentence under it talking about a
+ * control that is not there. */
 .chip.off {
   color: var(--ink-3);
   background: var(--off);
@@ -778,11 +678,9 @@ body {
   line-height: 1.25;
 }
 
-/* The hex under the name. It used to be 11.5px of monospace, which made the
- * one piece of the interface a person reads back to somebody else the hardest
- * thing in the window to read — and made it look like a log line in an app
- * that has none anywhere else. The system font at a legible size, with a
- * little air between the characters so the digits still hold their shape. */
+/* The hex under the name. The system font at a legible size, with a little air
+ * between the characters so the digits hold their shape: this is the one piece
+ * of the interface a person reads back to somebody else. */
 .well-hex {
   font-size: 13.5px;
   line-height: 1.3;
@@ -820,8 +718,8 @@ body {
 
 /* A code can hold a few thousand characters, so this is capped and scrolls
  * rather than pushing the rest of the column out of the window. Selectable,
- * because reading a code and then taking part of what it said is an ordinary
- * thing to want — the button beside it only offers the whole of it. */
+ * because taking part of what a code said is an ordinary thing to want — the
+ * button beside it only offers the whole of it. */
 .readout-text {
   margin: 0;
   max-height: 96px;
@@ -837,13 +735,12 @@ body {
 
 /* ---------------------------------------------------------------- stepper */
 
-/* The margin control: a number with a button on either side of it, which is
- * the layout somebody expects from a quantity they are going to nudge.
+/* The margin control: a number with a button on either side of it.
  *
- * The buttons are wide and the field is not. It holds one integer — two
- * digits at the very most — so a field stretched across the card was
- * promising room nobody can use, while the two targets that get pressed over
- * and over were the smallest things in the column. The space went to them. */
+ * The buttons are wide and the field is not. It holds one integer — two digits
+ * at most — so a field stretched across the card promises room nobody can use,
+ * while the two targets that get pressed over and over were the smallest things
+ * in the column. */
 .stepper {
   display: flex;
   flex-direction: row;
@@ -871,11 +768,10 @@ body {
 
 /* A stepper button with nowhere to go: the minus at a margin of zero, the plus
  * at sixteen. The same dimming the error-correction row wears while an inset
- * holds it and the three export buttons wear with nothing to export, because
- * it is the same statement — the control is still a fact about the number
- * beside it, and taking it away would leave the stepper lopsided every time
- * somebody reached an end. The hover is undone as well as the fill, or the
- * button would go on lighting up under a pointer it has nothing to offer. */
+ * holds it — the control is still a fact about the number beside it, and taking
+ * it away would leave the stepper lopsided at every end. The hover is undone as
+ * well as the fill, or the button would light up under a pointer it has nothing
+ * to offer. */
 .step.off {
   background: var(--off);
   border-color: var(--line);
@@ -886,25 +782,22 @@ body {
   border-color: var(--line);
 }
 
-/* **`text-align` does nothing to an `<input>` in Blitz**, which is why the
- * number in this one used to sit against its left edge with a stepper button
- * on either side, looking like a value that had slipped.
+/* **`text-align` does nothing to an `<input>` in Blitz.**
  *
  * A text field's content is not laid out by the inline code that reads
  * `text-align`: it belongs to a `parley::PlainEditor`, and `create_text_editor`
- * hands that editor exactly three properties — font size, line height and
- * brush — then calls `set_width(None)`, which is an editor with no box to
- * align inside. The glyphs are painted at the content box's left edge, full
- * stop. (Vertically they *are* centred, by the painter rather than by CSS.)
+ * hands that editor exactly three properties — font size, line height and brush
+ * — then calls `set_width(None)`, which is an editor with no box to align
+ * inside. The glyphs are painted at the content box's left edge, full stop.
+ * (Vertically they *are* centred, by the painter rather than by CSS.)
  *
- * So the centring is done with the one thing the painter does respect: the
- * padding that decides where the content box starts. `1ch` is the advance of
- * `0` in this field's own font — Blitz implements Stylo's
- * `zero_advance_measure`, so it is the real measurement rather than the 0.5em
- * fallback — and `ui.rs` writes a `padding-left` from it per digit on screen.
- * **Half of this width is the number `ui.rs` subtracts from.**
- * `the_margin_number_is_centered_in_its_field` measures the painted text
- * against the box it is in, so the two cannot drift apart quietly. */
+ * So the centring is done with the one thing the painter respects: the padding
+ * that decides where the content box starts. `1ch` is the advance of `0` in this
+ * field's own font — Blitz implements Stylo's `zero_advance_measure`, so it is a
+ * real measurement — and `ui.rs` writes a `padding-left` from it per digit on
+ * screen. **Half of this width is the number `ui.rs` subtracts from.**
+ * `the_margin_number_is_centered_in_its_field` measures the painted text against
+ * the box it is in. */
 .count {
   flex: 0 0 62px;
   height: 44px;
@@ -922,15 +815,10 @@ body {
   border-color: var(--raised-hi);
 }
 
-/* The caution that appears when the margin goes under two.
- *
- * It began as 12.5px of grey-gold tucked into the space left over at the end
- * of the stepper's row, which is the size and the position of a footnote —
- * and a footnote is not a warning. It is a banner of its own under the
- * control now: an icon, a tinted panel, a thick left edge in the warning
- * colour, and type larger than the hint below it, because the one line in
- * this card that says a code might not scan should not be the smallest thing
- * in it. */
+/* The caution that appears when the margin goes under two: an icon, a tinted
+ * panel, a thick left edge in the warning colour, and type larger than the hint
+ * below it — the one line in this card that says a code might not scan should
+ * not be the smallest thing in it. */
 .warn {
   display: flex;
   flex-direction: row;
@@ -938,8 +826,7 @@ body {
   gap: 10px;
   /* A `<p>` that did not say so carried the user agent's own 1em above and
    * below it — thirty points of nothing, on the one box in a rail that only
-   * exists in the state where the rail is tallest. Every other paragraph in
-   * this file already zeroed it; this one was the omission. */
+   * exists in the state where the rail is tallest. */
   margin: 0;
   padding: 10px 13px;
   color: var(--warn);
@@ -954,20 +841,17 @@ body {
 
 /* ------------------------------------------------------------------ inset */
 
-/* The picture in the middle of the code, once there is one: a thumbnail and
- * the name of the file it came from.
+/* The picture in the middle of the code, once there is one: a thumbnail and the
+ * name of the file it came from.
  *
- * A bare row rather than the sunken panel `.readout` gets, and the difference
- * is what the two hold. A read-out is a wall of somebody else's text and needs
- * a container to be a wall inside of; this is one image and one short line,
- * and giving it a border would be a box drawn inside a box for no reason. It
- * is also the difference between this card fitting under the colours and not:
- * the rail has room for one more card and no room for one more panel.
+ * A bare row rather than the sunken panel `.readout` gets: a read-out is a wall
+ * of somebody else's text and needs a container; this is one image and one short
+ * line. It is also the difference between this card fitting under the colours
+ * and not — the rail has room for one more card and no room for one more panel.
  *
- * The thumbnail is painted on the code's own background colour rather than on
- * the card, because that is what the picture will actually be sitting on — a
- * dark logo with a transparent ground would otherwise look right here and
- * vanish in the code. */
+ * The thumbnail is painted on the code's own background colour, because that is
+ * what the picture will be sitting on: a dark logo with a transparent ground
+ * would look right here and vanish in the code. */
 .inset {
   display: flex;
   flex-direction: row;
@@ -984,8 +868,8 @@ body {
   border-radius: 9px;
 }
 
-/* A file name is one long word as often as not, so it is told it may break
- * anywhere rather than allowed to push the card wider than its rail. */
+/* A file name is one long word as often as not, so it may break anywhere rather
+ * than push the card wider than its rail. */
 .inset-name {
   flex: 1 1 auto;
   min-width: 0;
@@ -1024,20 +908,13 @@ body {
  * the two agree.
  *
  * `background-origin: border-box` is what makes them agree about *where* zero
- * is, too: a pointer's element coordinates are measured from the border box,
- * so the gradients have to start there as well or everything sits a pixel out.
- * The layers themselves are set from `ui.rs`, because the marker moves.
+ * is: a pointer's element coordinates are measured from the border box, so the
+ * gradients have to start there too. The layers themselves are set from `ui.rs`,
+ * because the marker moves.
  *
- * The square gave up thirty pixels of height, and the swatches four each, to
- * pay for the Inset card underneath, and another twelve to pay for the row of
- * sizes inside that card. This column is where the height in this window is
- * spent: the picker was two hundred pixels tall against a rail with about a
- * hundred and eighty to spare, so anything else down here is a subtraction
- * from the square or nothing at all. A saturation/value square is a surface
- * somebody sweeps a pointer across rather than one they read, and it is still
- * the largest control in the app.
- *
- * `SQUARE_H` in `ui.rs` is this number, and a test says so. */
+ * This column is where the height in this window is spent — the picker had
+ * about a hundred and eighty points of slack, so anything else down here is a
+ * subtraction from the square. It is still the largest control in the app. */
 .sv {
   width: 310px;
   height: 158px;
@@ -1082,14 +959,13 @@ body {
 }
 
 /* **The monospace here does not arrive, and the declaration stays anyway.**
- * `create_text_editor` builds the `parley` editor behind an `<input>` from
- * three properties — size, line height, brush — and drops the rest of the
- * computed style, the family included, so this field is painted in whatever
- * `parley` defaults to. Measured: `ffffff` is 22.90 wide here and `bbbbbb` is
- * 48.39, and in a monospace face they would be the same number. The CSS is
- * right and the renderer is wrong, so this is left as written rather than
- * edited to match the bug; `blitz-fonts.md` is the report and the eight-line
- * patch that fixes it, under which the two strings both measure 52.21. */
+ * `create_text_editor` builds the `parley` editor behind an `<input>` from three
+ * properties — size, line height, brush — and drops the rest of the computed
+ * style, the family included. Measured: `ffffff` is 22.90 wide here and
+ * `bbbbbb` is 48.39, which in a monospace face would be the same number. The CSS
+ * is right and the renderer is wrong, so this is left as written;
+ * `blitz-fonts.md` is the report and the eight-line patch, under which both
+ * strings measure 52.21. */
 .hex {
   width: 132px;
   padding: 9px 10px;
@@ -1106,20 +982,15 @@ body {
 /* The button beside the hex field, which exchanges the code's two colours.
  *
  * It takes the rest of the row rather than only what its label needs: the row
- * holds two things and nothing else to align to, so a button that stopped
- * short would leave a gap at the end of the picker that means nothing. 176
- * points, against the field's 132 and the ten between them, and the label is a
- * half-point smaller than a `.btn` is elsewhere so that two words fit it with
- * room to spare in a wider face.
+ * holds two things and nothing else to align to. 176 points against the field's
+ * 132 and the ten between them, with the label a half-point smaller than a
+ * `.btn` is elsewhere so two words fit in a wider face.
  *
  * **The height is the field's, written down rather than arrived at.** Equal
- * padding does not give equal boxes here — the two have different type sizes,
- * so their line boxes differ by a point on each side — and a button two points
- * shorter than the field beside it reads as a button leaning on it rather than
- * as the other half of one row. 42 is what `.hex` comes out at; the padding
- * below is horizontal only, because the flex centring does the rest.
- * `swapping_exchanges_the_two_colors` measures the pair, so the number cannot
- * fall behind the field it was taken from. */
+ * padding does not give equal boxes here — the two have different type sizes —
+ * and a button two points shorter than the field beside it reads as leaning on
+ * it. 42 is what `.hex` comes out at, and `swapping_exchanges_the_two_colors`
+ * measures the pair so the number cannot fall behind the field. */
 .swap {
   flex: 1 1 auto;
   min-width: 0;
@@ -1129,9 +1000,8 @@ body {
 }
 
 /* A hex that is not a colour yet. It outranks the focus rule above — same
- * specificity, and it comes later — so a field being typed into wrongly says
- * so rather than saying it has the keyboard, and the ring turns with the
- * border so the two are never arguing. */
+ * specificity, later in the file — so a field being typed into wrongly says so
+ * rather than saying it has the keyboard. */
 .hex.bad {
   border-color: var(--danger);
 }
@@ -1143,41 +1013,28 @@ body {
 
 /* ------------------------------------------------------------------ stage */
 
-/* The code, matted in its own background colour. The mat is what turns a
- * square bitmap into an object on the page, and painting it in `light` rather
- * than in white means it still reads as one when the background is recoloured.
+/* The code, matted in its own background colour. The mat turns a square bitmap
+ * into an object on the page, and painting it in `light` rather than white means
+ * it still reads as one when the background is recoloured.
  *
- * **Square, and flush against the picture.** It was 18 pixels of padding and
- * a 20-pixel radius, and both of those were the preview telling a lie about
- * the file. The padding is painted in the code's own background colour, so it
- * is indistinguishable from the quiet zone the code carries — about one
- * module's worth at this window size, which made margin 0 look like margin 1
- * and margin 1 like margin 2, when the saved document at margin 0 is 25
- * modules across and carries nothing at all. The radius was the same lie in
- * the other direction: a rounded edge around a square file. What is on the
- * stage is now the document's own box, at its own size and its own shape.
+ * **Square, and flush against the picture.** Padding here is painted in the
+ * code's own background colour, so it is indistinguishable from the quiet zone
+ * the code carries — about one module at this window size, which made margin 0
+ * look like margin 1. A radius was the same lie the other way: a rounded edge
+ * around a square file. What is on the stage is the document's own box.
  *
- * **The outline is dashed, and it is not decoration.** The mat is the code's
- * own background colour and the window behind it is `--bg`; nothing stops
- * those two being the same colour, and one of them is a colour somebody can
- * type into the hex field. When they meet, the code's border — the quiet zone
- * a scanner needs, which is drawn in that same colour and is a real part of
- * the exported file — has no visible edge, and the preview stops saying how
- * much blank paper is being saved around the code. A dash is what says *the
- * picture ends here* without claiming to be part of the picture: it reads as
- * the app's line rather than as a frame somebody exported, which a solid rule
- * on a matching mat does not. It is the same dash the placeholder uses, so
- * the empty stage and the full one are the same object.
+ * **The outline is dashed, and it is not decoration.** The mat is the code's own
+ * background and the window behind it is `--bg`; nothing stops those being the
+ * same colour, and one of them is typed into the hex field. When they meet, the
+ * quiet zone — a real part of the exported file — has no visible edge, and the
+ * preview stops saying how much blank paper is being saved. A dash says *the
+ * picture ends here* without claiming to be part of the picture. It is the same
+ * dash the placeholder uses, so the empty stage and the full one are one object.
  *
- * Its *colour* is not here, and cannot be. A grey chosen against white is
- * gone the moment somebody clicks the middle of the greyscale row, four
- * pixels from where the colour was picked — so `mat_line` in `ui.rs` derives
- * it from the mat and sets `border-color` inline. `--mat-line` is what this
- * rule is worth without that.
- *
- * The cap came down from 620: with two columns of controls beside it, a code
- * that filled the rest of the window stopped reading as one thing on a page
- * and started reading as a wall. */
+ * Its *colour* is not here and cannot be: a grey chosen against white is gone
+ * the moment somebody clicks the middle of the greyscale row, so `mat_line` in
+ * `ui.rs` derives it from the mat and sets `border-color` inline. `--mat-line`
+ * is what this rule is worth without that. */
 .preview {
   display: flex;
   align-items: center;
@@ -1203,31 +1060,26 @@ body {
  * tidiness.** An in-flow replaced element — an `<img>`, or an `<svg>`, which
  * Blitz treats as one — whose width or height is a percentage is laid out
  * against nothing the first time an ancestor's *inherited* style changes: the
- * box comes back zero-high, the code goes off the stage, and the mat behind
- * it — painted in the code's own background colour — is all that is left.
- * Which looks exactly like the foreground of the code being deleted, and lasts
- * until something rebuilds the node, in practice the next character typed.
- * Changing the theme back does not bring it back.
+ * box comes back zero-high and the code goes off the stage, leaving the mat,
+ * which looks exactly like the code's foreground being deleted. It lasts until
+ * something rebuilds the node, and changing the theme back does not fix it.
  *
- * The one thing in this app that changes an inherited property on an ancestor
- * is the theme: `.theme-dark` and `.theme-system` redefine the custom
- * properties at the top of this file, a custom property is inherited, so
- * picking a theme restyles every node in the window at once.
+ * The one thing here that changes an inherited property on an ancestor is the
+ * theme: `.theme-dark` and `.theme-system` redefine the custom properties at the
+ * top of this file, and a custom property is inherited.
  *
  * Measured against the pinned Blitz on a document cut down to a flex column
- * holding a percentage-sized `<img>`, which is where the three halves of that
- * sentence come from: a plain inherited property (`color`) does not do it and a
- * non-inherited one (`background`) does not either — a *custom* property does;
- * only a *replaced* child is affected, a `<div>` at the same percentages keeps
- * its box; and an *absolutely positioned* one comes back right, because it is
- * laid out against its containing block in a pass of its own. The percentages
- * below are the same percentages, resolved somewhere that resolves them.
+ * holding a percentage-sized `<img>`: a plain inherited property (`color`) does
+ * not do it and a non-inherited one (`background`) does not either — a *custom*
+ * property does; only a *replaced* child is affected, a `<div>` at the same
+ * percentages keeps its box; and an *absolutely positioned* one comes back
+ * right, because it is laid out against its containing block in its own pass.
  *
  * So every layer is positioned against `.code`, which is what its
- * `position: relative` above is now for. The code fills it; the inset's own
- * `left`, `top`, `width` and `height` arrive inline from `Qr::inset_box` and
- * override the four written here. Paint order is document order — no layer has
- * a `z-index` — so the picture is still drawn over the code, which
+ * `position: relative` above is for. The inset's own `left`, `top`, `width` and
+ * `height` arrive inline from `Qr::inset_box` and override the four written
+ * here. Paint order is document order — no layer has a `z-index` — so the
+ * picture is drawn over the code, which
  * `the_picture_on_the_stage_is_where_the_document_puts_it` hit-tests.
  *
  * `the_theme_does_not_take_the_code_off_the_stage` is the regression test. */
@@ -1241,15 +1093,13 @@ body {
 }
 
 /* The `<svg>` inside `.doc` is the document itself, parsed out of the markup
- * `ui.rs` drops in — so it is not an element the app writes and cannot be
- * given a class of its own.
+ * `ui.rs` drops in — so it is not an element the app writes and cannot be given
+ * a class of its own.
  *
- * The percentages are what make it fill the box: the document declares a
- * `width` and a `height` in points, and left alone it would be drawn at those
- * rather than at the size of the stage. The `position` is the rule above,
- * applied to the one replaced element in this file that is not written by the
- * app — it is not known to collapse behind the wrapper, which is a block box
- * and keeps its own height, but nothing is gained by being the exception. */
+ * The percentages are what make it fill the box: the document declares a `width`
+ * and a `height` in points, and left alone would be drawn at those. The
+ * `position` is the rule above, applied to the one replaced element here that
+ * the app does not write. */
 .code > .doc > svg {
   position: absolute;
   left: 0;
@@ -1263,8 +1113,7 @@ body {
  *
  * `contain` is the same rule the saved document uses for the same picture —
  * `preserveAspectRatio="xMidYMid meet"` — so a picture that is not square is
- * letterboxed in its box here exactly as it is in the file. That is the whole
- * of what keeps two layers looking like the one thing they are. */
+ * letterboxed here exactly as it is in the file. */
 .code > .inset {
   object-fit: contain;
 }
@@ -1341,8 +1190,8 @@ body {
   box-shadow: 0 24px 60px var(--shadow-deep);
 }
 
-/* Wider than the About card, and the segmented row is why: three buttons in
- * one track, one of them two words. It is here rather than beside `.segments-3`
+/* Wider than the About card, and the segmented row is why: three buttons in one
+ * track, one of them two words. It is here rather than beside `.segments-3`
  * because both selectors are one class deep — put it above `.sheet` and source
  * order hands the width back. */
 .theme-sheet {
@@ -1352,17 +1201,13 @@ body {
 /* The top line of a sheet: what the panel is, and the way out of it.
  *
  * **The way out is a cross in the corner rather than a Close button at the
- * bottom**, which is where every panel a person has shut this year has put it.
- * The old row cost a full-width button's worth of height to say something the
- * shape of the panel already says, and in the About sheet it sat beside *View
- * on GitHub* wearing the same chip — two buttons of equal weight, one of which
- * only undoes the opening. Up here the leaving and the doing stop looking
- * alike: the cross is quiet furniture in the corner, and the one button left
- * in the panel is the one that actually goes somewhere.
+ * bottom.** A full-width button cost height to say what the shape of the panel
+ * already says, and in the About sheet it sat beside *View on GitHub* wearing
+ * the same chip — two buttons of equal weight, one of which only undoes the
+ * opening. Up here the leaving and the doing stop looking alike.
  *
- * It is still not the only way out. Escape closes either sheet and so does the
- * scrim, and both of those predate this; what the corner adds is the way that
- * needs no guessing. */
+ * Escape and the scrim also close either sheet; what the corner adds is the way
+ * that needs no guessing. */
 .sheet-head {
   display: flex;
   flex-direction: row;
@@ -1381,27 +1226,23 @@ body {
   font-weight: 600;
 }
 
-/* The cross itself: a 34-point circle with an 18-point glyph inside it, which
- * is a target half again the size of the mark it carries — a corner button is
- * pressed in a hurry and should not have to be aimed at.
+/* The cross itself: a 34-point circle with an 18-point glyph inside it — a
+ * target half again the size of its mark, because a corner button is pressed in
+ * a hurry.
  *
  * **Nothing is drawn until the pointer is over it.** At rest it is the mark
- * alone on the panel, in the faint ink the topbar's own chrome uses, so the
- * first thing read in this panel is its title rather than the button beside
- * it. The hover paints the disc — round, tinted, no border — and that is the
- * whole of the affordance, because it is the whole of what CSS can move here:
- * an icon's colour is a presentation attribute on a document the stylesheet
- * cannot see inside, so the *ink* cannot answer a hover and the ground has to.
+ * alone in the topbar's faint ink, so the first thing read in the panel is its
+ * title. The hover paints the disc, and that is the whole of the affordance
+ * because it is the whole of what CSS can move here: an icon's colour is a
+ * presentation attribute on a document the stylesheet cannot see inside, so the
+ * *ink* cannot answer a hover and the ground has to.
  *
- * `border-radius` in points rather than the 50% a circle is usually written
- * as: the number is exactly half the box, so it is the same circle, and it is
- * a length rather than a percentage resolved against a box.
+ * `border-radius` in points rather than 50%: the number is exactly half the box,
+ * so it is the same circle without a percentage resolved against one.
  *
- * The negative right margin is optical. The panel's padding is 26 and a mark
- * centred inside it would sit 43 points from the edge, which reads as a button
- * that has drifted inwards rather than one placed in the corner; six points
- * back puts the disc 20 from the edge and leaves the title's own line where it
- * was. */
+ * The negative right margin is optical. The panel's padding is 26 and a centred
+ * mark would sit 43 points from the edge, which reads as drift rather than a
+ * corner; six points back puts the disc 20 from the edge. */
 .sheet-close {
   display: flex;
   align-items: center;
@@ -1420,23 +1261,19 @@ body {
   background: var(--raised-hi);
 }
 
-/* ...and the mark turns with it. `glyph_hover` in `ui.rs` draws the cross
- * twice over — once in the faint ink it rests in, once in the red every close
- * button on the desktop turns under a pointer — and these four rules choose
- * between the two wrappers. The theme is not asked again here: `.lit` /
- * `.dim` at the foot of this file still picks the palette inside whichever
- * pair is showing, which is the whole reason the swap is a wrapper rather
- * than a fifth and sixth class on the icons themselves.
+/* ...and the mark turns with it. `glyph_hover` in `ui.rs` draws the cross twice
+ * over — once in the faint ink it rests in, once in the red every close button
+ * on the desktop turns under a pointer — and these four rules choose between the
+ * two wrappers. The theme is not asked again: `.lit` / `.dim` at the foot of
+ * this file picks the palette inside whichever pair is showing, which is why the
+ * swap is a wrapper rather than two more classes on the icons.
  *
- * `flex` rather than `block`, because the wrapper is what holds the icon: an
- * `<svg>` is inline, and a line box inside the button would sit the cross off
- * its centre by the descender. Measured: the mark stays in the same 18-point
- * box at the same point either way.
+ * `flex` rather than `block`: an `<svg>` is inline, and a line box inside the
+ * button would sit the cross off centre by the descender.
  *
- * Four documents for one mark is the price, and it is worth paying on these
- * two crosses and nothing else in the window: a cross is a shape rather than
- * a word, and the colour is what says which of the several things a cross can
- * mean this one is. */
+ * Four documents for one mark is the price, worth paying on these two crosses
+ * and nothing else — a cross is a shape rather than a word, and the colour is
+ * what says which of the things a cross can mean this one is. */
 .ink-rest,
 .ink-hot {
   display: flex;
@@ -1454,10 +1291,8 @@ body {
   display: flex;
 }
 
-/* The same size and ink as a `.hint` in the window behind it, because it is
- * the same kind of sentence: the app explaining itself. It was a step smaller
- * than the notes it sits in front of, which made the one panel that says what
- * QRnew *is* the quietest text in the app. */
+/* The same size and ink as a `.hint` in the window behind it, because it is the
+ * same kind of sentence: the app explaining itself. */
 .sheet p {
   margin: 0;
   color: var(--ink-2);
@@ -1481,12 +1316,10 @@ body {
 /* Icons. Every one is a `<svg>` in `ui.rs`, painted through usvg — so this
  * sizes them and nothing more; their colour is baked in at the call site.
  *
- * Which is why there are two of each: `glyph` in `ui.rs` emits the same icon
- * twice, once in the ink for each palette, and these three rules are the whole
- * of the choosing. They mirror the palettes exactly — the class decides, and
- * the desktop is asked only for `theme-system`. A hidden one takes no space
- * and is never painted, so the pair costs a node and a small usvg document,
- * not a layout. */
+ * Which is why there are two of each: `glyph` emits the same icon twice, once
+ * in the ink for each palette, and these three rules are the whole of the
+ * choosing. They mirror the palettes exactly. A hidden one takes no space and
+ * is never painted, so the pair costs a node and a small usvg document. */
 .dim {
   display: none;
 }

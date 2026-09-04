@@ -2,26 +2,22 @@
 
 //! QRnew's interface, driven end to end without a window.
 //!
-//! `blitz-test-harness` builds the same [`App`] the binary launches, lays it
-//! out with Stylo and Taffy, hit-tests it and dispatches real pointer, key and
-//! IME events through the real event pipeline — with no window, no GPU and no
+//! `blitz-test-harness` builds the same [`App`] the binary launches, lays it out
+//! with Stylo and Taffy, hit-tests it and dispatches real pointer, key and IME
+//! events through the real event pipeline — with no window, no GPU and no
 //! compositor, so this runs in CI on any platform.
 //!
-//! Two of these tests are about the *pointer* rather than about QRnew, and
-//! they are here because Blitz surprised the app twice: a press that drifts
-//! two pixels becomes a text-selection drag and never becomes a click, and a
-//! marker positioned with a `radial-gradient` lands at half its offset on a
-//! HiDPI display. Both were fixed in the stylesheet, and both would come
-//! straight back the first time somebody tidied the fix away.
+//! Two of these tests are about the *pointer* rather than about QRnew, because
+//! Blitz surprised the app twice: a press that drifts two pixels becomes a
+//! text-selection drag and never becomes a click, and a marker positioned with a
+//! `radial-gradient` lands at half its offset on a HiDPI display. Both were
+//! fixed in the stylesheet, and both would come back the first time somebody
+//! tidied the fix away.
 //!
-//! **The libcosmic build had no test like this and could not have had one**:
-//! testing `src/app.rs` meant opening a COSMIC window. Everything below is
-//! about the interface, not about `qrnew-core` — the core's own tests already
-//! hold the encoding, the shapes and the round trip.
-//!
-//! Assertions go against the preview's own document, read back out of the
-//! stage, so what is checked is the SVG the app would also save to disk —
-//! which `the_code_on_the_stage_is_the_code_in_the_file` is the proof of.
+//! Everything here is about the interface, not `qrnew-core` — the core's own
+//! tests hold the encoding, the shapes and the round trip. Assertions go against
+//! the preview's own document, read back out of the stage, so what is checked is
+//! the SVG the app would save to disk.
 
 use blitz_test_harness::{Harness, HarnessOptions};
 use blitz_traits::events::{BlitzImeEvent, UiEvent};
@@ -30,20 +26,12 @@ use blitz_traits::shell::ColorScheme;
 use dioxus::prelude::VirtualDom;
 use qrnew::ui::{App, Fill, Inlay, Remember, Theme, Tone};
 
-/// Press a key that edits text, the way the platform running the test delivers
-/// it.
+/// Press a key that edits text, the way the platform delivers it.
 ///
-/// **On macOS such a key arrives twice.** AppKit resolves it against the
-/// system's key-binding table and hands the window the command it means —
-/// `moveToBeginningOfDocument:` for Home, `deleteForward:` for Delete — and
-/// then `winit` delivers the key event as well, so that an app which does not
-/// implement the command still sees the key. `ui.rs` cancels the second of the
-/// two, because Blitz acts on both and one press would otherwise do the thing
-/// twice; the whole story is above `appkit_has_this_key` there.
-///
-/// A harness that sent only the key event would therefore not be a Mac, and the
-/// app it drove would sit still. Everywhere else there is no command to send
-/// and the key event is the whole story.
+/// **On macOS such a key arrives twice**: AppKit resolves it into a command, and
+/// `winit` delivers the key event as well. `ui.rs` cancels the second — see
+/// `appkit_has_this_key` — so a harness sending only the key event would not be
+/// a Mac, and the app it drove would sit still.
 fn edit(
     harness: &mut Harness<dioxus_native::DioxusDocument>,
     key: keyboard_types::Key,
@@ -59,30 +47,20 @@ fn edit(
     harness.press(key);
 }
 
-/// The preview's SVG, read back off the stage.
-///
-/// The app drops the document into `.doc` as markup, so what comes back here
-/// is the `<svg>` element Blitz parsed out of it, re-serialized — which is
-/// also, exactly, what Blitz hands `usvg` to draw. So this is the document on
-/// screen rather than a copy of it, and
-/// `the_code_on_the_stage_is_the_code_in_the_file` is what says it is still
-/// the document in the file.
-///
-/// `None` when there is no code on screen, which is the placeholder state.
+/// The preview's SVG, read back off the stage — the `<svg>` Blitz parsed out of
+/// the markup and re-serialized, which is exactly what it hands `usvg`. So this
+/// is the document on screen rather than a copy. `None` for the placeholder.
 fn preview(harness: &Harness<dioxus_native::DioxusDocument>) -> Option<String> {
     let node = harness.query("[data-preview] svg")?;
     Some(harness.base().get_node(node)?.outer_html())
 }
 
-/// One document's markup, in the one form both the stage and the file can be
-/// compared in.
+/// One document's markup, in the one form the stage and the file compare in.
 ///
-/// A document that has been through the DOM differs from the file it came from
-/// in exactly two ways, and `the_code_on_the_stage_is_the_code_in_the_file` is
-/// what holds it to those two: the XML declaration is not an element, so it
-/// does not survive being parsed into one; and Blitz's serializer writes a
-/// space before the slash of an empty element. Neither is a difference `usvg`
-/// can see, and nothing else moves.
+/// A document that has been through the DOM differs from its file in exactly two
+/// ways, and `the_code_on_the_stage_is_the_code_in_the_file` holds it to those:
+/// the XML declaration is not an element, and Blitz's serializer writes a space
+/// before the slash of an empty element. Neither is visible to `usvg`.
 fn body(document: &str) -> String {
     document
         .split_once("?>")
@@ -91,10 +69,9 @@ fn body(document: &str) -> String {
         .replace(" />", "/>")
 }
 
-/// The number of modules across the code, read off the SVG's own `viewBox`.
-///
-/// Taken from the document rather than from `qrnew-core`, so that the test
-/// says something about what reached the screen.
+/// The number of modules across the code, read off the SVG's own `viewBox` —
+/// from the document rather than from `qrnew-core`, so it says something about
+/// what reached the screen.
 fn modules_across(svg: &str) -> u32 {
     let box_attr = svg
         .split_once("viewBox=\"")
@@ -111,10 +88,8 @@ fn modules_across(svg: &str) -> u32 {
 
 /// The `d` of every `<path>` in a generated code, in document order.
 ///
-/// `draw.rs` writes the modules first, then the finder rings, then the finder
-/// centres, so the first and last of these are the two halves of a shape
-/// question: whether the modules are curved, and whether the corners followed
-/// them.
+/// `draw.rs` writes modules, then finder rings, then finder centres — so the
+/// first and last answer whether the modules are curved and the corners followed.
 fn outlines(svg: &str) -> Vec<&str> {
     svg.split(r#"<path fill=""#)
         .skip(1)
@@ -124,17 +99,11 @@ fn outlines(svg: &str) -> Vec<&str> {
         .collect()
 }
 
-/// Whether a path is drawn with curves.
-///
-/// `draw.rs` writes every curve in this document as an arc command and uses no
-/// other curve command, so one letter answers it.
 /// How wide the picture in the middle of the code is drawn, in points.
 ///
-/// Measured on the screen rather than read out of a string, because the stage
-/// draws the code and the picture as two layers — see the `preview` memo in
-/// `ui.rs` — and the point of the arrangement is that they land as one. The
-/// preview box is a fixed size whatever the code inside it is, so unlike the
-/// module units this replaces, these numbers compare across codes.
+/// Measured on screen rather than read out of a string, because the stage draws
+/// the code and the picture as two layers and the point is that they land as
+/// one. The preview box is a fixed size, so these numbers compare across codes.
 fn inset_width(harness: &Harness<dioxus_native::DioxusDocument>) -> f32 {
     harness.layout_rect("[data-preview-inset]").width
 }
@@ -175,11 +144,8 @@ fn decode_base64(text: &str) -> Vec<u8> {
 
 /// A harness with the app in it, ready for the first event.
 ///
-/// The viewport is set rather than left at the harness default, because the
-/// interface is a three-column layout that opens maximized and its stage sizes
-/// the preview off `vh`. 1280×860 is the size `main.rs` falls back to when the
-/// window is un-maximized, so the tests lay the app out at a size it actually
-/// opens at.
+/// 1280×860 is what `main.rs` falls back to un-maximized; the stage sizes the
+/// preview off `vh`, so the viewport has to be set.
 fn app() -> Harness<dioxus_native::DioxusDocument> {
     let mut harness = Harness::from_component(App);
     harness.set_viewport_size(1280, 860);
@@ -201,10 +167,8 @@ fn app_after(clicks: &[&str]) -> Harness<dioxus_native::DioxusDocument> {
 
 /// The same app, opened with text already in the field.
 ///
-/// `Fill` is the root context `main.rs` provides for `--fill`, and it is the
-/// only way to get a long input in front of the component without typing it:
-/// `type_text` is one dispatched key event per character, and the case worth
-/// testing is thousands of them.
+/// `Fill` is the root context for `--fill`, and the only way to get a long input
+/// in without typing it: `type_text` is one key event per character.
 fn app_filled(text: &str) -> Harness<dioxus_native::DioxusDocument> {
     let vdom = VirtualDom::new(App).with_root_context(Fill(text.to_string()));
     let mut harness = Harness::from_vdom(vdom, HarnessOptions::default());
@@ -213,11 +177,8 @@ fn app_filled(text: &str) -> Harness<dioxus_native::DioxusDocument> {
     harness
 }
 
-/// A picture on disk for the inset to be, and the path to it.
-///
-/// Written rather than checked in: it is nine lines of SVG, and a fixture file
-/// is one more thing to keep in step with the code that reads it. `name` keeps
-/// two tests running at once from writing the same path.
+/// A picture on disk for the inset to be, and the path to it. Written rather
+/// than checked in; `name` keeps two tests from writing one path.
 fn an_image(name: &str) -> std::path::PathBuf {
     let path = std::env::temp_dir().join(format!("qrnew-{name}.svg"));
     std::fs::write(
@@ -232,10 +193,8 @@ fn an_image(name: &str) -> std::path::PathBuf {
 
 /// A picture too large for the app to carry, and the path to it.
 ///
-/// A QR code stands in for a photograph. `qrnew-core` will write one at any
-/// size and is already a dev-dependency, which beats checking in a two
-/// megapixel fixture — and what matters about a photograph here is only that
-/// it is larger than [`qrnew_core::MAX_LOGO_SIDE`].
+/// A QR code stands in for a photograph; all that matters is that it is larger
+/// than [`qrnew_core::MAX_LOGO_SIDE`].
 fn a_large_image(name: &str) -> std::path::PathBuf {
     let png = qrnew_core::render_png(
         "a stand-in for a photograph",
@@ -252,10 +211,8 @@ fn a_large_image(name: &str) -> std::path::PathBuf {
 
 /// The app opened with text in the field and a picture in the middle of it.
 ///
-/// `Inlay` is the root context `main.rs` provides for `--inset`, and it is the
-/// only way to get one in front of the component: choosing a picture means
-/// working a native file dialog, which the harness has no way to touch and no
-/// business opening.
+/// `Inlay` is the root context for `--inset`, and the only way in: choosing a
+/// picture means a native file dialog the harness cannot touch.
 fn app_with_inset(text: &str, name: &str) -> Harness<dioxus_native::DioxusDocument> {
     app_with_picture(text, &an_image(name))
 }
@@ -272,13 +229,12 @@ fn app_with_picture(text: &str, image: &std::path::Path) -> Harness<dioxus_nativ
 
 /// The one resource this app ever loads, and the only fetcher it needs.
 ///
-/// It is `blitz_shell::DataUriNetProvider` in four lines, because that one is
-/// behind a feature of a crate the app does not depend on directly and this
-/// one has to decode exactly one shape: the base64 `data:` URL [`data_url`] in
-/// `ui.rs` writes. The window gets a provider of the same kind from
-/// `dioxus-native`'s `data-uri` feature; the harness is handed nothing and
-/// fetches nothing, which is why every test above this line lays out an
-/// `<img>` that never loaded.
+/// `blitz_shell::DataUriNetProvider` in four lines, because that one is behind a
+/// feature of a crate the app does not depend on directly and this one has to
+/// decode exactly one shape: the base64 `data:` URL [`data_url`] writes. The
+/// window gets a provider of the same kind from `dioxus-native`'s `data-uri`
+/// feature; the harness is handed nothing, which is why every test above this
+/// line lays out an `<img>` that never loaded.
 struct DataUri;
 
 impl NetProvider for DataUri {
@@ -292,16 +248,12 @@ impl NetProvider for DataUri {
     }
 }
 
-/// The app with the preview actually **decoded and laid out**, rather than
-/// standing in the document as an `<img>` whose `src` nothing ever fetched.
+/// The app with the preview actually **decoded and laid out**, rather than an
+/// `<img>` whose `src` nothing ever fetched.
 ///
-/// Everything about the code as a *document* — what is in the SVG, what is
-/// saved, what is copied — is checked off the `data:` URL by [`preview`] and
-/// needs none of this. What needs it is the code as a *box on the stage*: an
-/// image that never loaded has no intrinsic size, so it is laid out by the
-/// stylesheet alone and cannot show a bug in how the two are combined. The
-/// theme once did exactly that — see
-/// `the_theme_does_not_take_the_code_off_the_stage`.
+/// The code as a *document* is checked off the `data:` URL by [`preview`]. What
+/// needs this is the code as a *box on the stage*: an image that never loaded
+/// has no intrinsic size — see `the_theme_does_not_take_the_code_off_the_stage`.
 fn app_drawn(text: &str, image: Option<&std::path::Path>) -> Harness<dioxus_native::DioxusDocument> {
     let mut vdom = VirtualDom::new(App).with_root_context(Fill(text.to_string()));
     if let Some(image) = image {
@@ -400,18 +352,10 @@ fn high_correction_makes_a_denser_code() {
 
 /// **The shape row reaches the code, and the finders follow the modules.**
 ///
-/// `ModuleShape` and `FinderShape` have been in `qrnew-core` since before the
-/// rewrite — drawn, decoded and held by `every_combination_of_shapes_scans` —
-/// and until now there was no way to ask for either of them from the window.
-/// This is the test that says the row is wired to the code rather than only to
-/// its own `aria-pressed`.
-///
-/// The finders are asserted separately from the modules because the app couples
-/// them: one control sets both, and a shape that softened the modules and left
-/// three square corners behind is the exact fault that coupling exists to
-/// prevent. `draw.rs` writes the finder centres last, so the last `<path>` in
-/// the document is theirs — a circle where the code is rounded, a plain
-/// rectangle where it is square.
+/// The finders are asserted separately because the app couples them: one control
+/// sets both, and a shape that softened the modules and left three square
+/// corners is the fault that coupling prevents. `draw.rs` writes the finder
+/// centres last, so the last `<path>` is theirs.
 #[test]
 fn the_shape_row_redraws_the_code_and_its_finders() {
     let mut harness = app_filled("https://example.org");
@@ -454,10 +398,8 @@ fn the_shape_row_redraws_the_code_and_its_finders() {
     }
 }
 
-/// The shape the app opens on is the one the standard describes.
-///
-/// Somebody who never finds this card gets a plain code, and a plain code is
-/// drawn with no curve anywhere in it — finders included.
+/// The shape the app opens on is the one the standard describes: a plain code,
+/// with no curve anywhere in it, finders included.
 #[test]
 fn the_code_is_square_until_somebody_says_otherwise() {
     let harness = app_filled("https://example.org");
@@ -472,14 +414,10 @@ fn the_code_is_square_until_somebody_says_otherwise() {
     );
 }
 
-/// **Escape closes whichever sheet is open.**
+/// **Escape closes whichever sheet is open**, from wherever the keyboard is.
 ///
-/// Both of them, from wherever the keyboard happens to be. The handler sits on
-/// the root element and Blitz bubbles a key event up from the focused node, so
-/// this is as much a test of that route as of the app — and in particular of
-/// the `autofocus` on each Close button, without which the focus after opening
-/// a sheet is `<html>` (see `clicking_a_chip_blurs_the_field`) and a keystroke
-/// bubbles away from the app rather than through it.
+/// The handler sits on the root element and Blitz bubbles a key event up from
+/// the focused node, so this also tests the `autofocus` on each Close button.
 #[test]
 fn escape_closes_a_sheet() {
     for (open, panel) in [(".about-open", ".about"), (".theme-open", ".theme-sheet")] {
@@ -496,18 +434,11 @@ fn escape_closes_a_sheet() {
 
 /// **A sheet opens with the keyboard in it, and loses it to its own buttons.**
 ///
-/// Both halves matter, and together they are why Escape is answered twice.
-/// The first is what the element handler needs: a key event goes to the
-/// focused node and bubbles, so the keyboard has to be somewhere under `.app`
-/// for the handler there to see it, and `autofocus` on the Close button is
-/// what puts it there.
-///
-/// The second is the reason that is not enough. Clicking a theme clears the
-/// focus to `<html>` — the same upstream rule `clicking_a_chip_blurs_the_field`
-/// records — which is *above* `.app`, so from there a keystroke bubbles away
-/// from the app rather than through it. That case is caught by the winit
-/// handler in `App`, which no harness can reach: there is no window here to
-/// deliver a `WindowEvent`.
+/// Together these are why Escape is answered twice. A key event goes to the
+/// focused node and bubbles, so the keyboard has to be under `.app` — which
+/// `autofocus` on the Close button does. Clicking a theme then clears the focus
+/// to `<html>` (see `clicking_a_chip_blurs_the_field`), which is *above* `.app`,
+/// and that case is caught by the winit handler no harness can reach.
 ///
 /// **If the second assertion starts failing, upstream has stopped clearing the
 /// focus** and the window half of the Escape handling can go.
@@ -545,13 +476,9 @@ fn escape_with_nothing_open_leaves_the_window_alone() {
     assert_eq!(preview(&harness).unwrap(), before);
 }
 
-/// The hex field fills itself back in when the keyboard leaves it.
-///
-/// The same rule as `an_emptied_margin_field_restores_what_is_applied`, and it
-/// is the same fault underneath: half-typed text is allowed in the field while
-/// it is being typed, the code goes on being drawn in the last colour that
-/// parsed, and a field left reading `#2f` is the window showing one colour and
-/// the field claiming another.
+/// The hex field fills itself back in when the keyboard leaves it: the code goes
+/// on being drawn in the last colour that parsed, so a field left reading `#2f`
+/// is the window showing one colour and the field claiming another.
 #[test]
 fn a_half_typed_hex_field_restores_what_is_applied() {
     let mut harness = app();
@@ -618,17 +545,11 @@ fn a_swatch_recolors_the_code() {
 
 /// **The mat is outlined, and the outline stays visible on any mat.**
 ///
-/// The mat is painted in the code's own background colour, and that colour is
-/// a real part of the exported file: the quiet zone a scanner needs is drawn
-/// in it. On a light window the mat and the page can be the same colour —
-/// `#f5f4f2` is on the palette and `--bg` is `#f4f5f7` — and a code whose
-/// border cannot be seen is a code whose border nobody can judge. `.preview`
-/// is therefore outlined with a dash, and `mat_line` in `ui.rs` derives the
-/// dash's colour from the mat, because a grey fixed against white vanishes on
-/// the middle of the greyscale row.
-///
-/// So this walks the mat from white to the middle grey to black and asks the
-/// same question at each stop: is the line still a line?
+/// The mat is the code's own background colour, which is a real part of the
+/// exported file. On a light window it and the page can be the same colour —
+/// `#f5f4f2` is on the palette and `--bg` is `#f4f5f7` — so `.preview` is
+/// outlined with a dash whose colour `mat_line` derives from the mat, because a
+/// grey fixed against white vanishes on the middle of the greyscale row.
 #[test]
 fn the_mat_is_outlined_whatever_colour_the_mat_is() {
     /// How far apart, on 0…255 of brightness, counts as visible.
@@ -701,12 +622,10 @@ fn the_hex_field_recolors_the_code() {
         "clicking the hex field gives it the keyboard"
     );
 
-    // The field opens holding `#ffffff`, and it is cleared the way a person
-    // would clear it — except with Home and Delete rather than Backspace.
-    // **Backspace is deliberate**: `blitz-dom` handles it on macOS only
-    // through AppKit's standard key bindings, which arrive from the window
-    // and which a headless harness cannot produce, so a Backspace here is a
-    // no-op on one platform and works on the other two. Home and Delete go
+    // The field opens holding `#ffffff`, cleared the way a person would — except
+    // with Home and Delete rather than Backspace. **Backspace is deliberate**:
+    // `blitz-dom` handles it on macOS only through AppKit's standard key
+    // bindings, which a headless harness cannot produce. Home and Delete go
     // through `apply_keypress_event` everywhere.
     edit(
         &mut harness,
@@ -738,8 +657,8 @@ fn the_hex_field_recolors_the_code() {
 /// The stylesheet and the pointer maths agree about how big the square is.
 ///
 /// `ui.rs` divides a pointer's offset by a constant because the element cannot
-/// be measured from inside an event handler; the stylesheet is told the same
-/// number by hand. This is the test that catches somebody changing one.
+/// be measured from inside an event handler, and `ui.css` is told the same
+/// number by hand.
 #[test]
 fn the_square_is_the_size_the_maths_assumes() {
     let harness = app();
@@ -784,13 +703,10 @@ fn hex(text: &str) -> (u8, u8, u8) {
 
 /// **Swap exchanges the code's two colours**, and does not negate either.
 ///
-/// The two are picked off the palette rather than left at black and white,
-/// because black and white are each other's opposite as well as each other's
-/// swap — a test run on those two would pass whichever of the two things the
-/// button did. These two are neither, so only one answer fits.
-///
-/// The last half is the round trip: pressing it twice is where it started, and
-/// a swap is the only operation that is its own undo.
+/// The two are off the palette rather than black and white, because those are
+/// each other's opposite as well as each other's swap — a test on them would
+/// pass whichever of the two things the button did. The last half is the round
+/// trip: a swap is its own undo.
 #[test]
 fn swapping_exchanges_the_two_colors() {
     let mut harness = app();
@@ -977,9 +893,8 @@ fn reset_puts_black_and_white_back() {
     assert!(svg.contains("#000000"));
     assert!(svg.contains("#ffffff"));
 
-    // And the picker followed it. It did not before: the hex field kept its
-    // own copy of the colour and only ever wrote to it, so resetting turned
-    // the code black while the field went on reading `#8b1a1a`.
+    // And the picker followed it: the hex field used to keep its own copy of the
+    // colour and only ever write to it.
     assert_eq!(
         harness.attr("[data-hex]", "value").as_deref(),
         Some("#000000"),
@@ -990,13 +905,9 @@ fn reset_puts_black_and_white_back() {
 
 /// **And it follows a reset that takes the colour caution down with it.**
 ///
-/// The same promise as the test above, in the one state where the window has
-/// two things to redraw at once. The picker follows an outside colour through
-/// an effect of its own, and the caution is the other half of what a reset
-/// changes — so this is the state where a caution written as a second effect
-/// starves the first: the code goes black, the banner goes away, and the hex
-/// field is left reading the colour that has just been reset. It is why the
-/// held caution is written from the picker's pointer handlers instead.
+/// The one state with two things to redraw at once, which is where a caution
+/// written as a second effect starves the first. It is why the held caution is
+/// written from the picker's pointer handlers instead.
 #[test]
 fn the_picker_follows_a_reset_that_takes_the_caution_down() {
     let mut harness = app();
@@ -1028,12 +939,8 @@ fn the_picker_follows_a_reset_that_takes_the_caution_down() {
 ///
 /// `dioxus-assessment.md` named this the one honest blocker for QRnew: with no
 /// IME there is no way to type Japanese, Chinese, Korean or a composed accent
-/// into a field that *is* the whole application, and a QR code holding
-/// Japanese text is an ordinary thing to want. Blitz has since grown IME —
-/// `blitz-dom` applies preedit and commit to the focused text input, and
-/// `blitz-shell` enables it on the window and tracks the cursor area — so this
-/// test is here to say whether it actually works end to end, and to fail the
-/// day it stops.
+/// into a field that *is* the whole application. Blitz has since grown IME, so
+/// this test says whether it works end to end, and fails the day it stops.
 #[test]
 fn composed_text_reaches_the_field() {
     let mut harness = app();
@@ -1048,9 +955,8 @@ fn composed_text_reaches_the_field() {
     harness.pump();
     // winit sends an empty preedit immediately before every commit, and Blitz
     // relies on it: `Commit` inserts at the selection without clearing the
-    // composing region first. Leave this line out and the field ends up
-    // holding "にほん日本語" — which is what a first draft of this test found,
-    // and it is the harness being unrealistic rather than Blitz being wrong.
+    // composing region first. Leave this line out and the field holds
+    // "にほん日本語" — the harness being unrealistic, not Blitz being wrong.
     harness.ime(BlitzImeEvent::Preedit(String::new(), None));
     harness.ime(BlitzImeEvent::Commit("日本語".into()));
     harness.pump();
@@ -1078,12 +984,9 @@ fn composed_text_reaches_the_field() {
 
 /// **One press of an arrow key moves the caret one character.**
 ///
-/// It is a test about a *number*, and the number is one. On macOS the app
-/// receives such a key twice — the command AppKit resolved it into, and the key
-/// event behind it — and Blitz acts on both, so a field that does not cancel
-/// one of them moves two characters for every press. `edit` above delivers the
-/// pair the way the platform does; what is asserted here is that only one of
-/// them lands.
+/// On macOS the app receives such a key twice — the command AppKit resolved it
+/// into, and the key event behind it — and Blitz acts on both. `edit` delivers
+/// the pair the way the platform does; this asserts only one lands.
 #[test]
 fn an_arrow_moves_the_caret_one_character() {
     let mut harness = app();
@@ -1105,11 +1008,10 @@ fn an_arrow_moves_the_caret_one_character() {
 
 /// **Backspace deletes**, which on macOS it did not.
 ///
-/// `blitz-dom` leaves `Backspace` out of its key handling on macOS on purpose,
-/// because AppKit is supposed to send `deleteBackward:` instead and nothing was
-/// switching on the part of the window that receives it, so three presses of
-/// Backspace on "hello world" left "hello world". `open_the_text_input_client`
-/// in `ui.rs` is the fix and this is what it is for.
+/// `blitz-dom` leaves `Backspace` out of its macOS key handling on purpose,
+/// because AppKit is supposed to send `deleteBackward:` — and nothing was
+/// switching on the part of the window that receives it.
+/// `open_the_text_input_client` is the fix, and this is what it is for.
 #[test]
 fn backspace_deletes_the_character_before_the_caret() {
     let mut harness = app();
@@ -1150,14 +1052,13 @@ fn backspace_takes_a_selection_whole() {
     assert_eq!(harness.attr(".field", "value").as_deref(), Some(""));
 }
 
-/// **Option and an arrow jump a word**, which is what a Mac keyboard means by
-/// them, and it is AppKit rather than the app that decides so.
+/// **Option and an arrow jump a word**, and it is AppKit rather than the app
+/// that decides so.
 ///
-/// The app's part is to stay out of the way: `moveWordLeft:` is what the
-/// system's key-binding table resolves Option+Left into, `blitz-dom` already
-/// implements it, and cancelling the key event that arrives beside it is what
-/// stops the caret moving a word *and* a character. There is no equivalent
-/// binding to test anywhere else, which is why this one is macOS only.
+/// The app's part is to stay out of the way: `blitz-dom` already implements
+/// `moveWordLeft:`, and cancelling the key event beside it stops the caret
+/// moving a word *and* a character. No equivalent binding elsewhere, hence
+/// macOS only.
 #[cfg(target_os = "macos")]
 #[test]
 fn option_and_an_arrow_jump_a_word() {
@@ -1194,16 +1095,10 @@ fn action_modifier() -> keyboard_types::Modifiers {
 /// A click on a button takes the keyboard away from the field.
 ///
 /// Blitz walks up from the click target looking for something it knows how to
-/// focus, and a plain `<button>` is on none of its lists, so the focus lands
-/// on `<html>`. This is upstream's behaviour at the pinned revision and it is
-/// recorded rather than worked around, because for QRnew it is also what a
-/// browser does: click a button, and the field you were typing in blurs.
-///
-/// It used to matter for one place in particular: reading a code out of a
-/// file put the text in the field, so the app had to hand the keyboard back
-/// afterwards. It does not any more — what an image says is shown beside the
-/// button that read it — so nothing in QRnew now depends on this. **If this
-/// test starts failing, upstream has changed the rule** and the note in
+/// focus, and a plain `<button>` is on none of its lists, so the focus lands on
+/// `<html>`. Recorded rather than worked around — it is also what a browser
+/// does, and nothing in the app depends on it any more. **If this test starts
+/// failing, upstream has changed the rule** and the note in
 /// `dioxus-assessment.md` about handing the keyboard back can be dropped.
 #[test]
 fn clicking_a_chip_blurs_the_field() {
@@ -1233,14 +1128,9 @@ fn the_about_panel_opens_and_closes() {
 /// **The cross a sheet is closed by turns red under the pointer.**
 ///
 /// It has to be drawn rather than styled: CSS does not reach inside an SVG in
-/// Blitz, so `glyph_hover` in `ui.rs` draws the cross in both inks and
-/// `ui.css` shows one wrapper or the other. The two halves are in different
-/// files and neither says what the other is for, which is what this is here
-/// to hold together.
-///
-/// Measured rather than read off a style, because a hidden wrapper is a
-/// wrapper with no box: the one that is showing has the icon's width, and the
-/// one that is not has nothing.
+/// Blitz, so `glyph_hover` draws the cross in both inks and `ui.css` shows one
+/// wrapper or the other. Measured rather than read off a style, because a hidden
+/// wrapper has no box.
 #[test]
 fn the_close_cross_reddens_under_the_pointer() {
     let mut harness = app();
@@ -1273,17 +1163,10 @@ fn the_close_cross_reddens_under_the_pointer() {
 
 /// **The About panel names the version the crate was built at.**
 ///
-/// It was a `format!("Version {}", …)` — the one string in the window that was
-/// English rather than a translation. Fluent takes the number as an argument
-/// now, and this holds both halves of that: the key resolves, and the number
-/// in it is the one `cargo` built.
-///
-/// The isolates are Fluent's own. It wraps an interpolated argument in
-/// U+2068 / U+2069 so that a number keeps its direction inside a
-/// right-to-left sentence, and they are default-ignorable — measured on this
-/// renderer, they add exactly nothing to the painted width, where two visible
-/// characters in their place add 23 points. So they are stripped here rather
-/// than designed around.
+/// The isolates are Fluent's own — U+2068 / U+2069 around an interpolated
+/// argument, so a number keeps its direction in a right-to-left sentence. They
+/// are default-ignorable and add nothing to the painted width, so they are
+/// stripped here rather than designed around.
 #[test]
 fn the_about_panel_says_which_version_this_is() {
     let mut harness = app();
@@ -1324,11 +1207,9 @@ fn clicking_beside_the_about_panel_closes_it() {
 /// **A press that drifts is still a press.**
 ///
 /// Blitz turns a pointer that moves more than two pixels between down and up
-/// into a text-selection drag, and it does not dispatch a click at the end of
-/// one — so holding the button down for a moment, which is what most people do
-/// when they are reading the thing they are about to press, did nothing at all
-/// and selected the label instead. `user-select: none` in `ui.css` is the
-/// whole fix, and it is one line, which is exactly why this test exists.
+/// into a text-selection drag, and does not dispatch a click at the end of one,
+/// so a slow press did nothing and selected the label. `user-select: none` in
+/// `ui.css` is the whole fix — one line, which is why this test exists.
 #[test]
 fn a_press_that_drifts_still_counts() {
     let mut harness = app();
@@ -1361,13 +1242,9 @@ fn a_press_that_drifts_still_counts() {
 
 /// **The layout guarantee**, and the reason the interface is three columns.
 ///
-/// Using the colour picker must not move the code. In the single-column build
-/// it did — the picker was a block between the wells and the preview, so
-/// adjusting a colour pushed the thing being coloured off the bottom of the
-/// window. Here the picker is a column of its own, so the preview's rectangle
-/// is the same before and after — and the same again when the picker is
-/// pointed at the other colour, which is the one thing left that can change
-/// the rail's height.
+/// Using the colour picker must not move the code. In the single-column build it
+/// did. Here the picker is a column of its own, so the preview's rectangle is
+/// the same before and after — and the same again on the other colour.
 #[test]
 fn working_the_picker_does_not_move_the_code() {
     let mut harness = app();
@@ -1396,12 +1273,9 @@ fn working_the_picker_does_not_move_the_code() {
 
 /// **The one cost of the shape row that no decoding test can see.**
 ///
-/// All three shapes scan — `every_combination_of_shapes_scans` decodes each of
-/// them with a real reader — but decoding a rendered image is not the same
-/// thing as holding a phone up to a printed one. A rounded or dotted code
-/// gives a camera fewer clean edges, and it takes measurably longer to focus
-/// and lock on. That is a cost paid outside the repo, so the window says it,
-/// and it says it only when it applies.
+/// All three shapes scan — `every_combination_of_shapes_scans` decodes each with
+/// a real reader — but a rounded or dotted code gives a camera fewer clean edges
+/// and takes measurably longer to lock on. That cost is paid outside the repo.
 #[test]
 fn anything_but_square_says_what_it_costs() {
     let mut harness = app_filled("https://example.org");
@@ -1435,13 +1309,9 @@ fn anything_but_square_says_what_it_costs() {
 /// The three cautions are one banner, and the two in a rail come in the rail's
 /// own order.
 ///
-/// The same box is the load-bearing half. A window with three ways of saying
-/// "this still works, and here is what it costs" has three things to learn
-/// instead of one, and the second and third are read as something else. The
-/// order is the cards' order — margin, then shape — and it is pinned here so
-/// that moving a card is a decision somebody makes rather than one that
-/// happens. The colour caution is in the other rail, so it is held to the box
-/// and not to the order.
+/// The same box is the load-bearing half: three ways of saying "this still
+/// works, and here is what it costs" is three things to learn instead of one.
+/// The order is pinned so that moving a card is a decision somebody makes.
 #[test]
 fn the_cautions_are_all_the_same_banner() {
     let harness = app_after(&[
@@ -1473,11 +1343,9 @@ fn the_cautions_are_all_the_same_banner() {
 /// **The colour caution is a caution, not a failure.**
 ///
 /// `SAFE_CONTRAST` is deliberately well above where the app's own reader gives
-/// up — the argument is above the constant in `ui.rs` — and this is the half of
-/// that argument a test can hold: a code drawn at exactly the gap the app
-/// starts warning at still decodes. So the banner is the window saying it has
-/// stopped vouching, in a state where everything still works, which is the same
-/// thing the margin caution is.
+/// up — the argument is above the constant in `ui.rs` — and this is the half a
+/// test can hold: a code drawn at exactly the gap the app starts warning at
+/// still decodes.
 #[test]
 fn the_colour_caution_arrives_while_the_code_still_reads() {
     // A grey foreground on white, at the threshold. The greys are equal in all
@@ -1505,18 +1373,12 @@ fn the_colour_caution_arrives_while_the_code_still_reads() {
 /// **Two colours a scanner cannot tell apart are a code that does not scan,
 /// and the app is the only one in the room who knows.**
 ///
-/// It is the easiest mistake the window allows. The greyscale row is eight
-/// swatches in a line and the two on the end are white and near-white; a click
-/// four pixels from the one somebody meant paints the foreground the colour of
-/// the background, and what comes out is a blank square that saves, copies and
-/// exports exactly like a code. Nothing else in the window says so — the mat's
-/// dashed outline keeps the *preview* honest about where the paper ends, which
-/// is a different question.
+/// The easiest mistake the window allows: a click four pixels off in the
+/// greyscale row paints the foreground the colour of the background, and what
+/// comes out is a blank square that saves, copies and exports like a code.
 ///
-/// Luminance and not hue, which is the half worth testing rather than
-/// asserting: the palette's leaf green on its dark red is two colours nobody
-/// would call alike and a gap of 0.038 to a camera, which flattens the picture
-/// to grey before it looks for anything.
+/// Luminance and not hue, which is the half worth testing: the palette's leaf
+/// green on its dark red is a gap of 0.038 to a camera.
 #[test]
 fn the_colors_card_says_when_a_scanner_could_not_tell_them_apart() {
     let mut harness = app();
@@ -1554,17 +1416,13 @@ fn the_colors_card_says_when_a_scanner_could_not_tell_them_apart() {
 
 /// **The square holds still under the hand that is drawing on it.**
 ///
-/// The colour caution is a banner between the wells and the picker, so it
-/// moves the picker every time it comes or goes, and a drag is the one way of
-/// changing a colour where a pointer is on the picker while that happens. The
-/// jump is the visible half; the other half is that `element_coordinates` are
-/// measured against the square, so a square that has moved hands the same
-/// pointer a different colour and the rest of the drag lands somewhere nobody
-/// aimed at — and the colour that moved it can move it back.
+/// The colour caution is a banner between the wells and the picker, so it moves
+/// the picker every time it comes or goes — and a drag is the one way to change
+/// a colour with a pointer already on the picker. The jump is the visible half;
+/// the other is that `element_coordinates` are measured against the square, so a
+/// square that has moved hands the same pointer a different colour.
 ///
-/// So the caution is settled at the ends of a drag and not during one. The
-/// wait costs nothing: the pointer is still on the colour that earned the
-/// banner when the banner arrives.
+/// So the caution is settled at the ends of a drag, not during one.
 #[test]
 fn the_caution_waits_for_the_drag_to_finish() {
     let mut harness = app();
@@ -1603,12 +1461,10 @@ fn the_caution_waits_for_the_drag_to_finish() {
     );
 }
 
-/// **The inset's size is a control now, and it reaches the drawn code.**
+/// **The inset's size is a control, and it reaches the drawn code.**
 ///
-/// `qrnew-core` has carried `Logo::size` since before the rewrite and the
-/// window had no way to ask for anything but the default. The picture's box on
-/// the stage is what says it arrived: three sizes are three different widths,
-/// and the order they come in is the order the row offers.
+/// The picture's box on the stage is what says it arrived: three sizes are three
+/// different widths, in the order the row offers them.
 #[test]
 fn the_inset_row_draws_the_picture_at_the_size_it_asks_for() {
     let mut harness = app_with_inset("https://example.org/a-long-enough-address", "fold");
@@ -1636,12 +1492,10 @@ fn the_inset_row_draws_the_picture_at_the_size_it_asks_for() {
 
 /// A size the code has no room for is offered as held rather than as a lie.
 ///
-/// The ceiling is not a constant: a logo has to stay eight modules clear of
-/// every edge, which is a fixed *number of modules* and so a share of the code
-/// that grows with it. On the smallest code there is — a few characters, which
-/// with an inset is all a 21-module code holds — a quarter of the width does
-/// not fit, and one line of text later it does. The row asks the code in front
-/// of it, so it can only offer what that code can take.
+/// The ceiling is not a constant: a logo stays eight modules clear of every
+/// edge, a fixed *number of modules* and so a share that grows with the code. On
+/// a 21-module code a quarter of the width does not fit, and one line of text
+/// later it does.
 #[test]
 fn a_code_too_small_for_a_size_does_not_offer_it() {
     let mut harness = app_with_inset("hi", "fold");
@@ -1678,12 +1532,10 @@ fn a_code_too_small_for_a_size_does_not_offer_it() {
 
 /// Text deleted out from under a size that fitted leaves a code, not a hole.
 ///
-/// This is the half the row cannot prevent: the size is chosen against one
-/// code and the next keystroke makes a different one. `qrnew-core` refuses a
-/// logo that does not fit rather than shrinking it — deliberately, since only
-/// the caller knows which of the two to give up — and the app is the caller,
-/// and it gives up the size. Drawing nothing would be the one answer that is
-/// certainly wrong: the text is fine and the picture is fine.
+/// The half the row cannot prevent: the size is chosen against one code and the
+/// next keystroke makes a different one. `qrnew-core` refuses a logo that does
+/// not fit rather than shrinking it, and the app gives up the size — drawing
+/// nothing would be the one certainly wrong answer.
 #[test]
 fn a_shrinking_code_keeps_its_picture_and_says_the_size_is_held() {
     let mut harness = app_with_inset("https://example.org", "fold");
@@ -1720,44 +1572,20 @@ fn a_shrinking_code_keeps_its_picture_and_says_the_size_is_held() {
     );
 }
 
-/// Everything is on screen at once: neither rail has to be scrolled to reach
-/// the bottom of it.
+/// Everything is on screen at once: neither rail has to be scrolled.
 ///
-/// This is what the second column bought, and it is worth asserting rather
-/// than eyeballing, because one more control in either card takes it away
-/// again without anything else looking wrong.
+/// What the second column bought, and worth asserting rather than eyeballing —
+/// one more control in either card takes it away without anything looking wrong.
 ///
-/// **Both states of the inset card**, because they are different heights and
-/// the taller one is not the one the app opens in.
+/// **Both states of the inset card**, which are different heights. **At 820 as
+/// well as 860**, because 860 is the un-maximized fallback: maximized on a
+/// 1512x982 laptop screen the menu bar, Dock and title bar leave 801 points.
+/// **And each caution**, which are states nobody reaches without touching a
+/// control.
 ///
-/// **And both at 820 as well as at 860**, because 860 is the size the window
-/// falls back to and not the size it opens at. Maximized on a 1512x982 laptop
-/// screen, the menu bar and the Dock leave 833 points of window, of which the
-/// title bar takes another 32 — so the number the guarantee has to hold at is
-/// the smaller one. It did not, when the Inset card was first written: the
-/// colours rail went over by fifteen pixels and quietly scrolled, which is how
-/// the picker came to be thirty pixels shorter than it was.
-///
-/// **And the margin caution**, which is what this test was missing: it only
-/// ever looked at states nobody had touched a control to reach, so that
-/// caution had been overflowing the rail at 820 since it was written and no
-/// run said so. It fits now — a `<p>` that never zeroed the user agent's own
-/// margin was thirty points of it, and the card shows its hint or its caution
-/// rather than both.
-///
-/// **And the colour caution**, which is a banner added to the tighter rail
-/// with no hint to trade for it, and which the rail turns out to hold at both
-/// heights. That is worth a row here rather than only the weaker promise: it
-/// is the state a click on the wrong swatch reaches, so it is the caution most
-/// people will actually see.
-///
-/// The shape caution is the one state a rail cannot always take, and
-/// `a_caution_is_never_the_thing_that_scrolls` is what covers it instead: it
-/// is a card's worth of addition with no hint to trade for it, and in the
-/// wider face a Linux machine picks for `system-ui` the Shape card ends five
-/// points past the rail at 820. Five points of a bottom edge, under a sentence
-/// that is itself fully on screen — which is the line that test holds, and as
-/// close to this one as the room in that rail goes.
+/// The shape caution is the one a rail cannot always take — in the wider face a
+/// Linux machine picks for `system-ui` the Shape card ends five points past the
+/// rail at 820 — and `a_caution_is_never_the_thing_that_scrolls` covers it.
 #[test]
 fn no_control_is_below_the_fold() {
     for height in [860, 820] {
@@ -1786,24 +1614,14 @@ fn no_control_is_below_the_fold() {
 
 /// Whatever else a rail has to scroll, the caution is not it.
 ///
-/// This is the weaker promise that survives where `no_control_is_below_the_
-/// fold` cannot reach: a caution is a banner of sixty-odd points appearing in
-/// a rail that is already nearly full, and the shape's has no hint to take the
-/// room from the way the margin's does. So the guarantee is about the one box
-/// that matters rather than about the whole column — the sentence saying a
-/// code may be slower to scan is on screen at the moment it becomes true, and
-/// anything that has to go under the fold goes under it from further down.
+/// The weaker promise that survives where `no_control_is_below_the_fold` cannot
+/// reach: a caution is sixty-odd points arriving in a rail already nearly full,
+/// and the shape's has no hint to take the room from. So the guarantee is about
+/// the one box that matters rather than the whole column.
 ///
-/// Each caution on its own, which is how they arrive. Both at once, at 820 in
-/// a wide face, is twenty-five points past what the rail holds; the shape's is
-/// the lower of the two and it is the one that would go under, and the answer
-/// to that state is the scrollbar the rail already has.
-///
-/// The colour caution is in the other rail and is held to the same promise
-/// here, though it does not need it: `no_control_is_below_the_fold` covers
-/// that rail in the same state, which is the stronger claim. It is in this
-/// list so that the day it stops being true, the failure says which of the two
-/// promises went.
+/// Each caution on its own, which is how they arrive. Both at once, at 820 in a
+/// wide face, is twenty-five points past what the rail holds, and the answer to
+/// that is the scrollbar the rail already has.
 #[test]
 fn a_caution_is_never_the_thing_that_scrolls() {
     for height in [860, 820] {
@@ -1840,18 +1658,10 @@ fn a_caution_is_never_the_thing_that_scrolls() {
     }
 }
 
-/// **A sheet is left from its own top corner**, which is where a panel has
-/// been left from for about fifteen years.
-///
-/// It used to be a Close button on a row of its own at the foot of the panel,
-/// which cost a button's worth of height to say what the panel's shape already
-/// said — and in the About sheet it sat beside *View on GitHub* wearing the
-/// same chip, so the thing that goes somewhere and the thing that undoes the
-/// opening looked alike. This is the claim that replaced it: right-hand side,
-/// on the title's own line, close enough to the edge to read as the corner.
-///
-/// The last assertion is the one that matters most and is the easiest to lose
-/// while moving a button — it still closes the sheet.
+/// **A sheet is left from its own top corner**: right-hand side, on the title's
+/// own line, close enough to the edge to read as the corner. The last assertion
+/// is the one that matters most and the easiest to lose while moving a button —
+/// it still closes the sheet.
 #[test]
 fn a_sheet_closes_from_its_own_corner() {
     for (open, sheet, close) in [
@@ -1889,16 +1699,13 @@ fn a_sheet_closes_from_its_own_corner() {
 
 /// **A two-finger swipe across a rail moves nothing**, in either direction.
 ///
-/// It used to move the control rail fifty-five points left and leave the
-/// Content card hanging off the side of the window, and the cause is a scroll
-/// area that the boxes on screen do not justify — the whole of it is above
-/// `overflow-x` in `ui.css`. The swipe is what a person does; the wheel event
-/// is how it arrives, so that is what this sends, at a delta far past anything
-/// a touchpad produces so the assertion is about the clamp rather than about
-/// the size of the push.
+/// It used to move the control rail fifty-five points left and leave the Content
+/// card hanging off the window; the cause is a scroll area the boxes on screen
+/// do not justify — the whole of it is above `overflow-x` in `ui.css`. The wheel
+/// event is how a swipe arrives, sent at a delta far past anything a touchpad
+/// produces, so the assertion is about the clamp.
 ///
-/// Both rails and both directions, because the bug was in only one of each and
-/// a fix that only covered that one would be a coincidence rather than a rule.
+/// Both rails and both directions, because the bug was in one of each.
 #[test]
 fn a_rail_does_not_slide_sideways() {
     let mut harness = app();
@@ -1940,11 +1747,8 @@ fn a_rail_does_not_slide_sideways() {
     }
 }
 
-/// The controls and the code are side by side, not stacked.
-///
-/// The code is the middle column, so this is a rail on either side of it and
-/// neither one touching it — which is two assertions rather than the one it
-/// was when both rails were on the same side.
+/// The controls and the code are side by side, not stacked: the code is the
+/// middle column, so this is a rail on either side and neither touching it.
 #[test]
 fn the_controls_and_the_code_are_in_separate_columns() {
     let mut harness = app();
@@ -1975,12 +1779,8 @@ fn the_controls_and_the_code_are_in_separate_columns() {
 }
 
 /// **Blitz has no `placeholder` attribute**, so the app draws its own prompt.
-///
-/// This is the test that would have caught the previous build setting one and
-/// getting nothing: it asserts on what is on screen, not on what was asked
-/// for. The line then falls silent — it used to count the characters typed,
-/// which is a running total of nothing — and the point of this half is that
-/// falling silent does not move the button underneath it.
+/// This asserts on what is on screen, not on what was asked for — and that the
+/// line falling silent does not move the button underneath it.
 #[test]
 fn the_field_has_a_prompt_and_then_falls_silent() {
     let mut harness = app();
@@ -2008,11 +1808,8 @@ fn the_field_has_a_prompt_and_then_falls_silent() {
     );
 }
 
-/// Text past what the densest code can hold says so.
-///
-/// The libcosmic build — and this one until now — showed the empty-stage
-/// placeholder and explained nothing, which reads as the app having stopped
-/// working rather than as the input being too long.
+/// Text past what the densest code can hold says so, rather than showing the
+/// empty-stage placeholder — which reads as the app having stopped working.
 #[test]
 fn text_too_long_for_a_code_says_why() {
     let harness = app_filled(&"x".repeat(3000));
@@ -2027,17 +1824,13 @@ fn text_too_long_for_a_code_says_why() {
 
 /// **The marker goes where the pointer went.**
 ///
-/// The picker used to draw it with `radial-gradient(circle at Xpx Ypx, …)`,
-/// and Blitz resolves that centre in CSS pixels and then adds it to a
-/// rectangle it has already measured in device pixels. On a 1× display that is
-/// the same number and everything looks right; on a 2× display the mark landed
-/// at half the offset it was given, so the colour under the pointer was
-/// correct and the ring was somewhere else — which is what it looked like from
-/// the outside: "the colour follows the cursor, the circle does not".
+/// The picker used to draw it with `radial-gradient(circle at Xpx Ypx, …)`, and
+/// Blitz resolves that centre in CSS pixels then adds it to a rectangle already
+/// measured in device pixels — so on a 2× display the mark landed at half the
+/// offset, and the colour under the pointer was right while the ring was not.
 ///
-/// `background-position` *is* multiplied by the scale, so the marker is placed
-/// with that instead. This test pins both halves: the position tracks the
-/// click, and no radial gradient has crept back in.
+/// `background-position` *is* multiplied by the scale. This pins both halves:
+/// the position tracks the click, and no radial gradient has crept back in.
 #[test]
 fn the_picker_marks_where_it_was_clicked() {
     let mut harness = app();
@@ -2075,11 +1868,8 @@ fn the_picker_marks_where_it_was_clicked() {
     );
 }
 
-/// The wells point the picker at one colour or the other.
-///
-/// They used to open and close it, which is what made the second column worth
-/// having: with the picker always on screen the wells only have to say what it
-/// is editing, and switching between them is one click rather than two.
+/// The wells point the picker at one colour or the other: with the picker always
+/// on screen they only say what it is editing, and switching is one click.
 #[test]
 fn the_wells_choose_what_the_picker_edits() {
     let mut harness = app();
@@ -2112,15 +1902,12 @@ fn the_wells_choose_what_the_picker_edits() {
 /// **A stepper button says when it has nowhere to go.**
 ///
 /// The margin is clamped at both ends, so at zero the minus and at sixteen the
-/// plus were full-strength targets that answered a press by doing nothing —
-/// and nothing is also what a press that missed looks like. Both are dimmed
-/// and inert at their own end and live at the other, which is the half that
-/// would be easy to lose: a control that is always off is no better than one
-/// that is always on.
+/// plus answered a press by doing nothing — which is also what a press that
+/// missed looks like. Both are dimmed at their own end and live at the other.
 ///
-/// Checked by class rather than by colour, because the ink is spread across
-/// four places — two `<svg>`s per sign, one per palette — and the class is the
-/// one fact all of them follow from.
+/// Checked by class rather than colour, because the ink is spread across four
+/// places (two `<svg>`s per sign, one per palette) and the class is the one fact
+/// they all follow from.
 #[test]
 fn a_stepper_button_dims_at_its_own_end() {
     let mut harness = app();
@@ -2187,11 +1974,9 @@ fn a_stepper_button_dims_at_its_own_end() {
     );
 }
 
-/// The margin control widens and narrows the blank border.
-///
-/// `modules_across` reads the SVG's own `viewBox`, and the quiet zone is part
-/// of that box on both sides — so a margin one module wider is a document two
-/// modules wider, which is what makes this measurable from the outside at all.
+/// The margin control widens and narrows the blank border. `modules_across`
+/// reads the `viewBox`, and the quiet zone is part of that box on both sides, so
+/// a margin one module wider is a document two modules wider.
 #[test]
 fn the_stepper_resizes_the_margin() {
     let mut harness = app();
@@ -2267,12 +2052,8 @@ fn the_margin_field_clamps_what_it_is_given() {
     );
 }
 
-/// The caution about narrow margins is there when it applies and not before.
-///
-/// It used to be the second half of the sentence under the card, printed
-/// whether or not it was true of the value on screen — which is the shape of
-/// warning that gets read once and then stops being read. It is now beside the
-/// number, and it appears the moment somebody goes under two.
+/// The caution about narrow margins is there when it applies and not before: it
+/// is beside the number, and it appears the moment somebody goes under two.
 #[test]
 fn the_margin_warning_only_appears_below_two() {
     let mut harness = app();
@@ -2300,11 +2081,10 @@ fn the_margin_warning_only_appears_below_two() {
 
 /// An emptied margin field fills itself back in when the keyboard leaves it.
 ///
-/// A half-typed number is allowed to sit in the field — that is the only way
-/// to replace a value by typing — but the code goes on being drawn at the last
-/// number that parsed. So an empty field left behind is the app showing one
-/// margin and the field claiming another, and whatever is applied is what has
-/// to come back.
+/// A half-typed number may sit in the field — that is the only way to replace a
+/// value by typing — but the code goes on being drawn at the last number that
+/// parsed, so an empty field left behind is the app showing one margin and the
+/// field claiming another.
 #[test]
 fn an_emptied_margin_field_restores_what_is_applied() {
     let mut harness = app();
@@ -2345,19 +2125,12 @@ fn an_emptied_margin_field_restores_what_is_applied() {
 /// **The window is the same width on both sides of the code**, which stopped
 /// being free the moment the stage moved into the middle.
 ///
-/// A rail reserves eight points on its right for the overlay scrollbar that
-/// may or may not come down it. While both rails were on the same side of the
-/// stage, both of those gutters fell inside a gap and neither was visible;
-/// with a rail on each side, the far one's gutter is against the window's own
-/// edge, and eight points of air on one side only is the kind of thing that is
-/// seen without being noticed. `.rail-colors` and `.body`'s asymmetric padding
-/// are the two halves of the answer, and this is what says they still add up:
-/// the cards are the same width, they end the same distance from their edges,
-/// and the code is the same distance from each of them.
-///
-/// Measured at the width the window falls back to and at the narrowest it can
-/// be dragged, because the stage is the only flexible column and both numbers
-/// are its.
+/// A rail reserves eight points on its right for an overlay scrollbar. With a
+/// rail on each side, the far one's gutter is against the window's own edge, and
+/// eight points of air on one side only is seen without being noticed.
+/// `.rail-colors` and `.body`'s asymmetric padding are the answer, and this says
+/// they still add up — at the fallback width and at the narrowest drag, because
+/// the stage is the only flexible column.
 #[test]
 fn the_stage_sits_evenly_between_the_two_rails() {
     let mut harness = app();
@@ -2390,11 +2163,9 @@ fn the_stage_sits_evenly_between_the_two_rails() {
     }
 }
 
-/// The code starts at the height the controls start at.
-///
-/// Centring the stage put the one thing the window is about lower than
-/// everything beside it. This is a layout claim rather than a taste one: the
-/// three columns share a top edge.
+/// The code starts at the height the controls start at: the three columns share
+/// a top edge, rather than the stage being centred and sitting lower than
+/// everything beside it.
 #[test]
 fn the_code_is_level_with_the_controls() {
     let mut harness = app();
@@ -2414,9 +2185,8 @@ fn the_code_is_level_with_the_controls() {
 
 /// **Every hex the app writes is lower case.**
 ///
-/// It is one string built in one place — `Rgb::to_hex` — and this is the test
-/// that says so from the outside: the tile somebody reads the colour off, the
-/// field they edit it in, and the document that gets saved.
+/// One string built in one place — `Rgb::to_hex` — and this says so from the
+/// outside: the tile, the field, and the document that gets saved.
 #[test]
 fn the_app_writes_hex_in_lower_case() {
     let mut harness = app();
@@ -2440,28 +2210,20 @@ fn the_app_writes_hex_in_lower_case() {
 
 /// **The number sits in the middle of its field.**
 ///
-/// `text-align: center` is what a browser would need and what this field used
-/// to carry, and in Blitz it does nothing at all: a text field's content
-/// belongs to a `parley::PlainEditor` that `create_text_editor` hands a font
-/// size, a line height and a brush — not an alignment, and not a width to
-/// align inside. The glyphs are painted at the content box's left edge, so the
-/// number sat against the left border with a stepper button on either side of
-/// it, looking like a value that had come loose.
+/// `text-align: center` does nothing in Blitz: a text field's content belongs to
+/// a `parley::PlainEditor` that `create_text_editor` hands a font size, a line
+/// height and a brush — not an alignment, and not a width to align inside. The
+/// glyphs are painted at the content box's left edge.
 ///
-/// The centring is arithmetic now, done with `padding-left` in `ch` units, and
-/// this measures the result rather than the intent: where the text is actually
-/// painted, against the middle of the box it is painted in. It is also what
-/// ties `COUNT_MIDDLE` in `ui.rs` to `.count`'s width in `ui.css` — change one
-/// without the other and the number comes off centre here.
+/// The centring is arithmetic in `ch` units, and this measures the result rather
+/// than the intent. It also ties `COUNT_MIDDLE` in `ui.rs` to `.count`'s width.
 ///
-/// **The pixel of slack is Blitz's, and it is worth knowing about.** `1ch` is
-/// resolved by `BlitzFontMetricsProvider`, which asks fontique for the advance
-/// of `0` in the *specified* family list; the glyphs are painted by parley,
-/// which resolves that same list its own way. On macOS the two land on faces
-/// 5% apart — `ch` comes back 10px where the digit actually drawn is 9.45px at
-/// this size — so two digits end up half a pixel left of centre. The digits
-/// themselves are tabular, which is what keeps the error to that: `16` is
-/// exactly twice the width of `4`.
+/// **The pixel of slack is Blitz's.** `1ch` is resolved by
+/// `BlitzFontMetricsProvider` asking fontique for the advance of `0` in the
+/// *specified* family list; parley resolves that list its own way. On macOS the
+/// two land on faces 5% apart — `ch` comes back 10px where the digit drawn is
+/// 9.45px — so two digits sit half a pixel left of centre. The digits are
+/// tabular, which is what keeps the error to that.
 #[test]
 fn the_margin_number_is_centered_in_its_field() {
     let mut harness = app();
@@ -2511,13 +2273,9 @@ fn the_margin_number_is_centered_in_its_field() {
     }
 }
 
-/// The caution about a narrow margin is a banner, not a footnote.
-///
-/// It used to be the last item in the stepper's row, in whatever space the two
-/// buttons and the field left over — 12.5px of grey-gold beside a 17px number.
-/// That is the size and the position of an aside, and this one is the only
-/// line in the window that says a code might not scan. It is a block of its
-/// own under the control now, the full width of the card, with an icon.
+/// The caution about a narrow margin is a banner, not a footnote: a block of its
+/// own under the control, the full width of the card, with an icon. It is the
+/// only line in the window that says a code might not scan.
 #[test]
 fn the_margin_warning_is_a_banner_under_the_control() {
     let mut harness = app();
@@ -2551,17 +2309,14 @@ fn the_margin_warning_is_a_banner_under_the_control() {
 
 /// **A picture reaches the middle of the code.**
 ///
-/// The whole path, end to end: the bytes are read off disk, the format is
-/// worked out from the bytes rather than from the file's name, and they come
-/// out again on the stage, in the hole the code left for them. The card shows
-/// what was chosen, so that a picture that has landed somewhere unexpected can
-/// be told from one that was never read.
+/// The whole path: bytes read off disk, the format worked out from the bytes
+/// rather than the file's name, and out again on the stage in the hole the code
+/// left. The card shows what was chosen, so a picture that landed somewhere
+/// unexpected can be told from one that was never read.
 ///
-/// It is the layer that is checked rather than the document, because the
-/// document on screen does not carry the picture any more — see
-/// `the_picture_on_the_stage_is_where_the_document_puts_it` for why. What gets
-/// saved is still one document with everything in it, which is `qrnew-core`'s
-/// to prove and does.
+/// The layer is checked rather than the document, because the document on screen
+/// does not carry the picture — see
+/// `the_picture_on_the_stage_is_where_the_document_puts_it`.
 #[test]
 fn an_inset_reaches_the_code_and_the_card() {
     let harness = app_with_inset("https://example.org", "reaches");
@@ -2588,12 +2343,9 @@ fn an_inset_reaches_the_code_and_the_card() {
 
 /// **An inset takes error correction over, and the row says so.**
 ///
-/// `Qr::new` raises the level to `High` whenever there is a logo, whatever it
-/// was asked for — the modules the picture covers have to be paid for
-/// somewhere. Before this the four buttons went on showing 15% while the code
-/// was being drawn at 30%, which is the interface lying about the file it is
-/// about to save. The choice underneath is remembered rather than overwritten,
-/// so removing the picture gives it back.
+/// `Qr::new` raises the level to `High` whenever there is a logo, so a row still
+/// showing 15% while the code is drawn at 30% is the interface lying about the
+/// file it is about to save. The choice underneath is remembered.
 #[test]
 fn an_inset_holds_error_correction_at_thirty_percent() {
     let mut harness = app_with_inset("https://example.org", "correction");
@@ -2639,12 +2391,8 @@ fn an_inset_holds_error_correction_at_thirty_percent() {
 }
 
 /// Text that no longer fits *because* of the inset says which two things can
-/// give.
-///
-/// Error correction at 30% costs capacity, so an inset can be what takes a
-/// code past what it can hold. "That is more text than a single QR code can
-/// hold" would be true and useless there: the text is not the only thing that
-/// can move.
+/// give: error correction at 30% costs capacity, so "more text than a QR code
+/// can hold" would be true and useless.
 #[test]
 fn text_too_long_with_an_inset_says_the_inset_can_go() {
     // Comfortably inside what a code holds at 15%, and past what one holds at
@@ -2661,18 +2409,14 @@ fn text_too_long_with_an_inset_says_the_inset_can_go() {
 
 /// **`Copied.` lets go of the button again.**
 ///
-/// A confirmation that stays up stops being a confirmation and becomes the
-/// button's name, and then it is a claim about the clipboard that nothing is
-/// checking. It comes down after `CONFIRM_FOR`, on a countdown that runs on a
-/// thread of its own and wakes the app when it finishes — which is the half of
-/// this that a unit test cannot reach: `a_countdown_finishes_when_it_says_it_will`
-/// proves the timer fires and wakes its waker, and this proves the wake-up
-/// travels through Blitz's event loop and back into the document.
+/// A confirmation that stays up becomes the button's name, and then it is a
+/// claim about the clipboard nothing is checking. It comes down after
+/// `CONFIRM_FOR`, on a countdown running on its own thread:
+/// `a_countdown_finishes_when_it_says_it_will` proves the timer fires, and this
+/// proves the wake-up travels through Blitz's event loop and back.
 ///
-/// **Conditional on there being a clipboard.** Raising the confirmation means
-/// actually putting an image on one, and `arboard` has nothing to talk to on a
-/// CI runner with no display. Where there is no clipboard the button says what
-/// it always said, and the test has nothing to check.
+/// **Conditional on there being a clipboard** — `arboard` has nothing to talk to
+/// on a CI runner with no display.
 #[test]
 fn a_copied_button_goes_back_to_its_own_name() {
     let mut harness = app_filled("https://example.org");
@@ -2699,24 +2443,16 @@ fn a_copied_button_goes_back_to_its_own_name() {
     );
 }
 
-/// **A picture larger than the renderer's texture atlas is scaled down as it
-/// is taken in, not carried at the size it arrived.**
+/// **A picture larger than the renderer's texture atlas is scaled down as it is
+/// taken in.**
 ///
-/// This is the crash that made the app close: `vello_hybrid` keeps its images
-/// in a 4096-pixel atlas and does not draw one that will not fit — it refuses,
-/// and unwraps the refusal. Any photograph off a phone is over that line, and
-/// choosing one took the window with it.
+/// The crash that closed the app: `vello_hybrid` keeps its images in a
+/// 4096-pixel atlas and does not draw one that will not fit — it refuses, and
+/// unwraps the refusal. Any photograph off a phone is over that line.
 ///
 /// Checked on what reaches the screen rather than on `shrink_logo`, which
-/// `qrnew-core` tests on its own: what is worth proving here is that a picture
-/// coming through the one door there is comes out the other side already
-/// small.
-///
-/// The picture is drawn as its own layer over the code now, so the `<img>` on
-/// the stage is where it is read from — and the same bytes are what the code
-/// is built with, so measuring one measures both. That layer is also the
-/// second half of the answer to this crash: it is a size the atlas can take,
-/// *and* it is uploaded once instead of once per keystroke.
+/// `qrnew-core` tests on its own. The same bytes build the code, so measuring
+/// the layer measures both.
 #[test]
 fn a_picture_too_large_to_carry_is_scaled_down_as_it_is_taken_in() {
     let path = a_large_image("large");
@@ -2746,18 +2482,14 @@ fn a_picture_too_large_to_carry_is_scaled_down_as_it_is_taken_in() {
 
 /// **The picture on the stage is where the saved document puts it.**
 ///
-/// The preview is two layers: the code with a hole where the inset goes, and
-/// the picture laid into the hole. That is not a nicety — handing the renderer
-/// the picture inside a *new* document on every keystroke fills
-/// `vello_hybrid`'s image atlas, which keys what it has already uploaded by an
-/// identity counter and frees nothing, and the end of that is
-/// `AtlasLimitReached` unwrapped two crates down. At the 512-pixel cap
-/// `shrink_logo` imposes, eight atlases of 4096 square hold 392 of them.
+/// The preview is two layers: the code with a hole where the inset goes, and the
+/// picture laid into it. That is not a nicety — the picture inside a *new*
+/// document on every keystroke fills `vello_hybrid`'s image atlas, which keys
+/// uploads by an identity counter and frees nothing, ending in
+/// `AtlasLimitReached` two crates down.
 ///
-/// Two layers are only worth having if they land as one, and `qrnew-core`'s
-/// own tests only go as far as the numbers it hands over. This is the other
-/// half: that the window puts the picture where it was told to, in points on
-/// the screen.
+/// Two layers are only worth having if they land as one, and this is the half
+/// `qrnew-core`'s own tests cannot reach: points on the screen.
 #[test]
 fn the_picture_on_the_stage_is_where_the_document_puts_it() {
     let harness = app_with_inset("https://example.org", "spot");
@@ -2771,11 +2503,10 @@ fn the_picture_on_the_stage_is_where_the_document_puts_it() {
     let code = harness.layout_rect("[data-preview]");
     let inset = harness.layout_rect("[data-preview-inset]");
 
-    // **Over the code, not under it**, which layout alone cannot say and a
-    // headless harness cannot paint. Hit testing is the way to ask: it walks
-    // `paint_children` in reverse, so the node it returns for a point is the
-    // one drawn last there. A picture in exactly the right place and behind
-    // the code it belongs in front of would pass every other line here.
+    // **Over the code, not under it**, which layout alone cannot say. Hit
+    // testing walks `paint_children` in reverse, so the node it returns is the
+    // one drawn last there. A picture in the right place and behind the code
+    // would pass every other line here.
     let (x, y) = harness.center_of("[data-preview-inset]");
     assert_eq!(
         harness.hit_node(x, y),
@@ -2812,19 +2543,14 @@ fn the_picture_on_the_stage_is_where_the_document_puts_it() {
 
 /// **The theme is the desktop's until somebody says otherwise.**
 ///
-/// Three answers, and two mechanisms behind them that have to agree. The
-/// palette is a class on `.app` — a class rather than a media query because
-/// nothing a component can call moves `prefers-color-scheme`, and because
-/// macOS stops reporting theme changes the moment the app sets an appearance
-/// of its own. The *icons* cannot be a class at all: an icon's ink is a
-/// presentation attribute on an SVG that Blitz hands to `usvg` as a document
-/// of its own, so `glyph` in `ui.rs` draws each one twice and `ui.css` hides
-/// one of the pair.
+/// Three answers, and two mechanisms that have to agree. The palette is a class
+/// on `.app`, because nothing a component can call moves `prefers-color-scheme`.
+/// The *icons* cannot be a class at all: an icon's ink is a presentation
+/// attribute on an SVG Blitz hands to `usvg` as its own document, so `glyph`
+/// draws each one twice and `ui.css` hides one.
 ///
-/// If those two ever disagree the window is half-themed — dark surfaces under
-/// icons drawn for a light one — and nothing fails until somebody looks. So
-/// each case below checks both: the class the app is wearing, and which half
-/// of every icon pair survived layout.
+/// If those two disagree the window is half-themed and nothing fails until
+/// somebody looks, so each case checks both.
 #[test]
 fn the_theme_is_the_desktops_until_somebody_picks_one() {
     // How many of a class are actually laid out. A hidden icon keeps its node
@@ -2888,17 +2614,14 @@ fn the_theme_is_the_desktops_until_somebody_picks_one() {
 
 /// **The code on the stage is the code in the file.**
 ///
-/// The preview is markup dropped into the stage rather than a `data:` URL on
-/// an `<img>`, so what `usvg` draws is the `<svg>` element Blitz parsed out of
-/// that markup and then serialized again — not the bytes `qrnew-core` handed
-/// over. This is the test that the round trip changes nothing, and it is what
-/// every assertion in this file that goes through [`preview`] rests on.
+/// The preview is markup dropped into the stage, so what `usvg` draws is the
+/// `<svg>` Blitz parsed out of that markup and serialized again — not the bytes
+/// `qrnew-core` handed over. Every assertion going through [`preview`] rests on
+/// this round trip changing nothing.
 ///
-/// The two differences it does allow are the two [`body`] normalizes, and they
-/// are checked here rather than taken on trust: the XML declaration is not an
-/// element and does not survive being parsed into one, and Blitz writes a
-/// space before the slash of an empty element. The second is counted, so a
-/// third difference cannot hide inside the substitution.
+/// The two differences it allows are the two [`body`] normalizes, checked here
+/// rather than taken on trust. The second is counted, so a third difference
+/// cannot hide inside the substitution.
 #[test]
 fn the_code_on_the_stage_is_the_code_in_the_file() {
     // A style with something in every field the document can carry: a colour
@@ -2953,21 +2676,14 @@ fn the_code_on_the_stage_is_the_code_in_the_file() {
 
 /// **Changing the theme does not take the code off the stage.**
 ///
-/// It did. Picking a theme left the code — and the picture laid over it — with
-/// a box 458 points wide and *nothing high*, so the code vanished and the mat
-/// behind it, which is painted in the code's own background colour, was all
-/// that was left on the stage. Which looks like the foreground of the code
-/// being deleted, and lasts until the next keystroke builds the node again:
-/// changing the theme back does not bring it back.
+/// It did: picking a theme left the code — and the picture over it — 458 points
+/// wide and *nothing high*, so only the mat was left, which looks like the
+/// code's foreground being deleted and lasts until the next keystroke.
 ///
-/// The cause and the fix are above `.code > .doc` in `ui.css`. What matters
-/// here is that the check has to be made on the *box*, not on the document:
-/// the markup was right the whole time, so [`preview`] — which every other
-/// test in this file goes through — says the app is fine. Both layers are
-/// checked, and the picture is an `<img>` with a `data:` URL on it, which is
-/// what [`app_drawn`] is for.
-///
-/// Both directions, too: away from the default and back to it.
+/// The cause and the fix are above `.code > .doc` in `ui.css`. What matters here
+/// is that the check is on the *box*, not the document: the markup was right the
+/// whole time, so [`preview`] says the app is fine. The picture needs a `data:`
+/// URL actually fetched, which is what [`app_drawn`] is for.
 #[test]
 fn the_theme_does_not_take_the_code_off_the_stage() {
     let image = an_image("theme-stage");
@@ -3001,17 +2717,12 @@ fn the_theme_does_not_take_the_code_off_the_stage() {
 
 /// **A choice is written down, and nothing else is.**
 ///
-/// The theme is the one thing QRnew keeps between runs, and the writing is a
-/// closure handed in as a context rather than a call into `settings` — so this
-/// can watch it happen without a file, and so the rest of the suite, which
-/// clicks through this sheet several times, cannot edit the settings of
-/// whoever runs it.
+/// The writing is a closure handed in as a context rather than a call into
+/// `settings`, so this can watch it happen without a file and the rest of the
+/// suite cannot edit the settings of whoever runs it.
 ///
-/// The negative half matters as much as the positive one. Opening the sheet is
-/// not a decision, and a window seeded by `--theme` or by the saved value
-/// itself is not somebody changing their mind; either writing back would turn
-/// a screenshot flag into a preference and make the file impossible to reason
-/// about.
+/// The negative half matters as much: opening the sheet is not a decision, and a
+/// window seeded by `--theme` or the saved value is not a change of mind.
 #[test]
 fn the_sheet_writes_a_choice_down_and_nothing_else() {
     let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -3052,11 +2763,8 @@ fn the_sheet_writes_a_choice_down_and_nothing_else() {
     assert_eq!(seen().len(), 2, "and closing the sheet is not one");
 }
 
-/// **The sheet opens, chooses, and closes.**
-///
-/// The theme is the one setting in the app that is not a control on the face
-/// of the window, so the way in, the way out, and what the sheet says when it
-/// arrives are worth a test of their own.
+/// **The sheet opens, chooses, and closes.** The theme is the one setting that
+/// is not a control on the face of the window.
 #[test]
 fn the_theme_sheet_opens_chooses_and_closes() {
     let mut harness = app();

@@ -10,25 +10,15 @@
 //! cargo run --release -- --fill "…" --width 1019 --height 762 --quit 10
 //! ```
 //!
-//! The size flags and `--quit` exist for one reason: a GPU renderer's
-//! swapchain is sized in pixels, so comparing this build's memory against the
-//! libcosmic build is only honest at the same window size. `--quit N` ends the
-//! run after N seconds so the settled figure can be read off `vmmap` before
-//! the process goes away. Neither flag is meant for anybody using the app —
-//! and passing either of them is also what turns the maximized default off,
-//! since a window the compositor sized is not a window you can compare.
+//! `--fill`, `--inset` and `--theme` seed states the app otherwise needs
+//! somebody to type, click or work a file dialog to reach — they exist to make
+//! a window photographable and measurable. `--theme` does not write itself to
+//! `settings`.
 //!
-//! `--fill` and `--inset` are the two states the app cannot be started in from
-//! the outside otherwise — one needs somebody to type, the other needs
-//! somebody to work a file dialog — and both of them cost the renderer
-//! something worth measuring.
-//!
-//! `--theme system|light|dark` is the third of those, and the cheapest: the
-//! theme is behind a button and a sheet, so a window in any theme but the
-//! desktop's needs somebody to click twice. It seeds what the sheet would have
-//! set, which is what makes the two themes photographable — and it does not
-//! write itself to `settings`, because a screenshot is not somebody changing
-//! their mind.
+//! `--width`/`--height`/`--quit` are for memory measurement, not for users: a
+//! GPU swapchain is sized in pixels, so two builds only compare at the same
+//! window size, and `--quit N` exits after N seconds so `vmmap` can read the
+//! settled figure. Passing a size flag also turns the maximized default off.
 
 use std::sync::Arc;
 
@@ -57,9 +47,8 @@ fn main() {
             .cloned()
     };
     let fill = text("--fill").unwrap_or_default();
-    // The flag beats the file, and does not become the file: `--theme` is for
-    // photographing a window, and a screenshot is not somebody changing their
-    // mind. Only the sheet writes, and it writes from the click.
+    // The flag beats the file and does not become the file: a screenshot is
+    // not somebody changing their mind. Only the sheet writes.
     let tone = text("--theme")
         .and_then(|name| ui::Theme::named(&name))
         .or_else(|| settings::read(THEME).and_then(|name| ui::Theme::named(&name)));
@@ -73,17 +62,14 @@ fn main() {
         });
     }
 
-    // The interface is three columns wide and wants the room: it opens
-    // maximized, and the surface size below is only what the window falls back
-    // to when it is un-maximized. The minimum is the width at which the two
-    // 356-pixel control rails still leave the code a square worth looking at.
+    // Three columns wide and wanting the room: it opens maximized, and the
+    // surface size below is only the un-maximized fallback. The minimum is the
+    // width at which the two 356-pixel rails still leave the code a square
+    // worth looking at.
     //
-    // No theme is asked for here, and that is the point: the window opens
-    // under whatever the desktop is set to, which is what `Theme::System` in
-    // `ui.rs` means and what the app defaults to. Somebody who picks Light or
-    // Dark from the sheet has `ui.rs` call `set_theme` on this same window, so
-    // the title bar follows them; setting one *here* would only be a fourth
-    // answer nobody chose.
+    // No theme is asked for here: the window opens under whatever the desktop
+    // is set to, which is `Theme::System`. Picking Light or Dark has `ui.rs`
+    // call `set_theme` on this same window.
     let attributes = WindowAttributes::default()
         .with_title(qrnew::fl!("app-title"))
         .with_min_surface_size(LogicalSize::new(1160.0, 700.0))
@@ -93,8 +79,7 @@ fn main() {
         ))
         .with_maximized(measured.is_none());
 
-    // A context per seed, and the inset's is left out entirely when no path
-    // was given: `App` asks for it with `try_consume_context`, so a context
+    // A context per seed. `App` asks with `try_consume_context`, so a context
     // that is not there is the same as no picture.
     type Context = Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync>;
     let mut contexts: Vec<Context> = vec![Box::new(move || {
@@ -110,9 +95,8 @@ fn main() {
             Box::new(ui::Tone(theme)) as Box<dyn std::any::Any>
         }));
     }
-    // How the window writes a choice down. It is handed in rather than reached
-    // for, so that the tests — which click through the sheet — drive a window
-    // that cannot touch anybody's settings.
+    // Handed in rather than reached for, so the tests — which click through
+    // the sheet — drive a window that cannot touch anybody's settings.
     contexts.push(Box::new(|| {
         Box::new(ui::Remember(Arc::new(|theme: ui::Theme| {
             settings::write(THEME, theme.slug());

@@ -2,163 +2,44 @@
 
 //! QRnew's interface, as HTML and CSS over `qrnew-core`.
 //!
-//! The core is not touched by any of this: `Qr::new` takes the text, the error
-//! correction level and a [`QrStyle`], and hands back a document that the
-//! preview, the SVG export, the PNG export and the clipboard all come out of.
-//! That is the same single-SVG arrangement the libcosmic build had — the only
-//! thing that changed is who draws it.
+//! `Qr::new` takes the text, the error correction level and a [`QrStyle`], and
+//! hands back one document that the preview, both exports and the clipboard all
+//! come out of. The core is untouched by any of this.
 //!
-//! The preview reaches the screen as **the document's own markup**, dropped
-//! into the stage, which Blitz parses into an `<svg>` element and hands to
-//! `usvg` — `resvg`'s own parser, and the one `qrnew-core` already uses to
-//! rasterize. So the bytes on screen are the bytes in the saved file, through
-//! the same code, and the documented Blitz gap where CSS cannot reach inside an
-//! SVG never applies: `draw.rs` writes every colour as a presentation attribute
-//! so that an exported file stands on its own.
+//! # The preview is the file, in two layers
 //!
-//! It was a `data:` URL on an `<img>` until the memory said otherwise. Blitz
-//! caches a fetched image by its URL, in a map with no eviction in it at all,
-//! and a preview rebuilt on every keystroke is a new URL every time: three
-//! hundred characters typed cost seventeen megabytes that never came back, and
-//! a minute in the colour picker is worse. Markup goes to the node and is
-//! replaced with the node, so the same three hundred characters now cost two
-//! megabytes of code that is actually on screen. `blitz-atlas.md` has both
-//! measurements; `the_code_on_the_stage_is_the_code_in_the_file` is what holds
-//! the round trip through the DOM to changing nothing `usvg` can see.
+//! The preview reaches the screen as **the document's own markup** dropped into
+//! the stage, which Blitz parses into an `<svg>` and hands to `usvg` — the same
+//! parser `qrnew-core` rasterizes with, so the bytes on screen are the bytes in
+//! the saved file. `draw.rs` writes every colour as a presentation attribute,
+//! which is what makes an exported file stand on its own where CSS cannot reach
+//! inside an SVG in Blitz.
 //!
-//! **With one seam in it, and it is the renderer's fault rather than the
-//! design's.** A code with an inset reaches the screen as two layers: the
-//! document without the picture, and the picture laid into the hole the
-//! document left for it. `anyrender_vello_hybrid` keeps every image it has ever
-//! drawn in a GPU atlas, keyed by an identity counter rather than by content
-//! and freed never, so a picture arriving inside a *new* document on every
-//! keystroke is a new picture every time — 392 of them at the 512-pixel cap
-//! `shrink_logo` imposes, and then `AtlasLimitReached` unwrapped two crates
-//! down and the window is gone. Out here the picture is one `<img>` whose `src`
-//! does not change while the picture does not.
+//! A code with an inset arrives as **two** layers: the document without the
+//! picture, and the picture laid into the hole the document left for it.
+//! `anyrender_vello_hybrid` keys its GPU atlas by an identity counter and frees
+//! nothing, so a picture arriving inside a *new* document on every keystroke
+//! fills the atlas and ends in `AtlasLimitReached` two crates down. Out here the
+//! picture is one `<img>` whose `src` does not change while the picture does
+//! not. Markup rather than a `data:` URL is the same leak in Blitz's own image
+//! cache — `blitz-atlas.md` has both measurements.
 //!
-//! The seam is held shut by `Qr::inset_box`, which is the same code that drew
-//! the hole saying where it is, and by
-//! `the_picture_on_the_stage_is_where_the_document_puts_it`, which measures the
-//! result on screen — including, by hit test, that the picture is painted over
-//! the code rather than under it. What is saved and copied never went through
-//! any of this: it is `Qr::svg`, one document with everything in it.
+//! The seam is held by `Qr::inset_box` and by
+//! `the_picture_on_the_stage_is_where_the_document_puts_it`. What is saved and
+//! copied never goes through any of this: it is `Qr::svg`, one document.
 //!
-//! # The shape of the window
+//! # The rest
 //!
-//! **Three columns, and that is the whole layout argument.** A fixed-width
-//! rail of controls, then the stage the code sits on, then the second rail.
-//! Nothing in a rail can move the code, which is what the original
-//! single-column stack got wrong — opening the colour picker there pushed the
-//! preview under the bottom of the window, so the one thing somebody was
-//! adjusting the colour of was the one thing they could no longer see.
+//! Three columns — a rail of controls, the stage, a second rail — so nothing in
+//! a rail can move the code. Height is the scarce thing; the arithmetic is in
+//! `ui.css` and `no_control_is_below_the_fold` checks it.
 //!
-//! **The code is in the middle rather than at one end**, which is where it
-//! belongs by weight: it is the largest thing in the window and the only thing
-//! any of the controls is about, and a window whose subject sits against one
-//! edge with all of its interface piled against the other reads as a form with
-//! a picture appended. A rail on either side puts the subject where the eye
-//! starts, and neither rail becomes the far one that gets looked at last.
-//! `the_controls_and_the_code_are_in_separate_columns` is what holds the three
-//! apart, in that order.
-//!
-//! The second rail is what stops the first one scrolling. One column of
-//! controls only fitted a window this tall with the picker collapsed, so the
-//! picker had to be something you opened — and the moment it was, half the form
-//! was below the fold. Split in two, everything is on screen at once, the
-//! picker is simply *there*, and the wells above it choose which of the two
-//! colours it is editing rather than whether it exists.
-//!
-//! Both rails are now full: Content, Error correction, Margin and Shape down
-//! the first, Colors and Inset down the second. Height is the scarce thing here
-//! and the picker is what holds most of it, which is why adding the Inset card
-//! took thirty pixels off the saturation square and the row of inset sizes took
-//! twelve more, and why the Shape card was paid for out of every card's padding
-//! and every gap between them — the arithmetic is in `ui.css`, and
-//! `no_control_is_below_the_fold` checks it at the size a maximized window
-//! actually gets on a laptop screen rather than at the size the window falls
-//! back to.
-//!
-//! Two of the cards say something a decision costs, in the same banner: a
-//! margin under two may be hard for a scanner to find, and a code that is not
-//! drawn in squares takes a camera longer to lock onto. Neither is allowed to
-//! be the thing a rail scrolls away, which is a promise about the shortest
-//! window rather than about the order of the cards — see the Shape card, which
-//! is last and whose caution is therefore the lower of the two.
-//!
-//! The three export buttons are drawn from the first frame rather than
-//! appearing with the first character, dimmed until there is something to
-//! export, so the stage never rearranges itself while it is being looked at.
-//!
-//! # Light, dark, and following the desktop
-//!
-//! Three answers and the person at the window picks, from a sheet behind the
-//! button beside About. Following the desktop is the default, because it is the
-//! answer that is right without anybody being asked — but it is only a default.
-//! Somebody comparing a code against the paper it will be printed on wants a
-//! light window at ten at night, and the desktop's setting has no opinion about
-//! that worth overriding theirs.
-//!
-//! **The choice is a class on `.app`, not a media query**, and that is forced
-//! rather than chosen. `prefers-color-scheme` is real here — Blitz hands Stylo
-//! winit's window theme — but nothing an app can call from inside a component
-//! moves it. The one lever, `View::set_theme_override`, belongs to the shell
-//! and is not reachable from a Dioxus component; and asking winit to change the
-//! window's own theme does not stand in for it, because macOS deliberately
-//! *suppresses* the `ThemeChanged` event when the appearance was set by the
-//! program rather than by the desktop. So [`Theme`] writes `theme-system`,
-//! `theme-light` or `theme-dark` onto the root element, `ui.css` hangs both
-//! palettes off that, and `prefers-color-scheme` is consulted only inside the
-//! `theme-system` branch — which is the one case where the desktop really is
-//! the authority and the event really does arrive.
-//!
-//! The window is still asked, mind: [`App`] calls `set_theme` on winit so the
-//! title bar matches the window under it. That is cosmetic and best-effort — a
-//! compositor may decline — and nothing in the interface depends on it.
-//!
-//! An icon is the one thing this cannot reach. Its ink is a presentation
-//! attribute on a document CSS cannot see inside, so [`glyph`] draws every icon
-//! twice, once in each palette's ink, and the stylesheet hides the one that
-//! does not apply. A node and a small usvg document per icon is what a runtime
-//! theme switch costs here, and it is why the choice is spent on the window
-//! rather than on anything smaller.
-//!
-//! # The keyboard in a text field
-//!
-//! Three of the controls are `<input>`s, and everything a person expects of one
-//! — a caret that blinks, Backspace, a word jump, a readable selection — is
-//! somebody's job. Here it is split four ways, and only the first of them is
-//! really the app's.
-//!
-//! **The editing keys belong to AppKit, and had to be switched on.**
-//! [`open_the_text_input_client`] is the whole of it: on macOS a key that edits
-//! text is not delivered as a key, it is delivered as the command the system's
-//! key-binding table says it means — `deleteBackward:`, `moveWordLeft:` — and
-//! only to a window whose text input client is on. `blitz-dom` implements every
-//! one of those commands and asks for the client on focus, and at the pinned
-//! revision the request does not arrive: Backspace did nothing at all in this
-//! app until the window asked for itself. [`appkit_has_this_key`] is the other
-//! half, because `winit` then delivers the key event *as well* and Blitz acts
-//! on both, so one press of Left moved the caret twice. Cancelling the key
-//! event leaves the command holding it, which is also the right way round: the
-//! command knows what the person's own key map says, and the key event has to
-//! guess.
-//!
-//! Cmd is the exception, and it is not one this app can fix — see
-//! [`appkit_has_this_key`], which has the measurement.
-//!
-//! **The blink is the app's, because the renderer has no clock.** Blitz paints
-//! the caret on every frame it is asked for and asks for none of its own, so
-//! [`Caret`] and [`metronome`] supply the beat and `ui.css` turns `caret-color`
-//! transparent for half of it.
-//!
-//! **The selection's colour is nobody's**: it is a constant in `blitz-paint`, a
-//! pale blue, painted under text drawn in the element's own colour, with no
-//! `::selection` to say otherwise. What the app can choose is the ink, so a
-//! dark window cannot show a readable selection, and the only lever out here
-//! would be to turn the field to paper while it is focused, which is a brighter
-//! change to the window than the problem is worth. `blitz-mac-keys.md` carries
-//! it upstream instead.
+//! The theme is a class on `.app` rather than a media query, because nothing an
+//! app can call from a component moves `prefers-color-scheme`: see [`Theme`].
+//! Text editing on macOS is split between AppKit and Blitz, and both halves had
+//! to be arranged for: [`open_the_text_input_client`], [`appkit_has_this_key`],
+//! and `blitz-mac-keys.md` for what this app cannot fix. The caret blink is the
+//! app's, because the renderer has no clock: [`Caret`].
 
 use std::future::Future;
 use std::pin::Pin;
@@ -183,46 +64,34 @@ const EXPORT_SCALE: u32 = 10;
 /// The least the code's two colours may differ before the app says so, as a
 /// difference in [`luminance`] on 0…1.
 ///
-/// **It is not the number the reader stops at, and that is the point.** The
-/// obvious place to get this from is `qrnew_core::read` — draw a code, walk the
-/// two colours together, and take the gap at which it gives up. Measured that
-/// way, on a PNG at [`EXPORT_SCALE`]: a pale foreground on white reads down to
-/// a gap of 0.196 and fails at 0.176, and a black foreground on a lightening
-/// background reads down to 0.039. Which says the app's own reader is almost
-/// unbounded here, and it should be — it is handed a clean file with square
-/// edges and an even ground, and it binarizes adaptively.
+/// **Not the number the reader stops at, deliberately.** Swept against
+/// `qrnew_core::read` on a PNG at [`EXPORT_SCALE`], the app's own reader is
+/// almost unbounded: a pale foreground on white reads down to a gap of 0.196,
+/// a black foreground on a lightening background down to 0.039. It is handed a
+/// clean file with square edges and binarizes adaptively; a camera is handed
+/// none of that. So this sits at more than twice the reader's floor — a
+/// judgement, like [`SAFE_MARGIN`].
 ///
-/// A camera is not handed any of that. It has the code through optics, under
-/// whatever light is in the room, off whatever the code was printed on, and it
-/// has to find the edges before it can threshold anything. So the number is
-/// more than twice the reader's own floor, which is a judgement rather than a
-/// measurement, and it is the same judgement [`SAFE_MARGIN`] is: the app draws
-/// what it is asked for and says when it has stopped vouching.
-///
-/// The one thing the sweep does settle is that this cannot be a check that the
-/// code *decodes*. It decodes long past where anybody could scan it.
+/// What the sweep settles is that this cannot be a check that the code
+/// *decodes*. It decodes long past where anybody could scan it.
 pub const SAFE_CONTRAST: f32 = 0.4;
 
 /// The narrowest border the app is prepared to vouch for, in modules.
 ///
 /// Two modules of white is enough for a phone camera to find the edge of the
-/// code; below that a scan starts to depend on what the code is printed on and
-/// on how steady the hand holding the camera is. The claim is checked rather
-/// than assumed — `a_narrow_margin_still_scans` in `qrnew-core` decodes a
+/// code; below that a scan depends on what it was printed on and how steady
+/// the hand is. `a_narrow_margin_still_scans` in `qrnew-core` decodes a
 /// two-module border at both export sizes.
 ///
-/// It is one constant and not two because the default and the warning are the
-/// same idea from either side: the app opens at the narrowest border it will
+/// One constant and not two: the app opens at the narrowest border it will
 /// stand behind, and says so as soon as somebody goes under it.
 pub const SAFE_MARGIN: u32 = 2;
 
 /// Width of the blank border the app starts with, in modules.
 ///
-/// The QR standard asks for four, which `qrnew_core::DEFAULT_QUIET_ZONE` is,
-/// and four is visibly generous on screen: a third of a small code's width is
-/// border. [`SAFE_MARGIN`] is what the app opens at instead, and the control
-/// is right there for anybody printing something that has to survive a bad
-/// photocopier.
+/// The QR standard asks for four (`qrnew_core::DEFAULT_QUIET_ZONE`), which is
+/// visibly generous on screen: a third of a small code's width is border. The
+/// app opens at [`SAFE_MARGIN`] instead, and the control is right there.
 pub const DEFAULT_MARGIN: u32 = SAFE_MARGIN;
 
 /// As wide a border as the stepper will go to.
@@ -233,44 +102,30 @@ pub const MAX_MARGIN: u32 = 16;
 
 /// How long a button says `Copied.` before it goes back to its own name.
 ///
-/// A confirmation is only worth anything while it is still about the click
-/// that caused it. Left up, it stops being news and becomes the button's name:
-/// somebody who comes back to the window a minute later reads `Copied.` as a
-/// label rather than as an answer, and has no way to tell whether the thing on
-/// the clipboard is still the thing on screen.
-///
+/// Left up, a confirmation stops being news and becomes the button's name.
 /// Three seconds is long enough to be read by somebody whose eyes were on the
-/// code rather than on the button, and short enough that it is gone before the
-/// next thing anybody does.
+/// code, and gone before the next thing anybody does.
 pub const CONFIRM_FOR: Duration = Duration::from_secs(3);
 
 /// Half a blink: how long the caret is drawn, and then how long it is not.
 ///
-/// 530ms is the interval every desktop toolkit landed on independently — it is
-/// what GTK, Qt and AppKit all ship — and there is no reason for this app to
-/// have an opinion of its own about a number that every other window on the
-/// screen already agrees on.
+/// 530ms is what GTK, Qt and AppKit all ship.
 pub const CARET_BEAT: Duration = Duration::from_millis(530);
 
 /// The blinking caret, and the two things a text field has to tell it.
 ///
-/// **The blink is the app's, because the renderer does not have one.** Blitz
-/// paints the caret of the focused input on every frame it draws, in
-/// `caret-color`, and never asks for another frame on its own account — so a
-/// caret in this window is a bar that is simply there, which is the one thing a
-/// caret is not anywhere else. What is missing is the clock, and a clock is
-/// something an app can keep: [`metronome`] beats, this toggles, `.app` gains
-/// or loses `caret-dark`, and `ui.css` turns `caret-color` transparent for half
-/// of every beat.
+/// **The blink is the app's, because the renderer has no clock.** Blitz paints
+/// the focused input's caret on every frame it draws, in `caret-color`, and
+/// never asks for a frame on its own account. So [`metronome`] beats, this
+/// toggles, `.app` gains or loses `caret-dark`, and `ui.css` turns
+/// `caret-color` transparent for half of every beat.
 ///
-/// The two things a field says are why this is a struct rather than a bare
-/// signal. `fields` is how many text inputs hold the keyboard — zero or one,
-/// and while it is zero there is no caret on screen, so the beat writes nothing
-/// and the window is not redrawn twice a second for a caret nobody is looking
-/// at. `struck` counts keystrokes, and a beat that finds a keystroke since the
-/// last one lights the caret rather than toggling it: a caret that blinks out
-/// mid-word is a caret that has lost the place, and every other text field on
-/// the desktop holds it solid while somebody is typing.
+/// `fields` is how many text inputs hold the keyboard — zero or one — and
+/// while it is zero the beat writes nothing, so the window is not redrawn
+/// twice a second for a caret nobody is looking at. `struck` counts
+/// keystrokes: a beat that finds one since the last lights the caret rather
+/// than toggling it, because a caret that blinks out mid-word has lost the
+/// place.
 #[derive(Debug, Clone, Copy)]
 struct Caret {
     lit: Signal<bool>,
@@ -283,22 +138,19 @@ struct Caret {
 fn use_caret() -> Caret {
     let caret = Caret {
         lit: use_signal(|| true),
-        // One, from the first frame. The window opens with the content field
-        // holding the keyboard — that is what `autofocus` on it means, and
-        // `the_field_holds_the_keyboard_before_anything_is_clicked` is the test
-        // that says so — and **Blitz's autofocus does not raise `focusin`**: it
-        // moves the focus from inside the mutator, after the tree is built,
-        // rather than through the path that generates the event. So the one
-        // field that has the keyboard before anybody has touched anything is
-        // the one field that never announces it, and counting from zero would
-        // leave the caret solid until the first click somewhere else.
+        // One, from the first frame: the window opens with the content field
+        // holding the keyboard. **Blitz's autofocus does not raise `focusin`**
+        // — it moves the focus from inside the mutator, after the tree is
+        // built — so the one field with the keyboard before anybody touches
+        // anything is the one that never announces it, and counting from zero
+        // would leave the caret solid until the first click elsewhere.
         fields: use_signal(|| 1u32),
         struck: use_signal(|| 0u64),
     };
     use_context_provider(|| caret);
 
-    // The beat. One task and one thread for the life of the window, writing
-    // only while there is a caret on screen to write about.
+    // The beat. One task for the life of the window, writing only while there
+    // is a caret on screen to write about.
     use_future(move || async move {
         let clock = metronome(CARET_BEAT);
         let mut caret = caret;
@@ -326,8 +178,7 @@ impl Caret {
 
     /// And gave it back. Saturating, because Blitz can clear the focus without
     /// the field that had it ever hearing a `focusout` — see
-    /// `clicking_a_chip_blurs_the_field` — and a count that went negative
-    /// would leave the beat running over an empty window forever.
+    /// `clicking_a_chip_blurs_the_field`.
     fn left(&mut self) {
         let now = self.fields.peek().saturating_sub(1);
         self.fields.set(now);
@@ -341,13 +192,11 @@ impl Caret {
         *self.struck.write() += 1;
     }
 
-    /// One beat. `seen` is the caller's memory of the last keystroke it knew
-    /// about, which is what turns "something was typed" into "something was
-    /// typed *since the last beat*".
+    /// One beat. `seen` is the caller's memory of the last keystroke, which
+    /// turns "something was typed" into "typed *since the last beat*".
     ///
-    /// Every read here is a `peek`: this runs inside a task that would
-    /// otherwise subscribe to the signals it is about to write, and wake
-    /// itself for the rest of the afternoon.
+    /// Every read is a `peek`: this runs inside a task that would otherwise
+    /// subscribe to the signals it is about to write and wake itself forever.
     fn beat(&mut self, seen: &mut u64) {
         let struck = *self.struck.peek();
         let lit = *self.lit.peek();
@@ -367,30 +216,25 @@ impl Caret {
 
 /// The middle of the margin field, measured from inside its left border.
 ///
-/// Half of the width `ui.css` gives `.count`, less the one-pixel border: the
-/// point the number is centred on. It is here rather than in the stylesheet
-/// because **Blitz ignores `text-align` inside an `<input>`** — the field's
-/// text belongs to a `parley` editor that is handed a size, a line height and
-/// a colour, and no font at all — so the centring is arithmetic the app does
-/// with `padding-left` and the field's own `ch`. The long version of the story
-/// is above `.count` in `ui.css`, and
-/// `the_margin_number_is_centered_in_its_field` is what stops this number and
-/// that width drifting apart.
+/// Half the width `ui.css` gives `.count`, less the one-pixel border. It is
+/// here rather than in the stylesheet because **Blitz ignores `text-align`
+/// inside an `<input>`**: the field's text belongs to a `parley` editor handed
+/// a size, a line height and a colour, and no font at all. So the centring is
+/// arithmetic over `padding-left` and the field's own `ch`, and
+/// `the_margin_number_is_centered_in_its_field` keeps this number and that
+/// width together.
 ///
-/// It is arithmetic across two different answers to how wide a digit is, and
-/// `blitz-fonts.md` has both measured: Stylo resolves `1ch` here to 10.000
-/// points and the shaper paints 9.455. Half a point of the difference lands on
-/// screen, which is under the tolerance the test holds and over nothing. It is
-/// worth knowing that the day the editor is handed its font, the second number
-/// moves and this one has to be measured again.
+/// The two answers to how wide a digit is disagree — Stylo resolves `1ch` to
+/// 10.000 points, the shaper paints 9.455 (`blitz-fonts.md`) — which lands
+/// half a point on screen, under the test's tolerance. The day the editor is
+/// handed its font, remeasure this.
 const COUNT_MIDDLE: f32 = 30.0;
 
 /// The colours offered in the picker.
 ///
 /// Two rows of eight: a grey ramp, and hues dark enough to still read as the
-/// dark side of a code. There is no colour here that a scanner would struggle
-/// with as a foreground on white, which is a decision the picker makes for the
-/// person using it rather than one it explains.
+/// dark side of a code. Nothing here would trouble a scanner as a foreground
+/// on white.
 const PALETTE: [Rgb; 16] = [
     Rgb::new(0x00, 0x00, 0x00),
     Rgb::new(0x3a, 0x38, 0x36),
@@ -412,21 +256,17 @@ const PALETTE: [Rgb; 16] = [
 
 /// Text to start the field with, provided as a root context by `main.rs`.
 ///
-/// It exists for `--fill`, which exists so that the app can be measured with a
-/// code on screen without anybody typing one — a GPU renderer's cost is not
-/// the same before and after there is something to draw. Nothing provides it
-/// in a test, and an absent context means an empty field.
+/// For `--fill`, so the app can be measured with a code on screen without
+/// anybody typing one. An absent context means an empty field.
 #[derive(Clone)]
 pub struct Fill(pub String);
 
 /// The picture in the middle of the code, as it was picked.
 ///
-/// The bytes are kept rather than the path, because the file is read once and
-/// then belongs to the app: a code drawn from a picture that has since been
-/// moved or edited on disk would be a code the person never asked for. The
-/// format comes off those same bytes — `ImageFormat::detect` looks at what is
-/// in the file, not at what it is called — and it is what the thumbnail's
-/// `data:` URL declares itself to be.
+/// The bytes rather than the path: the file is read once and then belongs to
+/// the app, so a picture moved or edited on disk cannot change a code somebody
+/// already made. The format comes off those same bytes —
+/// `ImageFormat::detect` looks at what is in the file, not what it is called.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Inset {
     name: String,
@@ -437,26 +277,22 @@ struct Inset {
 impl Inset {
     /// Reads a file, if it turns out to be a picture.
     ///
-    /// `None` covers both ways this can go wrong — the file would not open,
-    /// and it opened but is not an image — because the card has one thing to
-    /// say about either: that file cannot be the picture in the middle of a
-    /// code. Which of the two it was is not something the person can act on
-    /// differently.
+    /// `None` covers both ways this goes wrong — the file would not open, and
+    /// it opened but is not an image — because the card says the same thing
+    /// about either and neither is something the person can act on.
     fn read(path: &std::path::Path) -> Option<Self> {
         let bytes = std::fs::read(path).ok()?;
         // What the file *is*, not what it is called: a dialog filter is a
         // convenience and an extension is a claim, so the bytes decide.
         let format = ImageFormat::detect(&bytes)?;
 
-        // And then, once, whatever scaling the picture needs to be one the app
-        // can carry. A photograph is several thousand pixels across, which is
-        // detail no export can use, an image re-decoded on every redraw — and,
-        // past four thousand and change, more than a GPU texture atlas will
-        // take at all. `vello_hybrid` does not draw such an image smaller, it
-        // unwraps the refusal, and **the window closes**: this is the line
-        // between choosing a photograph and losing the app. It happens here,
+        // And then, once, whatever scaling the picture needs. A photograph is
+        // several thousand pixels across — detail no export can use, re-decoded
+        // on every redraw, and past four thousand more than a GPU texture atlas
+        // will take at all. `vello_hybrid` does not draw such an image smaller,
+        // it unwraps the refusal and **the window closes**. So it happens here,
         // at the one moment a picture arrives, rather than in the memo that
-        // redraws the code on every keystroke.
+        // redraws on every keystroke.
         let (format, bytes) = match qrnew_core::shrink_logo(&bytes) {
             Some(scaled) => (ImageFormat::Png, scaled),
             None => (format, bytes),
@@ -474,11 +310,10 @@ impl Inset {
 
 /// A button's `Copied.`, which raises itself and then lets go on its own.
 ///
-/// Two signals rather than one flag, because a second copy while the first is
-/// still confirmed has to be able to tell the two countdowns apart: `serial`
-/// numbers the copies, and a countdown that finds a newer number than its own
-/// has been overtaken and leaves the confirmation alone. Without it the first
-/// click's timer would cut the second click's confirmation short.
+/// Two signals rather than one flag so a second copy while the first is still
+/// confirmed can tell the two countdowns apart: `serial` numbers the copies,
+/// and a countdown that finds a newer number has been overtaken. Without it
+/// the first click's timer would cut the second click's confirmation short.
 #[derive(Debug, Clone, Copy)]
 struct Confirmation {
     shown: Signal<bool>,
@@ -529,48 +364,38 @@ impl Confirmation {
 
 /// A picture to open with, provided as a root context by `main.rs`.
 ///
-/// [`Fill`]'s sibling, and it is here for both of the same reasons. The stated
-/// one is measurement: a code carrying an inset is a second image decoded and
-/// composited on every redraw, so a renderer measured on a bare code has not
-/// been measured on the heaviest thing the app draws. The quieter one is that
-/// **a native file dialog is the one control neither a test nor a scripted run
-/// can touch**, and without a way in, everything the interface does once a
-/// picture is in place — the thumbnail, error correction locked at 30%, what
-/// the too-long message says — would be reachable only by hand.
+/// [`Fill`]'s sibling, for measurement — a code with an inset is a second
+/// image decoded and composited on every redraw — and because **a native file
+/// dialog is the one control neither a test nor a scripted run can touch**.
+/// Without a way in, everything downstream of a picture (the thumbnail, error
+/// correction locked at 30%, the too-long message) is reachable only by hand.
 ///
-/// It holds a path rather than bytes: `main.rs` is given one on the command
-/// line, and a file that will not open is reported by the same silence as a
-/// file that is not a picture. See [`Inset::read`].
+/// A path rather than bytes: `main.rs` is given one on the command line. See
+/// [`Inset::read`].
 #[derive(Clone)]
 pub struct Inlay(pub String);
 
 /// The theme to open in, provided as a root context by `main.rs`.
 ///
-/// It exists for `--theme`, which exists because the choice is behind a button
-/// and a sheet: there is no way to photograph a dark window from the outside
-/// otherwise, and "here is what it looks like" is a question about this app
-/// that gets asked. Nothing provides it in a test, and an absent context is
-/// [`Theme::System`] — which is also what somebody who never opens the sheet
-/// gets.
+/// For `--theme`: the choice is behind a button and a sheet, so there is no
+/// other way to photograph a dark window. An absent context is
+/// [`Theme::System`].
 #[derive(Clone)]
 pub struct Tone(pub Theme);
 
 /// Somewhere to write the theme down, provided as a root context by `main.rs`.
 ///
-/// The app does not do its own file writing, and this is why: a test clicks
-/// through the theme sheet several times, and a component that saved to disk
-/// would be a test suite that edited the settings of whoever ran it. `main.rs`
-/// supplies the closure, nothing supplies it in a test, and an absent context
-/// is an app that simply does not remember — which is also what a machine with
-/// no writable home gets.
+/// Handed in rather than reached for: a test clicks through the theme sheet
+/// several times, and a component that saved to disk would edit the settings
+/// of whoever ran it. An absent context is an app that does not remember —
+/// which is also what a machine with no writable home gets.
 #[derive(Clone)]
 pub struct Remember(pub Arc<dyn Fn(Theme) + Send + Sync>);
 
 /// Which of the two colours the picker is pointed at.
 ///
 /// Not an `Option`: the picker is always on screen, and the wells choose what
-/// it edits. It used to be one, back when opening the picker was a thing you
-/// did and closing it again was how you got the rest of the form back.
+/// it edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Well {
     Dark,
@@ -579,28 +404,22 @@ enum Well {
 
 /// How the code's own marks are drawn.
 ///
-/// **One choice for two of `qrnew-core`'s knobs, deliberately.** The core
-/// holds a [`ModuleShape`] and a [`FinderShape`] and they are independent —
-/// `every_combination_of_shapes_scans` there walks all six pairings — but six
-/// is not a question worth putting to somebody making one code. Rounded
-/// modules inside square finders is the pairing nobody picks on purpose: it
-/// reads as a style that was applied to most of the code and missed the
-/// corners. So the app offers the three that are a *look*, and the finders
-/// follow the modules rather than being asked about separately.
+/// **One choice for two of `qrnew-core`'s knobs, deliberately.** The core's
+/// [`ModuleShape`] and [`FinderShape`] are independent — six pairings, which
+/// `every_combination_of_shapes_scans` walks — but six is not a question worth
+/// putting to somebody making one code, and rounded modules inside square
+/// finders is the pairing nobody picks on purpose. So the app offers the three
+/// that are a *look* and the finders follow the modules.
 ///
-/// Nothing here can make a code that does not *scan*, and that is not a hope:
-/// a scanner reads the colour at the centre of a module, every shape in the
-/// core covers its own centre, and `every_combination_of_shapes_scans` and
-/// `every_combination_of_shapes_scans_with_a_logo_in_the_way` decode all of
-/// them with a real reader.
+/// None of them can make a code that fails to scan: a scanner reads the colour
+/// at a module's centre, every shape covers its own centre, and
+/// `every_combination_of_shapes_scans` and
+/// `..._with_a_logo_in_the_way` decode all of them with a real reader.
 ///
-/// Scanning is not the same as scanning *quickly*, though, and the card says
-/// so as soon as anything but [`Square`] is chosen. A phone pointed at a
-/// rounded or dotted code takes visibly longer to lock onto it: the decoder
-/// gets fewer clean edges to work from, so autofocus has more to do before the
-/// first frame it can read. That is a cost paid at the camera, where the
-/// decoding tests cannot see it, which is exactly why it has to be written
-/// down rather than left to the test suite.
+/// Scanning quickly is another matter, and the card says so for anything but
+/// [`Square`]: a rounded or dotted code gives the decoder fewer clean edges, so
+/// a phone takes visibly longer to lock on. That cost is paid at the camera,
+/// where the decoding tests cannot see it.
 ///
 /// [`Square`]: Look::Square
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -623,9 +442,8 @@ impl Look {
 
     /// The name this look goes by in the markup.
     ///
-    /// A `data-look` for the tests to select on, for the same reason
-    /// [`Theme::slug`] is one: a test that clicked the visible label would
-    /// pass in English and nowhere else.
+    /// A `data-look` for the tests to select on, like [`Theme::slug`]: a test
+    /// that clicked the visible label would pass in English and nowhere else.
     const fn slug(self) -> &'static str {
         match self {
             Look::Square => "square",
@@ -645,10 +463,9 @@ impl Look {
 
     /// The outline the three corner squares are given.
     ///
-    /// Colours are left at the core's default, which is the code's own dark:
-    /// a finder in a second colour is a fourth colour control in a window
-    /// whose colour rail is already the tallest thing in it, and it is the one
-    /// part of the code that has to stay findable.
+    /// Colours stay at the core's default, the code's own dark: a finder in a
+    /// second colour is a fourth colour control in the tallest rail in the
+    /// window, and it is the one part of a code that has to stay findable.
     const fn finder(self) -> Finder {
         let shape = match self {
             Look::Square => FinderShape::Square,
@@ -664,19 +481,17 @@ impl Look {
 
 /// How much of the code the picture in the middle of it takes up.
 ///
-/// Three named sizes rather than a number, because the useful range is narrow
-/// and its top end is not a constant. A logo has to stay clear of the three
-/// finder patterns, which sit eight modules in from each edge whatever the
-/// code's version — so on the smallest code there is, twenty-one modules
-/// across, the largest picture that fits is a shade over a fifth of the width,
-/// while on anything longer than a few characters it is a third. A percentage
-/// field would spend most of its range on values that only work for some of
-/// what somebody might type.
+/// Three named sizes rather than a number, because the top of the useful range
+/// is not a constant: a logo has to clear the three finder patterns, which sit
+/// eight modules in from each edge whatever the version — so the smallest code
+/// (twenty-one modules) takes a shade over a fifth of its width, and anything
+/// longer takes a third. A percentage field would spend most of its range on
+/// values that only work for some of what somebody might type.
 ///
-/// [`Medium`] is [`Logo::DEFAULT_SIZE`] and always fits: that is what
-/// `the_default_logo_fits_even_the_smallest_code` in `qrnew-core` checks.
-/// [`Large`] does not always fit, and the app draws it at the middle size when
-/// it does not — see `Drawn::capped`.
+/// [`Medium`] is [`Logo::DEFAULT_SIZE`] and always fits
+/// (`the_default_logo_fits_even_the_smallest_code`). [`Large`] does not, and
+/// the app falls back to the middle size when it will not — see
+/// `Drawn::capped`.
 ///
 /// [`Medium`]: InsetSize::Medium
 /// [`Large`]: InsetSize::Large
@@ -702,11 +517,10 @@ impl InsetSize {
     }
 
     /// Side of the picture as a fraction of the code's width, quiet zone not
-    /// counted — which is exactly what [`Logo::size`] means.
+    /// counted — which is what [`Logo::size`] means.
     ///
-    /// An eighth and a quarter around the core's own sixth. They are spaced so
-    /// that each step is a visible change in the preview rather than a nudge:
-    /// a quarter is twice the *area* of an eighth.
+    /// An eighth and a quarter around the core's own sixth, spaced so each step
+    /// is a visible change: a quarter is twice the *area* of an eighth.
     fn fraction(self) -> f32 {
         match self {
             InsetSize::Small => 1.0 / 8.0,
@@ -718,14 +532,12 @@ impl InsetSize {
 
 /// The code as it was actually drawn.
 ///
-/// The second field is here because one of the app's controls can ask for
-/// something the code in front of it cannot give: [`InsetSize::Large`] does
-/// not fit a twenty-one-module code, and a twenty-one-module code is what a
-/// few characters plus an inset produces. `qrnew-core` refuses that outright —
-/// deliberately, since only the caller knows whether to give up the size or
-/// the picture — and this app is the caller, and it gives up the size. Drawing
-/// nothing would be the one answer that is certainly wrong: the text is fine,
-/// the picture is fine, and the placeholder would say neither.
+/// `capped` exists because a control can ask for something the code cannot
+/// give: [`InsetSize::Large`] does not fit a twenty-one-module code, which is
+/// what a few characters plus an inset produces. `qrnew-core` refuses outright
+/// — only the caller knows whether to give up the size or the picture — and
+/// this app gives up the size. Drawing nothing would be the one certainly
+/// wrong answer: the text is fine and the picture is fine.
 #[derive(Debug, Clone, PartialEq)]
 struct Drawn {
     qr: Qr,
@@ -736,13 +548,11 @@ struct Drawn {
 
 /// Which palette the window is painted in, and who decides.
 ///
-/// [`Theme::System`] is the default and the only one of the three that is an
-/// answer *about* the question rather than to it: it hands the decision back
-/// to the desktop and follows it live. The other two are somebody overruling
-/// that, which is a thing worth being able to do — a code is judged against
-/// the surface around it, and the surface that matters is usually the paper it
-/// is going to be printed on rather than whatever the desktop is set to after
-/// dark.
+/// [`Theme::System`] is the default and the only one that hands the decision
+/// back to the desktop and follows it live. The other two overrule it, which is
+/// worth being able to do: a code is judged against the surface around it, and
+/// that is usually the paper it will be printed on rather than whatever the
+/// desktop is set to after dark.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Theme {
     /// Whatever the desktop says, changing when the desktop changes.
@@ -757,10 +567,9 @@ impl Theme {
 
     /// The name this theme goes by in the markup.
     ///
-    /// It is both half of the class on `.app` — `theme-{slug}`, which every
-    /// themed rule in `ui.css` hangs off — and the `data-theme` a test selects
-    /// its button by. One name for both, because a test that clicked on the
-    /// visible label would be a test that passed in English and nowhere else.
+    /// Both half of the class on `.app` — `theme-{slug}`, which every themed
+    /// rule in `ui.css` hangs off — and the `data-theme` a test selects by. A
+    /// test that clicked the visible label would pass in English only.
     pub const fn slug(self) -> &'static str {
         match self {
             Theme::System => "system",
@@ -771,20 +580,17 @@ impl Theme {
 
     /// The theme `name` names, for `--theme` on the command line.
     ///
-    /// The same three words the sheet's buttons carry as `data-theme`, since
-    /// there is no sense in the flag and the markup disagreeing about what a
-    /// theme is called.
+    /// The same three words the sheet's buttons carry as `data-theme`.
     pub fn named(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|theme| theme.slug() == name)
     }
 
     /// What winit is asked to make the title bar.
     ///
-    /// `None` is not "no opinion" so much as "stop holding one": it clears any
-    /// appearance the app has set, which is what puts the window back under
-    /// the desktop's control — and, on macOS, what starts the `ThemeChanged`
-    /// events flowing again so that `prefers-color-scheme` is live for the
-    /// `theme-system` branch of the stylesheet.
+    /// `None` is "stop holding an opinion": it clears any appearance the app
+    /// set, putting the window back under the desktop — and, on macOS, starts
+    /// the `ThemeChanged` events flowing again so `prefers-color-scheme` is
+    /// live for the `theme-system` branch of the stylesheet.
     const fn window(self) -> Option<WinitTheme> {
         match self {
             Theme::System => None,
@@ -794,36 +600,23 @@ impl Theme {
     }
 }
 
-/// Hand the window to macOS's text input system, which is where its editing
-/// keys live.
+/// Hand the window to macOS's text input system, which is where its editing keys
+/// live.
 ///
 /// **Without this, `Backspace` does nothing at all.** AppKit does not send a
-/// window "the Backspace key"; it sends `deleteBackward:`, one of the standard
-/// key bindings it resolves from the user's own key map — and the same is true
-/// of `moveWordLeft:` for Option+Left, `deleteWordBackward:` for
-/// Option+Backspace, `moveToBeginningOfDocument:` for Home and everything else
-/// a Mac text field is expected to do. Blitz implements all of them, and never
-/// hears any of them, because AppKit only resolves a key event into a command
-/// for a window whose text input client is switched on. `blitz-dom` asks for
-/// that on focus, through `ShellProvider::set_ime_enabled` — and at the pinned
-/// revision the request does not arrive: `Window::ime_capabilities()` is still
-/// `None` while a field holds the keyboard and the caret is blinking in it.
-/// Measured, on this app, before any of this was written: three presses of
-/// Backspace on "hello world" left "hello world".
+/// window "the Backspace key"; it sends `deleteBackward:`, resolved from the
+/// user's own key map, and likewise `moveWordLeft:` and the rest. Blitz
+/// implements all of them and hears none, because AppKit only resolves a key
+/// into a command for a window whose text input client is on. `blitz-dom` asks
+/// on focus through `ShellProvider::set_ime_enabled`, and at the pinned revision
+/// the request does not arrive.
 ///
-/// So the app asks, once, for the window it was given. It is the same request
-/// `blitz-dom` makes and the same one `winit` grants — `ImeCapabilities::new()`
-/// declares no extras, which is exactly what Blitz declares — and asking early
-/// rather than on focus costs nothing, because the request that would turn it
-/// off again on blur is a no-op in `winit` at this revision anyway: a window
-/// whose text input client has been switched on keeps it. What arrives with it
-/// is the rest of the platform for free — dead keys and a composition window
-/// included, which is the path `composed_text_reaches_the_field` already tests
-/// and which nothing was feeding.
+/// So the app asks once, declaring no extras. Asking early costs nothing: the
+/// request that would turn it off on blur is a no-op in `winit` here. Dead keys
+/// and the composition window arrive with it, which
+/// `composed_text_reaches_the_field` tests.
 ///
-/// It is `let _`: a window that has already been asked answers
-/// `ImeRequestError::AlreadyEnabled`, which is not a failure and not this
-/// function's business either way.
+/// `let _`: a window already asked answers `AlreadyEnabled`, not a failure.
 #[cfg(target_os = "macos")]
 fn open_the_text_input_client(window: &Arc<dyn WinitWindow>) {
     use dioxus_native::winit::window::{ImeCapabilities, ImeEnableRequest, ImeRequest};
@@ -836,38 +629,23 @@ fn open_the_text_input_client(window: &Arc<dyn WinitWindow>) {
 /// Let AppKit be the only thing editing a text field, on the keys it has an
 /// opinion about.
 ///
-/// The other half of [`open_the_text_input_client`], and it is needed because
-/// **`winit` delivers such a key twice**: once as the command it resolved, and
-/// again as a plain `KeyboardInput`, deliberately, so that an app which does
-/// not implement the command still sees the key. Blitz implements both paths,
-/// so with the text input client on, one press of Left moves the caret two
-/// characters — the command moved it, and then the key event moved it again.
-///
-/// Cancelling the key event's default action leaves the command holding it
-/// alone, which is the right way round: the command is the one that knows what
-/// the *user's* key map says Option+Left means — and Blitz's key handling has
-/// to guess, from a table that reads the same on every platform.
+/// The other half of [`open_the_text_input_client`]: **`winit` delivers such a
+/// key twice**, once as the command it resolved and again as a plain
+/// `KeyboardInput`, so an app that does not implement the command still sees the
+/// key. Blitz implements both, so one press of Left moved the caret two
+/// characters. Cancelling the key event leaves the command holding it, which is
+/// the right way round — the command knows the *user's* key map.
 ///
 /// The list is exactly the keys AppKit resolves into an editing command. `Tab`
-/// is not on it, because Blitz moves the focus on `Tab` before it looks at the
-/// field at all and cancelling would strand the keyboard; nor is `Escape`,
-/// which closes this app's sheets.
+/// is not on it (Blitz moves the focus first, so cancelling would strand the
+/// keyboard), nor `Escape`, which closes sheets.
 ///
-/// **Nothing held with Cmd is on it either, and that is the one thing this
-/// cannot fix.** `NSTextInputContext` declines to interpret a key event with
-/// the Command key down — those belong to the menu bar, as far as AppKit is
-/// concerned — so no command arrives for Cmd+Left, even though
-/// `moveToLeftEndOfLine:` is what the system's own key-binding table says it
-/// means, and even though `blitz-dom` implements that command. Measured the
-/// same way as everything else here: Ctrl+A jumps to the start of the line and
-/// Cmd+Backspace does nothing at all. So a key held with Cmd is left to Blitz —
-/// where Cmd is the "action" modifier and moves by word, which is the Windows
-/// and Linux binding rather than the Mac one — because leaving it alone at
-/// least leaves it doing something. The alternative is a key that does nothing
-/// whatever, and the only way past that is upstream: `blitz-dom` reading Cmd as
-/// the end of the line on macOS rather than as its cross- platform "action"
-/// modifier. `blitz-mac-keys.md` is the report and the patch that does it, and
-/// with that patch applied this function can be deleted.
+/// **Nothing held with Cmd is on it, and this cannot fix that.**
+/// `NSTextInputContext` declines to interpret a key event with Command down, so
+/// no command arrives for Cmd+Left even though `blitz-dom` implements
+/// `moveToLeftEndOfLine:`. Cmd is left to Blitz, where it moves by word: the
+/// wrong binding for a Mac, but better than a key that does nothing.
+/// `blitz-mac-keys.md` is the report and the patch; with it applied, delete this.
 #[cfg(target_os = "macos")]
 fn appkit_has_this_key(event: &Event<KeyboardData>) {
     if event.modifiers().contains(Modifiers::SUPER) {
@@ -909,10 +687,8 @@ pub fn App() -> Element {
     let mut margin_draft = use_signal(|| DEFAULT_MARGIN.to_string());
     // What was decoded out of an image, and whether it has been copied since.
     //
-    // It is shown under the button rather than dropped into the field: reading
-    // a code and writing one are two different errands, and somebody checking
-    // what a printed code says did not ask for the code they were looking at
-    // to become the code the app is drawing.
+    // Shown under the button rather than dropped into the field: reading a code
+    // and writing one are two different errands.
     let mut read_text = use_signal(|| None::<String>);
     let mut copied = use_confirmation();
     let mut copied_image = use_confirmation();
@@ -927,33 +703,28 @@ pub fn App() -> Element {
     let mut inset_size = use_signal(InsetSize::default);
     let mut editing = use_signal(|| Well::Dark);
     // **What the colour caution said when a pointer took hold of the picker**,
-    // or `None` whenever nothing is holding it — which is when the caution is
-    // read live off the two wells instead. The argument for freezing it is
-    // beside the banner, down in the colours rail.
+    // or `None` when nothing is holding it, in which case the caution is read
+    // live off the two wells. The argument for freezing it is beside the
+    // banner, down in the colours rail.
     //
-    // It is written from `Picker`'s pointer handlers and not from an effect
-    // watching the colours. An effect here would run on every colour change in
-    // the window, and `reset_puts_black_and_white_back` is what says why that
-    // is not free: the picker follows an outside colour through an effect of
-    // its own, and a second effect writing a signal `App` renders from starves
-    // it for a frame — the code went black and the hex field went on reading
-    // the old colour, which is the exact bug that effect was written to fix.
+    // Written from `Picker`'s pointer handlers rather than from an effect
+    // watching the colours: an effect here would run on every colour change,
+    // and `reset_puts_black_and_white_back` says why that is not free — the
+    // picker follows an outside colour through an effect of its own, and a
+    // second effect writing a signal `App` renders from starves it for a frame.
     let mut held_caution = use_signal(|| None::<bool>);
     let take_the_caution = move |holding: bool| {
         held_caution.set(holding.then(|| contrast(dark(), light()) < SAFE_CONTRAST));
     };
     // **The two colours change places.** A code drawn light on dark is the one
     // variation somebody reaches for that is not a new colour at all, and
-    // reaching it by hand was four steps: read one hex, type it into the
-    // other well, remember the first one, type it back.
+    // reaching it by hand was four steps.
     //
-    // It cannot make the code unscannable, which is what lets it sit beside
-    // the hex field rather than under a caution of its own: `contrast` is the
-    // distance between two luminances, and a distance does not care which way
-    // round it is measured. Whatever the colour caution said before the swap,
-    // it says after it. What *does* change is the code — a scanner is not
-    // symmetric, and `qrnew-core` draws and reads both ways round; the README
-    // has that story.
+    // It cannot make the code unscannable, which is what lets it sit beside the
+    // hex field rather than under a caution: `contrast` is a distance between
+    // luminances, and a distance does not care which way round it is measured.
+    // The *code* does change — a scanner is not symmetric — and `qrnew-core`
+    // draws and reads both ways round; the README has that story.
     let swap = move |()| {
         let (was_dark, was_light) = (dark(), light());
         dark.set(was_light);
@@ -967,21 +738,17 @@ pub fn App() -> Element {
     let mut caret = use_caret();
     let remember = use_hook(dioxus_core::try_consume_context::<Remember>);
 
-    // The title bar belongs to the platform, and the platform will not read a
-    // class off `.app` — so the one thing the stylesheet cannot reach is asked
-    // for here. It is cosmetic: a compositor that declines leaves a title bar
-    // that does not match, and the window under it is right either way.
+    // The title bar belongs to the platform, which will not read a class off
+    // `.app`. Cosmetic: a compositor that declines leaves a title bar that does
+    // not match, and the window under it is right either way.
     //
-    // The window arrives as a context, and there is not one in a test: the
-    // harness builds the document with no window at all. `try_consume_context`
-    // is what lets the same component run in both, the way `Fill` and `Inlay`
-    // already do.
+    // The window arrives as a context, and there is not one in a test — the
+    // harness builds the document with no window at all.
     let window = use_hook(dioxus_core::try_consume_context::<Arc<dyn WinitWindow>>);
     let windowed = window.is_some();
     // The editing keys, on the one platform that does not send them as keys.
-    // Before the effect below rather than after it, only because that one takes
-    // the window; there is no window in a test, which is what the `Option` is
-    // for here and in every other hook that asks for one.
+    // There is no window in a test, which is what the `Option` is for here and
+    // in every other hook that asks for one.
     #[cfg(target_os = "macos")]
     {
         let asking = window.clone();
@@ -997,37 +764,23 @@ pub fn App() -> Element {
         }
     });
 
-    // **Escape closes whichever sheet is open.** A modal is the one place in
-    // this window where the next click has to land somewhere in particular,
-    // and the key that means "not this" is the one everybody reaches for
-    // first: the scrim and the cross in the corner were the only two ways out,
-    // and a scrim is a thing you have to guess is clickable.
+    // **Escape closes whichever sheet is open**, answered twice because the two
+    // answers cover different halves of *where the keyboard is when the key is
+    // pressed*.
     //
-    // It is answered twice, because the two answers cover different halves of
-    // the same question — *where the keyboard is when the key is pressed*.
-    //
-    //   * `onkeydown` on `.app`, below. Blitz sends a key to the focused node
+    //   * `onkeydown` on `.app`, below: Blitz sends a key to the focused node
     //     and lets it bubble, so this catches every keystroke made while the
-    //     keyboard is anywhere inside the interface. It is also the half the
-    //     headless tests can drive, which is why the sheets take the keyboard
-    //     when they open — see the `autofocus` on their close buttons.
+    //     keyboard is inside the interface, and it is the half the headless
+    //     tests can drive.
     //
-    //   * This one, on the window itself. `clicking_a_chip_blurs_the_field`
-    //     records the upstream rule that makes it necessary: a click that
-    //     matches none of Blitz's known controls *clears* the focus, and a
-    //     plain `<button>` matches none of them — so after clicking a theme in
-    //     the sheet the keyboard is on `<html>`, which is above `.app` and
-    //     bubbles away from it rather than through it. A winit key event is
-    //     delivered before any of that applies.
+    //   * This one, on the window. `clicking_a_chip_blurs_the_field` records the
+    //     rule that makes it necessary: a click matching none of Blitz's known
+    //     controls *clears* the focus, so after clicking a theme the keyboard is
+    //     on `<html>`, above `.app`, and bubbles away from it.
     //
-    // Setting a signal that is already false is nothing, so the overlap on the
-    // keystrokes both of them see costs a comparison.
-    //
-    // The hook is gated on there being a window at all, and the gate is a
-    // constant for the life of this component — `window` comes from a
-    // `use_hook` — so the hook order does not change under it. Upstream's
-    // `use_window_event` consumes the window context rather than trying for
-    // it, and there is no window in a test.
+    // The gate is constant for the life of the component, so hook order does not
+    // change under it; upstream's `use_window_event` consumes the window context
+    // rather than trying for it, and there is no window in a test.
     if windowed {
         dioxus_native::use_window_event(move |event, _| {
             if let WindowEvent::KeyboardInput { event, .. } = event
@@ -1059,62 +812,47 @@ pub fn App() -> Element {
             finder: look().finder(),
             // Padding and clearing stay at the core's defaults — half a module
             // of air and a square cut-out. The size is the one of the three
-            // worth a control: it is the one somebody looks at the preview and
-            // wants a different answer to.
+            // worth a control.
             logo: picture.clone().map(|bytes| Logo {
                 size: asked,
                 ..Logo::new(bytes)
             }),
-            // No `..QrStyle::default()`: every field of it is written here,
-            // and the shape row is what filled the last two. A struct update
-            // that updates nothing is a line that would go on looking like the
-            // app is leaving something to the core.
+            // No `..QrStyle::default()`: every field is written here.
         };
         match Qr::new(&text, ec(), &style) {
             Ok(qr) => Some(Drawn { qr, capped: false }),
-            // The picture does not fit *this* code — which is a statement
-            // about how short the text is, not about the picture. Redrawn at
-            // the size that fits every code there is, and the row says so.
+            // The picture does not fit *this* code — a statement about how
+            // short the text is, not about the picture. Redrawn at the size
+            // that fits every code there is, and the row says so.
             //
-            // Guarded on the size actually being the larger one, so that a
-            // logo failure that is not about size cannot send the app round
-            // the same encode twice for the same answer.
+            // Guarded on the size actually being the larger one, so a logo
+            // failure that is not about size cannot send the app round the
+            // same encode twice for the same answer.
             Err(QrError::Logo(_)) if asked > Logo::DEFAULT_SIZE => {
                 style.logo = picture.map(Logo::new);
                 Qr::new(&text, ec(), &style)
                     .ok()
                     .map(|qr| Drawn { qr, capped: true })
             }
-            // An input past what the densest code can hold. The libcosmic
-            // build showed the placeholder for that and said nothing; the line
-            // under the field says it now.
+            // An input past what the densest code can hold. The line under the
+            // field says so.
             Err(_) => None,
         }
     });
 
-    // Kept apart from `code` so that a re-render that changes neither the text
-    // nor the colours does not rebuild the document.
+    // Kept apart from `code` so a re-render that changes neither the text nor
+    // the colours does not rebuild the document.
     //
-    // **Without the picture in it**, which is not a smaller preview but a
-    // different arrangement of the same one: the code's document already
-    // leaves a hole where the inset goes, and the picture is laid into that
-    // hole as an `<img>` of its own on the stage. What is saved and copied is
-    // still `Qr::svg`, one document with everything in it.
-    //
-    // The reason is the renderer underneath. `anyrender_vello_hybrid` keeps
-    // every image it has ever drawn in a GPU atlas, keyed by an identity
-    // counter rather than by content, and frees none of them — so a picture
-    // that arrives inside a *new* document on every keystroke is a new picture
-    // every time, and the eight atlases fill. At the 512-pixel cap
-    // `shrink_logo` imposes that is 392 redraws, which is a minute of moving
-    // the colour picker, and the end of it is `AtlasLimitReached` unwrapped
-    // two crates down. Out here the picture is one `<img>` whose `src` does
+    // **Without the picture in it.** The code's document already leaves a hole
+    // where the inset goes, and the picture is laid into that hole as an
+    // `<img>` of its own on the stage; what is saved and copied is still
+    // `Qr::svg`, one document with everything in it. The reason is the GPU
+    // atlas leak in `anyrender_vello_hybrid` — see this file's header and
+    // `blitz-atlas.md`. Out here the picture is one `<img>` whose `src` does
     // not change while the picture does not, so it is uploaded once.
     //
-    // The document itself is **markup rather than a `data:` URL**, and that is
-    // the second leak of the same family — `blitz-atlas.md` has the
-    // measurement. It is handed to the stage as it comes off `qrnew-core`, no
-    // base64 in between, which is also simply less work per keystroke.
+    // The document is **markup rather than a `data:` URL** for the same
+    // reason, in Blitz's own image cache, and it is less work per keystroke.
     let preview = use_memo(move || code().as_ref().map(|drawn| drawn.qr.svg_without_inset()));
 
     // The chosen picture, as something an `<img>` can point at. A memo for the
@@ -1154,9 +892,8 @@ pub fn App() -> Element {
         });
     };
 
-    // The file dialog offers the same formats the reader does, because they
-    // are the same list for the same reason: they are what `resvg` can draw,
-    // and the preview and both exports go through `resvg`.
+    // The same formats the reader offers, because it is the same list for the
+    // same reason: what `resvg` can draw.
     let choose_inset = move |_| {
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
@@ -1235,9 +972,7 @@ pub fn App() -> Element {
     };
 
     // The confirmation belongs to the image that was copied, so any edit that
-    // redraws the code takes it back: what is on the clipboard is no longer
-    // what is on the stage, and a button still saying "Copied." would be
-    // claiming otherwise.
+    // redraws the code takes it back.
     use_effect(move || {
         code.read();
         // `Confirmation::lower` peeks rather than reads, so this effect does
@@ -1258,48 +993,37 @@ pub fn App() -> Element {
     // stage's content and how the three export buttons are drawn.
     let ready = preview().is_some();
 
-    // Whether an inset is in place. It is asked three times below — the code
-    // is drawn with one, error correction is held at 30% by one, and the
-    // too-long message says different things with and without one — so it is
-    // read once here rather than borrowed three times in the middle of the
-    // markup.
+    // Whether an inset is in place — asked three times below, so read once here.
     let has_inset = inset.read().is_some();
     let shown_ec = if has_inset { ErrorCorrection::High } else { ec() };
-    // The largest inset the code on screen can carry, as the fraction of its
-    // width that [`InsetSize::fraction`] is measured in — and `None` while
-    // there is no code to measure.
+    // The largest inset this code can carry, as the fraction of its width that
+    // [`InsetSize::fraction`] is measured in; `None` while there is no code.
     //
-    // The number moves with the text, because the rule behind it is a number
-    // of *modules* and the module count is what the text decides. So the row
-    // has to ask the code in front of it rather than knowing the answer: the
-    // sizes it can offer at all are the sizes this code can take.
-    //
-    // `size_in_modules` counts the quiet zone, which the fraction does not.
+    // It moves with the text, because the rule behind it counts *modules* and
+    // the text decides the module count. `size_in_modules` counts the quiet
+    // zone, which the fraction does not.
     let room = code.read().as_ref().map(|drawn| {
         let modules = drawn.qr.size_in_modules() - 2 * margin();
         qrnew_core::largest_logo_size(Logo::DEFAULT_PADDING, modules)
     });
-    // Whether the size the row is pointing at is the size the code was drawn
-    // at. Read out of the memo rather than recomputed: the encode that already
-    // happened is the only thing that actually knows, and `room` above is the
-    // app's own arithmetic about the same rule. The two agree, and where a
-    // rounding at the boundary makes them disagree the memo is the one that is
-    // right — which is why the chip is dimmed by either of them.
+    // Whether the size the row points at is the size the code was drawn at.
+    // Read out of the memo rather than recomputed: the encode that already
+    // happened is the only thing that knows, and `room` is the app's own
+    // arithmetic about the same rule. Where a rounding at the boundary makes
+    // them disagree the memo is right, which is why either dims the chip.
     let capped = code.read().as_ref().is_some_and(|drawn| drawn.capped);
-    // Whether a size in the row is one the code in front of it cannot take: it
-    // does not fit, or it is the one that was asked for and did not fit. The
-    // second half is what covers a code that *shrank* — text deleted out from
-    // under a size that was fine when it was chosen.
+    // Whether a size in the row is one this code cannot take: it does not fit,
+    // or it is the one that was asked for and did not. The second half covers a
+    // code that *shrank* — text deleted out from under a size that was fine.
     let held = move |choice: InsetSize| {
         room.is_some_and(|room| choice.fraction() > room) || (capped && inset_size() == choice)
     };
 
-    // Where the picture goes on the stage, written as the style the layer over
-    // the code wears. The code that says where is the code that drew the hole,
-    // so the two cannot disagree about it — see the `preview` memo for why the
-    // picture is a layer at all. The numbers are fractions of the whole
-    // document, quiet zone included, and the box the layer sits in is the
-    // document, so a percentage is the whole conversion.
+    // Where the picture goes on the stage, as the style the layer over the code
+    // wears. The code that says where is the code that drew the hole, so the two
+    // cannot disagree. The numbers are fractions of the whole document, quiet
+    // zone included, and the layer's box is the document — so a percentage is
+    // the whole conversion.
     let spot = code
         .read()
         .as_ref()
@@ -1309,16 +1033,9 @@ pub fn App() -> Element {
             format!("left: {edge}%; top: {edge}%; width: {side}%; height: {side}%")
         });
 
-    // The line under the field. The prompt while the field is empty, nothing
-    // at all while a code is being drawn, and — the one failure the app could
-    // not report before — text past what a code can hold.
-    //
-    // It used to count the characters typed once there was a code. That count
-    // was a running total of nothing: there is no length anybody is working
-    // towards here, no limit worth watching approach, and the one number that
-    // *would* matter arrives as a sentence when the text stops fitting. What
-    // is left is a line that is often silent, which `min-height` in `ui.css`
-    // is what makes safe.
+    // The line under the field: the prompt while it is empty, nothing while a
+    // code is being drawn, and text past what a code can hold. Often silent,
+    // which `min-height` in `ui.css` is what makes safe.
     let (note, note_class) = if input().is_empty() {
         (fl!("input-placeholder"), "note")
     } else if ready {
@@ -1333,13 +1050,10 @@ pub fn App() -> Element {
     };
 
     // Whether either stepper button has anywhere to go. The margin is clamped
-    // at both ends — `set_margin` at the top and `saturating_sub` at the
-    // bottom — so at 0 and at [`MAX_MARGIN`] one of the two buttons was a
-    // target that answered a press by doing nothing at all, with no way to
-    // tell that from a press that had missed. Dimmed and inert instead, which
-    // is the same answer the error-correction row gives while an inset holds
-    // it and the same one the export buttons give with nothing to export: the
-    // control stays where it is and stops pretending.
+    // at both ends, so at 0 and at [`MAX_MARGIN`] one button answered a press
+    // by doing nothing, with no way to tell that from a press that had missed.
+    // Dimmed and inert instead — the same answer the error-correction row gives
+    // while an inset holds it.
     let can_shrink = margin() > 0;
     let can_grow = margin() < MAX_MARGIN;
 
@@ -1348,9 +1062,8 @@ pub fn App() -> Element {
     // a digit in the field's own font, so this is exact rather than tuned.
     let count_pad = margin_draft.read().chars().count() as f32 * 0.5;
 
-    // Cloned out rather than borrowed through the markup: holding a `Ref` on
-    // the signal while the tree is built is a lock held over a great deal of
-    // other people's code, and a file name is a few dozen bytes.
+    // Cloned rather than borrowed through the markup: holding a `Ref` while the
+    // tree is built is a lock held over a lot of other people's code.
     let inset_name = inset.read().as_ref().map(|chosen| chosen.name.clone());
     let export_ink = if ready { Ink::Plain } else { Ink::Faint };
     let export_class = if ready { "btn" } else { "btn off" };
@@ -1358,10 +1071,10 @@ pub fn App() -> Element {
     rsx! {
         style { {include_str!("ui.css")} }
 
-        // The theme is a class here rather than a media query in `ui.css`,
-        // and both sheets are inside it rather than beside it: a custom
-        // property is inherited, so anything painted in the app's colours has
-        // to be a descendant of the element the palette is written on.
+            // The theme is a class here rather than a media query in `ui.css`,
+            // and both sheets are inside it: a custom property is inherited, so
+            // anything painted in the app's colours has to descend from the
+            // element the palette is written on.
         div {
             class: "app theme-{theme().slug()}{caret.class()}",
             // Escape, for every keystroke made while the keyboard is inside
@@ -1422,16 +1135,14 @@ pub fn App() -> Element {
                             onfocusout: move |_| caret.left(),
                         }
                         // **Blitz has no `placeholder`.** There is no such
-                        // attribute in `blitz-dom` at all, so setting one — as
-                        // this app did until now — left the field simply
-                        // blank. The prompt is a sibling instead, and it is a
-                        // sibling rather than an overlay because
-                        // `pointer-events: none` is also missing, so anything
-                        // laid over the field would eat the click that is
-                        // supposed to focus it.
+                        // attribute in `blitz-dom` at all, so setting one left
+                        // the field blank. The prompt is a sibling rather than
+                        // an overlay because `pointer-events: none` is also
+                        // missing, so anything laid over the field would eat
+                        // the click meant to focus it.
                         //
-                        // The line keeps its height when it has nothing to
-                        // say, so the button below it never moves.
+                        // The line keeps its height when it has nothing to say,
+                        // so the button below never moves.
                         p { class: "{note_class}", "{note}" }
                         button {
                             class: "btn wide",
@@ -1490,34 +1201,15 @@ pub fn App() -> Element {
                             span { {fl!("section-correction")} }
                         }
                         // An inset takes this control away: `Qr::new` raises
-                        // error correction to `High` whenever there is a logo,
-                        // whatever it was asked for. The row goes on saying
-                        // what the code is actually drawn at — dimmed, and
-                        // inert, because a button that looks live and moves
-                        // nothing is worse than one that admits it is held.
-                        // The choice underneath is remembered, and comes back
-                        // when the inset goes.
+                        // error correction to `High` whenever there is a logo.
+                        // The row goes on saying what the code is drawn at,
+                        // dimmed and inert. The choice underneath is remembered
+                        // and comes back when the inset goes.
                         div { class: "segments",
                             // `data-ec` is the level's own name rather than its
                             // label, because the label is a translation and a
                             // test that selected on it would pass in English
                             // and nowhere else.
-                            // **The label is in a `<span>`, and it has to
-                            // be.** Bare text inside a `<button>` keeps the
-                            // colour it was first painted in when the theme
-                            // changes under it: the surface repaints and the
-                            // word does not, which leaves dark text on a dark
-                            // chip until something else makes Blitz rebuild
-                            // that node — clicking it, in practice, so the row
-                            // corrects itself one segment at a time. Wrapping
-                            // the text is what makes it a node with a style of
-                            // its own. Every other button in this file happens
-                            // to be built this way already, for the icon; the
-                            // two segmented rows are the only ones that were
-                            // not, and they were the only ones that broke. The
-                            // headless harness resolves this correctly, so
-                            // there is no test that would catch it coming
-                            // back.
                             for (level , name , label) in [
                                 (ErrorCorrection::Low, "low", fl!("ec-low")),
                                 (ErrorCorrection::Medium, "medium", fl!("ec-medium")),
@@ -1538,9 +1230,6 @@ pub fn App() -> Element {
                                 }
                             }
                         }
-                        // What the previous build hid behind a hover tooltip.
-                        // There is room for it here, and a sentence somebody
-                        // can read is worth more than one they have to find.
                         p { class: "hint",
                             {if has_inset { fl!("ec-locked") } else { fl!("ec-hint") }}
                         }
@@ -1576,11 +1265,11 @@ pub fn App() -> Element {
                                 r#type: "text",
                                 "data-margin": "true",
                                 // **This is what centres the number.** Blitz
-                                // paints an input's text at the left edge of
-                                // its content box and never looks at
-                                // `text-align`, so the padding is the only
-                                // handle there is: half the field, less half
-                                // the text, in the field's own digit width.
+                                // paints an input's text at the left edge of its
+                                // content box and never looks at `text-align`,
+                                // so padding is the only handle: half the field,
+                                // less half the text, in the field's own digit
+                                // width.
                                 style: "padding-left: calc({COUNT_MIDDLE}px - {count_pad}ch)",
                                 value: "{margin_draft}",
                                 oninput: move |event| {
@@ -1599,14 +1288,12 @@ pub fn App() -> Element {
                                         Err(_) => margin_draft.set(text),
                                     }
                                 },
-                                // Half-typed input is allowed to sit in the
-                                // field while it is being typed, but it cannot
-                                // outlive the keyboard: the code is still drawn
-                                // at the last number that parsed, so leaving an
-                                // empty field behind would leave the app
-                                // showing one margin and the field claiming
-                                // another. Whatever is applied is what comes
-                                // back.
+                                // Half-typed input may sit in the field while it
+                                // is being typed, but it cannot outlive the
+                                // keyboard: the code is drawn at the last number
+                                // that parsed, so an empty field left behind
+                                // would have the app showing one margin and the
+                                // field claiming another.
                                 onblur: move |_| margin_draft.set(margin().to_string()),
                                 onkeydown: move |event| {
                                     caret.struck();
@@ -1628,24 +1315,17 @@ pub fn App() -> Element {
                                 {glyph(Glyph::Plus, step_ink(can_grow), "glyph")}
                             }
                         }
-                        // Only once somebody has actually gone below two: a
-                        // caveat printed permanently is read once and then
-                        // stops being read, and this one arrives at the moment
-                        // it applies. It is a banner under the control rather
-                        // than a remark at the end of its row, and it is set
-                        // larger than the sentence below it, because the one
-                        // line here that says a code might not scan should not
-                        // be the smallest thing in the card.
+                        // Only once somebody has gone below two: a caveat
+                        // printed permanently stops being read, and this one
+                        // arrives at the moment it applies. Set larger than the
+                        // sentence below it, because the line saying a code
+                        // might not scan should not be the smallest thing here.
                         //
-                        // It also *replaces* the hint rather than joining it,
-                        // which is what pays for it. The hint says what the
-                        // control does, and somebody who has driven the number
-                        // below two has already found that out by doing it;
-                        // the caution is the same sentence's worth of room
-                        // spent on the thing that now matters more. Two
-                        // paragraphs here is what pushed this card off the
-                        // bottom of the rail in the wider face a Linux machine
-                        // picks for `system-ui` — see the budget in `ui.css`.
+                        // It *replaces* the hint rather than joining it, which
+                        // is what pays for it — two paragraphs pushed this card
+                        // off the bottom of the rail in the wider face a Linux
+                        // machine picks for `system-ui`. See the budget in
+                        // `ui.css`.
                         if margin() < SAFE_MARGIN {
                             p { class: "warn", "data-margin-warning": "true",
                                 {glyph(Glyph::Alert, Ink::Warn, "glyph")}
@@ -1655,29 +1335,19 @@ pub fn App() -> Element {
                             p { class: "hint", {fl!("margin-hint")} }
                         }
                     }
-                    // Last in the rail, under the margin, which is the order
-                    // the two read in: what the code is made of, after how
-                    // much air is around it, both downstream of what it says.
+                    // Last in the rail, under the margin: what the code is made
+                    // of, after how much air is around it.
                     //
-                    // The cost of being last is that this card's caution is
-                    // the lower of the two, in a column that scrolls — and it
-                    // is the likelier of the two to appear, needing one click
-                    // where the margin's needs somebody to walk under the
-                    // app's own default. So the room it needs was found rather
-                    // than borrowed from the position: a point off every
-                    // card's padding and two off the gap between them, which
-                    // is what keeps the banner on screen at the shortest
-                    // window in the widest face. `a_caution_is_never_the_
-                    // thing_that_scrolls` is the promise; what goes under the
-                    // fold there is this card's own bottom edge, below the
-                    // sentence rather than instead of it.
+                    // The cost of being last is that this card's caution is the
+                    // lower of the two, in a column that scrolls, and it is the
+                    // likelier of the two to appear. So the room was found
+                    // rather than borrowed from the position — see the budget in
+                    // `ui.css`. `a_caution_is_never_the_thing_that_scrolls` is
+                    // the promise: what goes under the fold is this card's own
+                    // bottom edge, below the sentence rather than instead of it.
                     //
-                    // It is in this rail rather than beside the colours, where
-                    // it arguably belongs by subject, because that is the rail
-                    // with no room: the picker leaves it a few dozen points of
-                    // slack at the height `no_control_is_below_the_fold` holds
-                    // the window to, and this card is a hundred and six of them
-                    // before it says anything.
+                    // In this rail rather than beside the colours, where it
+                    // belongs by subject, because that is the rail with no room.
                     div { class: "card",
                         div { class: "card-head",
                             {glyph(Glyph::Shape, Ink::Accent, "glyph")}
@@ -1691,10 +1361,6 @@ pub fn App() -> Element {
                                     "data-look": "{choice.slug()}",
                                     aria_pressed: if look() == choice { "true" } else { "false" },
                                     onclick: move |_| look.set(choice),
-                                    // In a `<span>`, like every other chip in
-                                    // the window: bare text inside a `<button>`
-                                    // keeps the ink it was first painted in
-                                    // when the theme changes under it.
                                     span {
                                         match choice {
                                             Look::Square => fl!("shape-square"),
@@ -1705,24 +1371,17 @@ pub fn App() -> Element {
                                 }
                             }
                         }
-                        // The one thing the test suite cannot tell anybody.
-                        // All three shapes decode — `every_combination_of_
-                        // shapes_scans` proves it with a real reader — but
-                        // decoding in a test is not the same experience as
-                        // holding a phone up to one: a rounded or dotted code
-                        // gives the camera fewer clean edges, so it takes
-                        // longer to focus and longer to lock on. That is a
-                        // real cost, it is invisible from inside the repo, and
-                        // the person paying it is standing in front of a
-                        // printed code wondering whether it works.
+                        // The one thing the test suite cannot tell anybody. All
+                        // three shapes decode — `every_combination_of_shapes_
+                        // scans` proves it with a real reader — but a rounded or
+                        // dotted code gives a camera fewer clean edges, so it
+                        // takes longer to focus and lock on. Invisible from
+                        // inside the repo; paid by somebody holding a phone up
+                        // to a printed code.
                         //
-                        // Written the way the margin caution is written, for
-                        // the same reason: a caveat printed permanently is
-                        // read once and then stops being read, and this one
-                        // has nothing to say while the code is square. It is
-                        // the same banner and the same ink, because it is the
-                        // same kind of statement — the app volunteering that a
-                        // choice it is perfectly willing to make has a price.
+                        // Written the way the margin caution is, and for the
+                        // same reason: it has nothing to say while the code is
+                        // square.
                         if look() != Look::Square {
                             p { class: "warn", "data-shape-warning": "true",
                                 {glyph(Glyph::Alert, Ink::Warn, "glyph")}
@@ -1746,24 +1405,19 @@ pub fn App() -> Element {
                             // and a percentage inside it is a fraction of the
                             // document — which is the unit `inset_box` speaks.
                             div { class: "code",
-                                // The document, dropped in whole. `Blitz`
-                                // parses the markup, sees an `<svg>`, and hands
-                                // that element's own serialization to `usvg` —
-                                // the same parser a `data:` URL would have
-                                // reached, and `the_code_on_the_stage_is_the_
-                                // code_in_the_file` is what holds the two
-                                // documents to being one.
+                                // The document, dropped in whole. Blitz parses
+                                // the markup, sees an `<svg>`, and hands that
+                                // element's own serialization to `usvg` — the
+                                // same parser a `data:` URL would have reached.
+                                // `the_code_on_the_stage_is_the_code_in_the_file`
+                                // holds the two documents to being one.
                                 //
-                                // `dangerous_inner_html` is the only way in,
-                                // and the name is about markup from somewhere
-                                // else. This markup is `draw.rs`'s, built from
-                                // an escaped string a line above where the
-                                // code was encoded.
-                                //
-                                // The name the `<img>` carried as its `alt`
-                                // moves here with it: a `<div>` full of paths
-                                // is not a picture to anything reading the
-                                // window aloud unless it says so.
+                                // `dangerous_inner_html` is the only way in, and
+                                // the name is about markup from somewhere else;
+                                // this is `draw.rs`'s, built from an escaped
+                                // string. The `alt` the `<img>` carried moves
+                                // here: a `<div>` full of paths is not a picture
+                                // to anything reading the window aloud.
                                 div {
                                     class: "doc",
                                     "data-preview": "true",
@@ -1848,44 +1502,24 @@ pub fn App() -> Element {
                                 onpick: move |_| editing.set(Well::Light),
                             }
                         }
-                        // The third caution, in the same banner as the other
-                        // two and for the same reason: a choice the app is
-                        // perfectly willing to make, with a price it is the
-                        // only one in the room who knows about.
+                        // The third caution, in the same banner as the other two
+                        // and for the same reason: a choice the app is willing
+                        // to make, with a price only it knows about.
                         //
-                        // It is the most reachable of the three. The margin's
-                        // caution takes two clicks past the app's own default
-                        // and the shape's takes one; this one is a click on a
-                        // swatch four pixels from the one somebody meant, and
-                        // the greyscale row has eight of them in a line. The
-                        // window's other answer to a colour that is nearly its
-                        // neighbour — `mat_line`, which keeps the mat's edge
-                        // visible against the page — is about the *preview*
-                        // being honest. This is about the file.
+                        // The most reachable of the three — a click on a swatch
+                        // four pixels from the one somebody meant. It is about
+                        // the *file*; `mat_line`, the window's other answer to a
+                        // colour near its neighbour, is about the preview.
                         //
-                        // Directly under the wells, which is what it is about,
-                        // and as high in the tighter of the two rails as it
-                        // can be put. The card has no hint to trade for the
-                        // banner the way the margin card trades for its own,
-                        // so this is the one caution of the three that is a
-                        // card's worth of addition to a rail with no slack —
-                        // and it still fits, at 820 as well as at 860, which
-                        // is `no_control_is_below_the_fold` rather than the
-                        // weaker promise the shape caution has to settle for.
-                        //
-                        // It is held while the picker is being dragged,
-                        // because it is *above* the picker: a banner arriving
-                        // under a pointer that is drawing on the square drops
-                        // the square half an inch mid-stroke, and a pointer's
-                        // `element_coordinates` are measured against the
-                        // square — so a hand that has not moved is suddenly on
-                        // a different colour, which can cross back over the
-                        // threshold and move the square again. Nothing is lost
-                        // by the wait: the banner arrives when the button
-                        // comes up, with the pointer still on the colour that
-                        // earned it, and every other way into these two
-                        // colours is one change that moves the picker once,
-                        // which is what a click does everywhere else here.
+                        // **Held while the picker is being dragged**, because it
+                        // is *above* the picker: a banner arriving under a
+                        // pointer drawing on the square drops the square half an
+                        // inch mid-stroke, and a pointer's `element_coordinates`
+                        // are measured against the square — so a hand that has
+                        // not moved is suddenly on a different colour, which can
+                        // cross back over the threshold and move it again.
+                        // Nothing is lost by waiting: the banner arrives when
+                        // the button comes up.
                         if held_caution()
                             .unwrap_or_else(|| contrast(dark(), light()) < SAFE_CONTRAST)
                         {
@@ -1919,10 +1553,9 @@ pub fn App() -> Element {
                         }
                     }
 
-                    // Under the colours, which is where it belongs: an inset
-                    // is the last thing anybody adds and the first thing they
-                    // take away again, and it is the only control in the
-                    // window that changes what another one is allowed to say.
+                    // Under the colours: an inset is the last thing anybody adds
+                    // and the first thing they take away, and it is the only
+                    // control that changes what another one is allowed to say.
                     div { class: "card",
                         div { class: "card-head",
                             {glyph(Glyph::Inset, Ink::Accent, "glyph")}
@@ -1962,20 +1595,15 @@ pub fn App() -> Element {
                                     span { {fl!("inset-remove")} }
                                 }
                             }
-                            // How big the picture is drawn, and only once
-                            // there is one to draw: a size control over an
-                            // empty card is a question about nothing, and the
-                            // card is in the taller of the two rails.
+                            // How big the picture is drawn, and only once there
+                            // is one: a size control over an empty card is a
+                            // question about nothing, in the taller rail.
                             //
                             // A size this code has no room for is dimmed and
-                            // inert, the same way the error-correction row is
-                            // while an inset holds it at 30%. It is the honest
-                            // shape for it: the row's top end is set by the
-                            // code's module count, the module count is set by
-                            // how much text there is, and a chip that took the
-                            // click and changed nothing would be the app
-                            // pretending otherwise. A few more characters and
-                            // it comes back.
+                            // inert, like the error-correction row while an
+                            // inset holds it. The row's top end is set by the
+                            // module count and the module count by how much text
+                            // there is, so a few more characters brings it back.
                             div { class: "segments segments-3",
                                 for choice in InsetSize::ALL {
                                     button {
@@ -1988,11 +1616,6 @@ pub fn App() -> Element {
                                                 inset_size.set(choice);
                                             }
                                         },
-                                        // In a `<span>`, like every other chip
-                                        // in the window: bare text inside a
-                                        // `<button>` keeps the ink it was
-                                        // first painted in when the theme
-                                        // changes under it.
                                         span {
                                             match choice {
                                                 InsetSize::Small => fl!("inset-small"),
@@ -2015,14 +1638,10 @@ pub fn App() -> Element {
                         if inset_error() {
                             p { class: "error", {fl!("inset-error")} }
                         }
-                        // The sentence is what an empty card is for: it says
-                        // what an inset is and what taking one costs. Once
-                        // there is a picture the thumbnail says the first
-                        // half, and the error-correction card — a rail away,
-                        // but still on screen — is already saying the second
-                        // in its own hint, so
-                        // keeping it here would be the same fact twice, in the
-                        // one column that has no room to spare.
+                        // What an empty card is for: it says what an inset is
+                        // and what taking one costs. Once there is a picture the
+                        // thumbnail says the first half and the error-correction
+                        // hint is already saying the second.
                         if !has_inset {
                             p { class: "hint", {fl!("inset-hint")} }
                         }
@@ -2059,9 +1678,7 @@ pub fn App() -> Element {
                             }
                         }
                         // The same segmented row the error-correction levels
-                        // use, because it is the same shape of question: a
-                        // short closed list where the answer in force is worth
-                        // seeing without opening anything.
+                        // use: the same shape of question.
                         div { class: "segments segments-3",
                             for choice in Theme::ALL {
                                 button {
@@ -2118,17 +1735,14 @@ pub fn App() -> Element {
                             }
                         }
                         p { {fl!("app-description")} }
-                        // The one line in the window that was English rather
-                        // than a translation: it was a `format!`, because the
-                        // number is not a word. Fluent takes an argument, so
-                        // it does not have to be.
+                        // Fluent takes an argument, so the number does not force
+                        // this line to be a `format!` in English.
                         p { class: "version",
                             {fl!("version", number = env!("CARGO_PKG_VERSION"))}
                         }
-                        // One button where there were two, so it takes the
-                        // width rather than sitting in half of it: the panel
-                        // now has exactly one thing to press and one way out,
-                        // and they do not look alike.
+                        // One button, so it takes the width rather than sitting
+                        // in half of it: the panel has one thing to press and
+                        // one way out, and they do not look alike.
                         div { class: "sheet-actions",
                             button {
                                 class: "btn wide",
@@ -2148,10 +1762,9 @@ pub fn App() -> Element {
 
 /// One of the two colour tiles: the swatch, what it paints, and its hex.
 ///
-/// A tile rather than the bare circle the libcosmic build drew, because a
-/// circle of colour beside the word "Foreground" is two things to look at for
-/// one fact. This is one thing to look at, and it is also the click target
-/// that points the picker below at this colour.
+/// A tile rather than a bare circle of colour beside a word, which is two
+/// things to look at for one fact. It is also the click target that points the
+/// picker below at this colour.
 #[component]
 fn ColorWell(
     which: Well,
@@ -2183,40 +1796,35 @@ fn ColorWell(
 /// The colour picker: a saturation/value square, a hue strip, a palette and a
 /// hex field, all writing the same signal.
 ///
-/// This is the one part of the interface that libcosmic gave QRnew for free.
 /// There is no `<input type="color">` in Blitz — it has an accessibility role
 /// for one and no widget behind it — so every piece here is an ordinary
-/// element, and the square is drawn the way a browser would draw it: four
-/// stacked CSS background layers over a `div`.
+/// element, and the square is four stacked CSS background layers over a `div`.
 ///
 /// **The markers are background layers rather than child elements**, which is
-/// the one non-obvious decision in this file. A child sitting on top of the
-/// square is what the pointer hits, and Blitz measures element coordinates
-/// once against the hit node — so `element_coordinates()` would come back
-/// relative to the marker instead of the square, and `pointer-events: none` —
-/// the usual answer — is not implemented. A background layer has no hit box at
-/// all, so the square stays its own target no matter where the marker is.
+/// the one non-obvious decision here. A child on top of the square is what the
+/// pointer hits, and Blitz measures element coordinates once against the hit
+/// node — so `element_coordinates()` would come back relative to the marker,
+/// and `pointer-events: none`, the usual answer, is not implemented. A
+/// background layer has no hit box at all.
 ///
-/// `onhold` says when a pointer has taken hold of the square or the strip and
-/// when it has let go. It is the picker's own business except that the colour
-/// caution above it holds still in between; the argument is beside the banner.
+/// `onhold` says when a pointer has taken hold of the square or the strip. It
+/// is the picker's own business except that the colour caution above holds
+/// still in between; the argument is beside the banner.
 #[component]
 fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<()>) -> Element {
     // The blink, from the context `App` provides. The hex field is a text
     // field like the other two and blinks like them; it is only in a different
     // component because the colour picker is.
     let mut caret = use_context::<Caret>();
-    // The hex field keeps its own text, because half-typed hex is not a
-    // colour: "#2f6" is three characters short of one, and a field that
-    // rewrote itself from `color` on every keystroke could not be typed into.
+    // The hex field keeps its own text, because half-typed hex is not a colour
+    // and a field rewritten from `color` on every keystroke cannot be typed in.
     let mut draft = use_signal(|| color().to_hex());
     let mut valid = use_signal(|| true);
 
     // Hue, saturation and value are held here rather than derived from the
-    // colour on every render, because the conversion back is lossy in exactly
-    // the places a picker is used: black has no hue and grey has no hue, so a
-    // square dragged into its bottom edge would snap the strip back to red and
-    // strand whoever was dragging it.
+    // colour on every render, because the conversion back is lossy where a
+    // picker is used: black and grey have no hue, so a square dragged into its
+    // bottom edge would snap the strip to red and strand whoever was dragging.
     let mut hsv = use_signal(|| to_hsv(color()));
     let mut dragging = use_signal(|| false);
     // Taking hold and letting go are the same two words to the square, to the
@@ -2226,11 +1834,9 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
         onhold.call(holding);
     };
 
-    // The last colour this picker itself wrote, so that a colour arriving from
-    // anywhere else can be told apart from one of its own. "Reset to black &
-    // white" is the one place another colour comes from, and before this the
-    // square, the strip and the hex field all carried on showing whatever had
-    // been picked before it — the code went black and the picker did not.
+    // The last colour this picker wrote, so a colour arriving from anywhere
+    // else can be told apart from one of its own — "Reset to black & white" is
+    // the one place another comes from.
     //
     // A round trip through HSV cannot stand in for this comparison: it is lossy
     // for exactly the colours a picker is used on, so a half-typed hex would be
@@ -2387,13 +1993,10 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
                         }
                         draft.set(text);
                     },
-                    // The same rule the margin field follows, and for the same
-                    // reason: half-typed text may sit in a field while it is
-                    // being typed, but it cannot outlive the keyboard. The
-                    // code is still drawn in the last colour that parsed, so a
-                    // field left reading `#2f6` — or reading nothing — would be
-                    // the window showing one colour and the field claiming
-                    // another. Whatever is applied is what comes back.
+                    // The same rule the margin field follows: half-typed text
+                    // may sit in a field while it is being typed, but it cannot
+                    // outlive the keyboard. The code is still drawn in the last
+                    // colour that parsed.
                     onblur: move |_| {
                         draft.set(color().to_hex());
                         valid.set(true);
@@ -2406,16 +2009,9 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
                     onfocusout: move |_| caret.left(),
                 }
                 // Beside the hex rather than under it, in the room the row
-                // already had: the field holds seven characters and is 132
-                // points wide, so half of this row has been empty since it
-                // was written.
-                //
-                // It belongs to the card rather than to this picker — it moves
-                // both colours, and the picker only ever holds one — which is
-                // why it arrives as a handler. It is here because this is
-                // where the room is, and because a person who has just typed
-                // one of the two colours is the person most likely to want
-                // them the other way round.
+                // already had. It belongs to the card rather than to this
+                // picker — it moves both colours, and the picker holds one — so
+                // it arrives as a handler.
                 button {
                     class: "btn swap",
                     "data-swap": "true",
@@ -2460,14 +2056,11 @@ struct Hsv {
 /// is two colours rather than one: see [`glyph`], which draws both and lets
 /// the stylesheet hide the one that does not belong to the theme in force.
 ///
-/// Three of the five are a palette token written out a second time — the
-/// accent, the caution and the danger, which have to be exactly the green,
-/// the gold and the red of the chrome they sit in, and
+/// Three of the five are a palette token written a second time — the accent,
+/// the caution and the danger, which have to match the chrome they sit in;
 /// `an_icon_is_inked_the_colour_the_stylesheet_says` keeps the two files
-/// saying the same number. The two greys are not tokens: a 1.7-pixel stroke
-/// does not carry the same weight as a line of text at the same colour, so
-/// they were matched by eye against the words beside them and land between
-/// the ink steps rather than on one.
+/// agreeing. The two greys are not tokens: a 1.7-pixel stroke does not carry
+/// the weight of text at the same colour, so they were matched by eye.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Ink {
     /// Section marks and the brand, in the accent.
@@ -2478,10 +2071,8 @@ enum Ink {
     Faint,
     /// The one caution the app has: a margin too narrow to vouch for.
     Warn,
-    /// A cross under the pointer, in the `--danger` the window writes a bad
-    /// hex field in. It is the colour a close button turns everywhere else on
-    /// the desktop, and on a mark that is a shape rather than a word it is
-    /// what says which of the several things a cross can mean this one is.
+    /// A cross under the pointer, in the `--danger` the window writes a bad hex
+    /// field in — the colour a close button turns everywhere else.
     Danger,
 }
 
@@ -2499,9 +2090,9 @@ impl Ink {
 
     /// The same five on a dark one.
     ///
-    /// Not the light inks inverted: an icon is a line drawing, and a line has
-    /// to stay a shade away from the surface it is on in both directions —
-    /// which is a different distance on paper than it is on graphite.
+    /// Not the light inks inverted: a line drawing has to stay a shade away
+    /// from its surface in both directions, which is a different distance on
+    /// paper than on graphite.
     const fn dark(self) -> &'static str {
         match self {
             Ink::Accent => "#4ECB8F",
@@ -2516,9 +2107,8 @@ impl Ink {
 /// The icons, as the paths that draw them on a 24×24 grid.
 ///
 /// Hand-drawn rather than pulled from an icon font, for the reason the whole
-/// app exists: a font is a file to ship and a licence to honour, and nineteen
-/// icons is less of both. They are stroked, round-capped and unfilled, which
-/// is the one decision that keeps them looking like a set.
+/// app exists: a font is a file to ship and a licence to honour. Stroked,
+/// round-capped and unfilled, which is what keeps them looking like a set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Glyph {
     /// Three finder squares and a scatter of modules: QRnew's own mark, and
@@ -2606,10 +2196,9 @@ impl Glyph {
                 "M4.4 4.4 H19.6 V19.6 H4.4 Z",
                 "M15.2 12 A3.2 3.2 0 1 1 8.8 12 A3.2 3.2 0 1 1 15.2 12",
             ],
-            // Two cells across and two down: a square, a rounded square and
-            // two dots. Three outlines rather than four shapes' worth of
-            // information, because the fourth cell empty reads as a mistake
-            // and the dot is the one worth showing twice.
+            // Two cells across and two down: a square, a rounded square and two
+            // dots. Three outlines rather than four, because an empty fourth
+            // cell reads as a mistake.
             Glyph::Shape => &[
                 "M4 4 H11 V11 H4 Z",
                 "M15.2 4 H17.8 A2.2 2.2 0 0 1 20 6.2 V8.8 A2.2 2.2 0 0 1 17.8 11 \
@@ -2650,12 +2239,6 @@ impl Glyph {
     }
 }
 
-/// The classes one error-correction segment is drawn with.
-///
-/// Four states out of two questions — is this the level the code is drawn at,
-/// and is an inset holding the row where it is — and they are spelled out
-/// rather than assembled, because a class list built by pushing strings
-/// together is a class list nothing can grep for.
 /// The ink a stepper button's sign is drawn in, given whether it can move the
 /// margin at all.
 ///
@@ -2667,6 +2250,14 @@ const fn step_ink(live: bool) -> Ink {
     if live { Ink::Plain } else { Ink::Faint }
 }
 
+/// How a chip is drawn: selected, held, or neither.
+///
+/// **Every chip's label goes in a `<span>`.** Bare text inside a `<button>`
+/// keeps the colour it was first painted in when the theme changes under it —
+/// the surface repaints and the word does not, leaving dark text on a dark
+/// chip until something rebuilds the node. Wrapping the text makes it a node
+/// with a style of its own. The headless harness resolves this correctly, so
+/// no test would catch it coming back.
 const fn chip_class(selected: bool, locked: bool) -> &'static str {
     match (selected, locked) {
         (true, false) => "chip on",
@@ -2685,10 +2276,9 @@ const fn chip_class(selected: bool, locked: bool) -> &'static str {
 /// cannot follow the theme and the icon has to. One is drawn in each palette's
 /// ink and `ui.css` hides the wrong one.
 ///
-/// It is the price of letting somebody change the theme while the window is
-/// open, and it is paid on every icon whether they ever do or not: a node and
-/// a small usvg document that is laid out nowhere and painted never. Worth
-/// knowing before spending the same trick on anything that appears in a list.
+/// It is the price of a runtime theme switch, paid on every icon whether
+/// anybody uses it or not. Worth knowing before spending the same trick on
+/// anything that appears in a list.
 fn glyph(kind: Glyph, ink: Ink, class: &'static str) -> Element {
     rsx! {
         {drawn(kind, ink.light(), format!("{class} lit"))}
@@ -2704,11 +2294,9 @@ fn glyph(kind: Glyph, ink: Ink, class: &'static str) -> Element {
 /// a sheet and on nothing else in the window.
 ///
 /// The swap is a `display` on the two wrappers, so the theme half of the
-/// choosing is not written a second time: `.lit` / `.dim` still picks inside
-/// each pair, and `ui.css` only has to say which pair the pointer is asking
-/// for. Both wrappers are flex boxes, which is what keeps the mark centred —
-/// an `<svg>` is inline by default, and a line box under a 34-point button
-/// would sit it a pixel low.
+/// choosing is not written twice: `.lit` / `.dim` still picks inside each pair.
+/// Both wrappers are flex boxes, which keeps the mark centred — an `<svg>` is
+/// inline by default, and a line box under a 34-point button would sit it low.
 fn glyph_hover(kind: Glyph, rest: Ink, hot: Ink, class: &'static str) -> Element {
     rsx! {
         span { class: "ink-rest", {glyph(kind, rest, class)} }
@@ -2736,24 +2324,16 @@ fn drawn(kind: Glyph, stroke: &'static str, class: String) -> Element {
 
 /// The dashed outline's colour on a mat painted `mat`.
 ///
-/// The outline is what tells the code's own background apart from the window
-/// behind it, and `ui.css` can only guess at one of those two: the mat is
-/// whatever colour somebody picked. A fixed grey answers the case the app
-/// opens in — white on near-white — and disappears the moment anybody clicks
-/// the middle of the greyscale row, which is four pixels from where the colour
-/// is chosen. So the line is derived from the mat instead.
-///
-/// It is the mat pushed away from itself: towards black if the mat is light,
-/// towards white if it is dark. That keeps a line on the mat's own hue rather
-/// than a grey laid over it, and it is also what makes the line independent of
-/// the theme: a line half a palette away from the mat clears the page on
-/// either side of it, because a mat light enough to need a dark line is
-/// already lighter than a dark window, and one dark enough to need a light
-/// line is already darker than a light one.
+/// The outline tells the code's own background apart from the window behind
+/// it, and the mat is whatever colour somebody picked — so a fixed grey answers
+/// the case the app opens in and disappears the moment anybody clicks the
+/// middle of the greyscale row. The line is derived from the mat instead:
+/// pushed towards black if the mat is light, towards white if it is dark, which
+/// keeps it on the mat's own hue and independent of the theme.
 ///
 /// The two fractions differ because the eye does. A third of the way to black
-/// off white is a line you read without looking at it; the same third of the
-/// way to white off black is barely there, so the dark side gets more.
+/// off white reads without looking; the same third towards white off black is
+/// barely there, so the dark side gets more.
 fn mat_line(mat: Rgb) -> String {
     /// Luminance above which a mat counts as light, on 0…1.
     const LIGHT_ABOVE: f32 = 0.5;
@@ -2775,9 +2355,7 @@ fn mat_line(mat: Rgb) -> String {
 /// How light a colour is, on 0…1.
 ///
 /// The 299/587/114 weighting, which is what `read` in `qrnew-core` flattens a
-/// photograph to before handing it to `rqrr`. Deliberately the same one: if the
-/// app is going to call a colour light or dark, it should call it what its own
-/// reader would.
+/// photograph to before handing it to `rqrr`. Deliberately the same one.
 fn luminance(colour: Rgb) -> f32 {
     (299.0 * f32::from(colour.r) + 587.0 * f32::from(colour.g) + 114.0 * f32::from(colour.b))
         / 255_000.0
@@ -2785,12 +2363,11 @@ fn luminance(colour: Rgb) -> f32 {
 
 /// How far apart the code's two colours are, on 0…1.
 ///
-/// Luminance and not hue, because a scanner has no opinion about hue: it
-/// flattens the picture to grey and looks for the step. Two colours that are
-/// nothing alike to look at can be the same colour to a camera — the palette's
-/// own leaf green on its dark red is a gap of 0.038 — which is exactly the
-/// case a window full of colour swatches has to be able to say something
-/// about. [`SAFE_CONTRAST`] is where it starts saying it.
+/// Luminance and not hue: a scanner flattens the picture to grey and looks for
+/// the step. Two colours nothing alike to look at can be the same colour to a
+/// camera — the palette's leaf green on its dark red is a gap of 0.038 — which
+/// is the case a window full of swatches has to say something about.
+/// [`SAFE_CONTRAST`] is where it starts saying it.
 fn contrast(dark: Rgb, light: Rgb) -> f32 {
     (luminance(dark) - luminance(light)).abs()
 }
@@ -2808,25 +2385,21 @@ struct Marker {
 
 /// A marker on the square or the strip, as three stacked background layers.
 ///
-/// It is a dark outline, a white ring inside it and the picked colour in the
-/// middle — three filled squares, largest at the bottom, so that it reads on a
-/// white corner and a black one alike and says what has been picked while it
-/// is at it.
+/// A dark outline, a white ring inside it and the picked colour in the middle —
+/// three filled squares, largest at the bottom, so it reads on a white corner
+/// and a black one alike.
 ///
-/// **Not a `radial-gradient`, which is what drew it before.** Blitz resolves a
-/// radial gradient's centre in CSS pixels and then adds it to a rectangle it
-/// has already measured in device pixels, so on a 2× display the ring landed
-/// at half the offset it was given: the colour under the pointer was right and
-/// the mark was somewhere else entirely. `background-position` and
-/// `background-size` are both multiplied by the scale before they are used,
-/// and `linear-gradient(c, c)` is a flat fill of `c`, so a marker built out of
-/// those is drawn where it was put at any scale.
+/// **Not a `radial-gradient`, which drew it before.** Blitz resolves a radial
+/// gradient's centre in CSS pixels and then adds it to a rectangle already
+/// measured in device pixels, so on a 2× display the ring landed at half the
+/// offset it was given. `background-position` and `background-size` are both
+/// multiplied by the scale before use, and `linear-gradient(c, c)` is a flat
+/// fill, so a marker built out of those is drawn where it was put at any scale.
 ///
 /// The centre is held half a marker inside the box. A background layer is
-/// clipped to its element — unlike the child element a browser would use,
-/// which is free to overhang — so an unclamped marker on a fully black or
-/// fully saturated colour would be a sliver against the edge, which is exactly
-/// when somebody is looking for it.
+/// clipped to its element — unlike the child element a browser would use — so
+/// an unclamped marker on a fully black or fully saturated colour would be a
+/// sliver against the edge, which is exactly when somebody is looking for it.
 fn marker(x: f64, y: f64, width: f64, height: f64, fill: Rgb) -> Marker {
     /// Half the outermost square, which is how far in the centre is held.
     const REACH: f64 = 10.0;
@@ -2901,14 +2474,12 @@ fn from_hsv(hsv: Hsv) -> Rgb {
 /// `#rrggbb`, `rrggbb`, `#rgb` or `rgb`, in either case.
 ///
 /// **Bytes rather than a string slice, and that is a crash rather than a
-/// preference.** This reads whatever is in the hex field on every keystroke,
-/// the field takes any text somebody can type, and the length it switched on
-/// was `str::len` — a count of bytes — while the slices it then took were
-/// expected to be characters. Three bytes is `abc` and it is also `aé`, and
-/// `&text[1..2]` inside that second one is not a character boundary: the field
-/// panics, and a panic in a Dioxus event handler takes the window with it.
-/// Every path below now indexes a byte and asks whether that byte is a hex
-/// digit, which anything outside ASCII simply is not.
+/// preference.** This reads the hex field on every keystroke, the field takes
+/// any text somebody can type, and the length it switched on was `str::len` —
+/// bytes — while the slices it took were expected to be characters. Three bytes
+/// is `abc` and also `aé`, where `&text[1..2]` is not a character boundary: the
+/// field panics, and a panic in a Dioxus event handler takes the window with
+/// it. Every path below indexes a byte and asks whether it is a hex digit.
 fn parse_hex(text: &str) -> Option<Rgb> {
     let text = text.trim().trim_start_matches('#').as_bytes();
     // A byte at or above 0x80 becomes a Latin-1 character here, and none of
@@ -2926,13 +2497,10 @@ fn parse_hex(text: &str) -> Option<Rgb> {
 
 /// Bytes, as something an `<img>` can point at.
 ///
-/// Two callers: the generated SVG, rebuilt on every keystroke, and whatever
-/// picture has been chosen as an inset, encoded once when it is chosen.
-///
-/// Base64 rather than percent-encoding because a QR code's document is mostly
-/// path data and the characters that would have to be escaped are common in
-/// it: base64 costs a third more, escaping everything costs three times more,
-/// and this is rebuilt on every keystroke.
+/// Base64 rather than percent-encoding because a QR document is mostly path
+/// data and the characters needing escapes are common in it: base64 costs a
+/// third more, escaping everything costs three times more, and this is rebuilt
+/// on every keystroke.
 fn data_url(mime: &str, bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -2963,16 +2531,14 @@ fn data_url(mime: &str, bytes: &[u8]) -> String {
 ///
 /// [`after`] is a countdown and this is a clock, and the difference is a
 /// thread: `after` starts one per wait and lets it die, which is right for a
-/// confirmation that is claimed a few times an hour and wrong for a caret that
-/// is claimed twice a second. One thread is started here and sleeps between
-/// beats for the life of the process — it is never joined, because the only
-/// thing that ends it is the process ending, and a caret that stops blinking
-/// while the window is still up is a bug rather than a saving.
+/// confirmation claimed a few times an hour and wrong for a caret claimed twice
+/// a second. The thread here sleeps between beats for the life of the process
+/// and is never joined.
 ///
-/// It beats whether or not anybody is waiting. A beat nobody took is dropped on
-/// the next one — `done` is a flag rather than a count — so a task that falls
-/// behind resumes on the current beat instead of catching up through a backlog
-/// of stale ones, which for a blink is the only sensible answer.
+/// It beats whether or not anybody is waiting, and a beat nobody took is
+/// dropped on the next one — `done` is a flag rather than a count — so a task
+/// that falls behind resumes on the current beat instead of catching up through
+/// a backlog of stale ones.
 fn metronome(period: Duration) -> Metronome {
     let beat = Arc::new(Mutex::new(Countdown::default()));
     let keeping = Arc::clone(&beat);
@@ -3024,18 +2590,16 @@ impl Future for Tick<'_> {
 
 /// A future that completes once `delay` has passed.
 ///
-/// **There is no timer in the dependency list to borrow one from**, and that
-/// is the point of the dependency list: `tokio` is in the tree, pulled in by
-/// something else, but only as `rt` — no time driver, and nothing running one.
+/// **There is no timer in the dependency list to borrow one from**, and that is
+/// the point of the dependency list: `tokio` is in the tree, pulled in by
+/// something else, but only as `rt` — no time driver and nothing running one.
 /// The alternative to twenty lines here is a crate whose whole job is to spawn
-/// the thread below, in an app whose privacy claim is that somebody can read
-/// its dependencies in one sitting.
+/// the thread below.
 ///
-/// The thread is started on the first poll rather than on construction, so a
-/// countdown that is dropped before anyone waits on it costs nothing. The
-/// waker is stored on every poll rather than only the first: a task that is
-/// polled from somewhere else afterwards has a new waker, and the old one
-/// would wake nobody.
+/// The thread starts on the first poll rather than on construction, so a
+/// countdown dropped before anyone waits on it costs nothing. The waker is
+/// stored on every poll, not only the first: a task polled from somewhere else
+/// afterwards has a new waker, and the old one would wake nobody.
 fn after(delay: Duration) -> After {
     After { delay, alarm: None }
 }
@@ -3068,8 +2632,8 @@ impl Future for After {
                     countdown.waker.take()
                 };
                 // Woken outside the lock: the waker runs the app's own code on
-                // the way through, and it has no business doing that while
-                // holding something this thread will not be back to release.
+                // the way through, and it has no business doing that while this
+                // thread holds something it will not be back to release.
                 if let Some(waker) = waker {
                     waker.wake();
                 }
@@ -3095,20 +2659,17 @@ mod tests {
     ///
     /// They are written twice — once as a presentation attribute in [`Ink`],
     /// because CSS cannot reach inside an SVG in Blitz, and once as a custom
-    /// property in `ui.css` — and there is no way to have them written once.
-    /// So the two files are compared instead: the light palette comes first in
-    /// the stylesheet and the dark one second, which is the order [`Ink`]
-    /// answers in.
+    /// property in `ui.css` — with no way to write them once. So the two files
+    /// are compared: the light palette comes first in the stylesheet and the
+    /// dark one second, which is the order [`Ink`] answers in.
     #[test]
     fn an_icon_is_inked_the_colour_the_stylesheet_says() {
         /// Every value `token` is given in `ui.css`, in order and without
         /// repeats.
         ///
-        /// The repeats are the dark palette's, which is written twice — once
-        /// for the class and once for the media query. Two colours are what
-        /// this test is about; three would only be saying that
-        /// `the_dark_palette_says_the_same_thing_twice` is passing, which is
-        /// that test's job.
+        /// The repeats are the dark palette's, written twice — once for the
+        /// class and once for the media query.
+        /// `the_dark_palette_says_the_same_thing_twice` is what holds those.
         fn palette(token: &str) -> Vec<String> {
             let name = format!("{token}:");
             let mut seen: Vec<String> = Vec::new();
@@ -3146,12 +2707,10 @@ mod tests {
 
     /// **The dark palette is written twice, so the two have to agree.**
     ///
-    /// It applies when somebody picked dark and when somebody left the choice
-    /// to a dark desktop, and those are a selector and a media query — CSS
-    /// gives no way to share one block between them, so `ui.css` repeats it.
-    /// A colour edited in one copy and not the other would be a theme that
-    /// looked subtly different depending on how it was arrived at, and nothing
-    /// on screen would say which copy was in force.
+    /// It applies when somebody picked dark and when somebody left the choice to
+    /// a dark desktop — a selector and a media query, which CSS gives no way to
+    /// share a block between. A colour edited in one copy and not the other
+    /// would be a theme that looked different depending on how it was reached.
     #[test]
     fn the_dark_palette_says_the_same_thing_twice() {
         /// Every `--token: value` between `selector` and the `}` that ends it.
@@ -3195,10 +2754,9 @@ mod tests {
     /// **The hex field takes anything a keyboard can produce, so this must
     /// too.**
     ///
-    /// Each of these is three or six *bytes* and fewer than that in
-    /// characters, which is the shape that used to slice through the middle of
-    /// one and panic — in an event handler, on a keystroke, taking the window
-    /// with it. `aé` is the whole bug in two characters.
+    /// Each of these is three or six *bytes* and fewer in characters, which is
+    /// the shape that used to slice through the middle of one and panic. `aé`
+    /// is the whole bug in two characters.
     #[test]
     fn hex_refuses_text_that_is_not_ascii_instead_of_panicking() {
         for text in ["aé", "éa", "ééé", "ff€", "€ff", "«»f", "ﬀ", "２ｆ６"] {
@@ -3223,12 +2781,10 @@ mod tests {
 
     /// **The countdown behind every `Copied.` in the window.**
     ///
-    /// It is tested here rather than through the interface because raising a
-    /// confirmation means putting something on the clipboard first, and the
-    /// tests run on a Linux CI machine with no display to have a clipboard on.
-    /// So this is the part that can be checked anywhere: it does not finish
-    /// early, it does finish, and it wakes whoever was waiting rather than
-    /// relying on being polled again by chance.
+    /// Tested here rather than through the interface because raising a
+    /// confirmation means putting something on the clipboard first, and CI has
+    /// no display to have one on. So: it does not finish early, it does finish,
+    /// and it wakes whoever was waiting rather than relying on another poll.
     #[test]
     fn a_countdown_finishes_when_it_says_it_will() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -3271,12 +2827,10 @@ mod tests {
 
     /// **The clock behind the caret, which has to beat more than once.**
     ///
-    /// That is the whole difference between it and the countdown above, and it
-    /// is the part a blink depends on: a metronome that fired once and stopped
-    /// would leave a caret that vanished and never came back. It is also why
-    /// the beat has to survive being read — a `Tick` that returned `Ready`
-    /// twice for one beat would blink at whatever rate the runtime happened to
-    /// poll at.
+    /// That is the whole difference between it and the countdown above: a
+    /// metronome that fired once would leave a caret that never came back. The
+    /// beat also has to survive being read — a `Tick` returning `Ready` twice
+    /// for one beat would blink at whatever rate the runtime polls at.
     #[test]
     fn a_metronome_beats_again_and_again() {
         let waker = Waker::noop();

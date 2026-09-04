@@ -1,50 +1,31 @@
 // SPDX-License-Identifier: MPL-2.0
 
-//! The one thing QRnew remembers between runs.
+//! The one thing QRnew remembers between runs: the theme.
 //!
-//! A theme somebody picked and the app forgot on the way out is not a theme
-//! they picked; it is a theme they will pick again tomorrow. So the choice
-//! goes to a file, and the file is the whole of QRnew's state on disk.
+//! Not a settings system, and it should not become one. Everything else in the
+//! window belongs to the *code being made* — text, colours, margin, inset — and
+//! the next code is a different code. The theme is the only setting about the
+//! person rather than the picture.
 //!
-//! # What this is not
+//! Every operation is best-effort and silent. A read-only home, a sandbox, an
+//! unset `$HOME`, a file edited into nonsense: the fallback is the default the
+//! app would have used anyway, and the control that sets it is on screen.
 //!
-//! It is not a settings system, and it should not grow into one by accident.
-//! Everything else in the window is a property of the *code being made* — the
-//! text, the colours, the margin, the inset — and none of that belongs to the
-//! app between runs: the next code is a different code. The theme is the only
-//! setting here that is about the person rather than the picture, which is why
-//! it is the only one saved.
-//!
-//! It is also not a reason to re-read the privacy claim. Nothing is sent
-//! anywhere; a word is written to the directory the platform keeps for exactly
-//! this, and the app reads it back. `read` and `write` are the only two things
-//! in QRnew that touch a path the user did not choose in a dialog.
-//!
-//! # Failure is not an error
-//!
-//! Every operation here is best-effort and silent. A read-only home, a
-//! sandbox, a `$HOME` that is not set, a file somebody has edited into
-//! nonsense — none of that is worth a message, because the fallback is the
-//! default the app would have used anyway and the person is standing in front
-//! of the control that sets it. An app that cannot start because it could not
-//! remember a colour scheme has its priorities wrong.
+//! `read` and `write` are the only two things in QRnew that touch a path the
+//! user did not choose in a dialog. Nothing is sent anywhere.
 
 use std::path::PathBuf;
 
 /// The file, and the format: `key = value`, one per line.
 ///
-/// A whole line-based format for a single key is not over-building so much as
-/// declining to build twice. The alternative — a file whose entire contents
-/// are the word `dark` — cannot gain a second setting without every older
-/// version of the app misreading the newer file, and this can: an unknown key
-/// is skipped by [`read`] and a missing one is `None`.
+/// A line-based format for a single key so a second setting can be added
+/// without older versions misreading the file: an unknown key is skipped by
+/// [`read`] and a missing one is `None`.
 const FILE: &str = "settings";
 
 /// The reverse-DNS name the packaging already uses.
 ///
-/// Taken from `resources/app.metainfo.xml` rather than invented here, so that
-/// the directory macOS makes for this app is the one the desktop entry, the
-/// icon and the metainfo all agree it is called.
+/// Taken from `resources/app.metainfo.xml` rather than invented here.
 const APP_ID: &str = "dev.lhdjung.QRnew";
 
 /// The short name, for the platforms whose convention is a plain directory.
@@ -58,10 +39,9 @@ pub fn read(key: &str) -> Option<String> {
 
 /// Stores `value` under `key`, keeping whatever else the file holds.
 ///
-/// The read-modify-write is not a transaction and does not try to be. Two
-/// copies of QRnew writing the same key at the same moment would leave one of
-/// the two answers in the file, and both answers are a theme somebody just
-/// asked for.
+/// The read-modify-write is not a transaction: two copies of QRnew writing the
+/// same key at once leave one of the two answers, and both are a theme
+/// somebody just asked for.
 pub fn write(key: &str, value: &str) {
     let Some(path) = file() else { return };
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
@@ -86,11 +66,8 @@ fn key_of(line: &str) -> Option<&str> {
     Some(key.trim())
 }
 
-/// The value `key` is given in `text`.
-///
-/// The last one wins, which is the rule that makes [`write`] safe to be as
-/// simple as it is: a file that somehow ends up with the key twice reads as
-/// whatever was written most recently.
+/// The value `key` is given in `text`. The last one wins, which is what makes
+/// [`write`]'s append safe.
 fn value_of<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     text.lines()
         .filter_map(|line| line.split_once('='))
@@ -101,11 +78,9 @@ fn value_of<'a>(text: &'a str, key: &str) -> Option<&'a str> {
 
 /// Where the settings file lives, by the convention of the platform.
 ///
-/// Hand-rolled rather than taken from `dirs` or `directories`, and the reason
-/// is the one that decides most of this app's dependency questions: QRnew's
-/// pitch is that you can read its dependency list and see that nothing in it
-/// can talk to a network. Three crates to join two strings is a poor trade
-/// against that, and these are three rules that have not moved in a decade.
+/// Hand-rolled rather than `dirs` or `directories`: QRnew's pitch is that you
+/// can read its dependency list and see nothing in it can talk to a network,
+/// and three crates to join two strings is a poor trade against that.
 fn file() -> Option<PathBuf> {
     let home = || std::env::var_os("HOME").filter(|home| !home.is_empty());
 
@@ -141,9 +116,8 @@ mod tests {
         assert_eq!(value_of(file, "colour"), None);
     }
 
-    /// Whitespace, blank lines and keys this version has never heard of are
-    /// all things a file may contain, and none of them is a reason to give up
-    /// on the rest of it.
+    /// Whitespace, blank lines and unknown keys are all things a file may
+    /// contain, and none of them is a reason to give up on the rest of it.
     #[test]
     fn a_file_with_other_things_in_it_still_reads() {
         let file = "\n  window  =  wide  \n\ntheme=light\nnonsense\n";
@@ -166,9 +140,9 @@ mod tests {
         assert_eq!(key_of("nonsense"), None);
     }
 
-    /// The path is not asserted — it is three different paths and only one of
-    /// them exists on the machine running this — but it has to *be* one, and
-    /// it has to end at the file rather than the directory holding it.
+    /// It is three different paths and only one exists on the machine running
+    /// this, so the path is not asserted — but it has to *be* one, and it has
+    /// to end at the file rather than the directory holding it.
     #[test]
     fn the_settings_file_is_somewhere_absolute() {
         let Some(path) = file() else {

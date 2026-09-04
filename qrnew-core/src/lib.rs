@@ -31,32 +31,27 @@ pub use crate::style::{
 
 use crate::logo::Placement;
 
-/// The largest share of a code that a logo may cover, counting the blank
-/// padding around it.
+/// The largest share of a code that a logo may cover, counting the blank padding
+/// around it.
 ///
-/// The `High` error correction level is usually quoted as surviving 30% damage,
-/// which is where the tempting round number comes from. Measured instead of
-/// quoted, by rendering codes and reading them back with `rqrr`, decoding
-/// starts failing just past 19% — consistently, across code sizes. This sits a
-/// good step below that, since a code that only just decodes from a perfect
-/// rendering has nothing left over for the printing, lighting and camera angle
-/// of an actual scan.
+/// `High` error correction is usually quoted as surviving 30% damage. Measured
+/// instead — rendering codes and reading them back with `rqrr` — decoding starts
+/// failing just past 19%, consistently across code sizes. This sits a good step
+/// below that: a code that only just decodes from a perfect rendering has
+/// nothing left for the printing, lighting and camera angle of a real scan.
 pub const MAX_LOGO_AREA: f32 = 0.15;
 
 /// The longest side a logo image is kept at, in pixels.
 ///
-/// A logo is drawn at [`Logo::DEFAULT_SIZE`] — a sixth of the code — so even
-/// the largest code there is, exported at ten pixels per module, draws it
-/// about three hundred pixels across. Everything past that is detail no export
-/// can use, and carrying it is not free: the image travels inside the SVG as
-/// base64 and is decoded again every time the code is redrawn.
+/// A logo is drawn at [`Logo::DEFAULT_SIZE`] — a sixth of the code — so even the
+/// largest code, exported at ten pixels per module, draws it about three hundred
+/// pixels across. Everything past that is detail no export can use, carried as
+/// base64 inside the SVG and decoded again on every redraw.
 ///
-/// It is also a hard limit rather than a preference. A GPU renderer keeps its
-/// images in a texture atlas — `vello_hybrid`'s is 4096 pixels square — and an
-/// image that does not fit in one is not drawn small, it is refused, which in
-/// a renderer that unwraps the refusal means the window goes away. A photo
-/// straight off a camera is over that limit, so this is what stands between a
-/// person picking one and the app closing.
+/// It is also a hard limit. A GPU renderer keeps its images in a texture atlas —
+/// `vello_hybrid`'s is 4096 pixels square — and an image that does not fit is
+/// not drawn small, it is refused, which in a renderer that unwraps the refusal
+/// means the window goes away. A photo straight off a camera is over that limit.
 pub const MAX_LOGO_SIDE: u32 = 512;
 
 /// How far a logo has to stay from the edge of the code, in modules.
@@ -241,19 +236,18 @@ impl Qr {
         &self.svg
     }
 
-    /// The same document with the inset's picture left out, for a caller that
-    /// is going to draw the picture itself.
+    /// The same document with the inset's picture left out, for a caller that is
+    /// going to draw the picture itself.
     ///
-    /// **The code underneath is not a different code.** The modules the
-    /// picture covers are already left out when the code is drawn, so this is
-    /// the same document with a hole in it, and putting the picture back at
+    /// **The code underneath is not a different code.** The modules the picture
+    /// covers are already left out when the code is drawn, so this is the same
+    /// document with a hole in it, and putting the picture back at
     /// [`Qr::inset_box`] reproduces [`Qr::svg`] exactly.
     ///
-    /// This exists for a live preview, where the alternative is re-encoding
-    /// the picture into a fresh document on every keystroke — which costs the
-    /// base64 of it twice over each time, and hands the renderer a picture it
-    /// has no way to recognize as one it already has. A file should use
-    /// [`Qr::svg`], which is one self-contained document.
+    /// For a live preview, where the alternative is re-encoding the picture into
+    /// a fresh document on every keystroke — the base64 twice over each time, and
+    /// a picture the renderer has no way to recognize as one it already has. A
+    /// file should use [`Qr::svg`].
     pub fn svg_without_inset(&self) -> String {
         match self.inset {
             Some((at, _)) => format!("{}</svg>", &self.svg[..at]),
@@ -336,24 +330,19 @@ impl Qr {
 /// The largest [`Logo::size`] a code `modules` across can carry, at `padding`
 /// modules of air around the picture.
 ///
-/// The two rules a size can break are the two [`Qr::new`] enforces, and both
-/// of them turn into a ceiling on the size:
+/// The two rules [`Qr::new`] enforces each turn into a ceiling:
 ///
-/// - the cleared box covers at most [`MAX_LOGO_AREA`] of the code, which is a
-///   fixed share and so a fixed side;
-/// - the cleared box stops [`FINDER_CLEARANCE`] modules short of every edge,
-///   which is a fixed *number of modules* and so a share that grows with the
-///   code.
+/// - the cleared box covers at most [`MAX_LOGO_AREA`] of the code, a fixed share
+///   and so a fixed side;
+/// - the cleared box stops [`FINDER_CLEARANCE`] modules short of every edge, a
+///   fixed *number of modules* and so a share that grows with the code.
 ///
-/// The second is what makes this worth exposing rather than assuming. On the
-/// smallest code there is — twenty-one modules — it allows a shade over a
-/// fifth of the width; a few characters further on it allows a third. An
-/// interface offering a choice of sizes has no way to work that out from
-/// [`Logo`] alone, and the alternative is copying these two rules somewhere
-/// they can drift out of step with the ones actually enforced.
+/// The second is why this is worth exposing rather than assuming: a
+/// twenty-one-module code allows a shade over a fifth of the width, and a few
+/// characters further on it allows a third. An interface offering a choice of
+/// sizes cannot work that out from [`Logo`] alone.
 ///
-/// Zero when nothing fits, which a code cannot be small enough to reach:
-/// twenty-one modules is the floor and it has room to spare.
+/// Zero when nothing fits, which no code is small enough to reach.
 pub fn largest_logo_size(padding: f32, modules: u32) -> f32 {
     let modules = modules as f32;
     let by_area = MAX_LOGO_AREA.sqrt() - 2.0 * padding / modules;
@@ -411,15 +400,13 @@ pub fn render_png(
 /// Scales an image down until neither of its sides is longer than
 /// [`MAX_LOGO_SIDE`], as a PNG.
 ///
-/// `None` means keep the bytes you already have, and covers the three cases
-/// that need no work: the image fits, it is an SVG and so is already every
-/// size it will ever need to be, or it cannot be read — and a picture nothing
-/// here can read is one nothing downstream can draw either, so making it
-/// smaller was never going to help.
+/// `None` means keep the bytes you already have, and covers the three cases that
+/// need no work: the image fits, it is an SVG and so is already every size it
+/// will need, or it cannot be read — and a picture nothing here can read is one
+/// nothing downstream can draw.
 ///
-/// A PNG whatever went in, because the work happens in pixels: writing a
-/// scaled JPEG back out would be a second generation of the same lossy
-/// encoding, on an image that is about to be drawn at a sixth of a QR code.
+/// A PNG whatever went in, because the work happens in pixels: writing a scaled
+/// JPEG back out would be a second generation of the same lossy encoding.
 pub fn shrink_logo(image: &[u8]) -> Option<Vec<u8>> {
     let format = ImageFormat::detect(image)?;
     if format == ImageFormat::Svg {
@@ -453,21 +440,16 @@ pub fn shrink_logo(image: &[u8]) -> Option<Vec<u8>> {
 /// `target`, and then resampled the rest of the way.
 ///
 /// Going down in halves rather than in one step is the difference between a
-/// scaled photograph and a noisy one. A single leap from four thousand pixels
-/// to five hundred samples one row in eight and throws the rest away, so fine
-/// detail arrives as speckle; halving averages every pixel into the one below
-/// it, and the step that finishes the job is always under 2:1.
+/// scaled photograph and a noisy one: a single leap from four thousand pixels to
+/// five hundred samples one row in eight, so fine detail arrives as speckle.
 ///
-/// The first draw is the expensive one — a ten-megapixel photograph is 43 MB
-/// as a pixmap, and `resvg` has already decoded its own copy of the same
-/// thing behind this call — so it is made at half the natural size whenever
-/// the chain has a halving to spare. That swaps the first box halving for
-/// `resvg`'s own 2:1 filter, which is measurably almost the same picture: on a
-/// zone plate, the standard way to make a downscaler show what it throws away,
-/// the two chains land 9.2 and 10.2 levels out of 255 from a true box average,
-/// while starting a quarter of the way down lands 22.9 and going straight to
-/// the target lands 53.3. One level of accuracy for three quarters of the
-/// largest allocation the crate makes.
+/// The first draw is the expensive one — a ten-megapixel photograph is 43 MB as
+/// a pixmap — so it is made at half the natural size whenever the chain has a
+/// halving to spare, swapping the first box halving for `resvg`'s own 2:1
+/// filter. Measured on a zone plate, the two chains land 9.2 and 10.2 levels out
+/// of 255 from a true box average, while starting a quarter of the way down
+/// lands 22.9 and going straight to the target lands 53.3. One level of accuracy
+/// for three quarters of the largest allocation the crate makes.
 fn in_halves(href: &str, natural: (u32, u32), target: (u32, u32)) -> Option<tiny_skia::Pixmap> {
     let room_to_spare = natural.0 >= target.0 * 4 && natural.1 >= target.1 * 4;
     let first = if room_to_spare {
@@ -815,12 +797,10 @@ mod tests {
     }
 
     /// A zone plate — rings that get finer towards the edge — is the standard
-    /// way to make a downscaler show what it throws away, and it is the one
-    /// picture where the difference between [`in_halves`] and a single leap to
-    /// the target is not a matter of taste. Against a true box average the
-    /// chain lands about ten levels out of 255 and one leap lands above fifty,
-    /// so the bound below is not a tight fit to the current number: it is the
-    /// line between averaging and sampling.
+    /// way to make a downscaler show what it throws away. Against a true box
+    /// average the chain lands about ten levels out of 255 and one leap lands
+    /// above fifty, so the bound below is not a tight fit to the current number:
+    /// it is the line between averaging and sampling.
     #[test]
     fn a_scaled_photograph_is_averaged_rather_than_sampled() {
         let (width, height) = (2048, 1536);
@@ -967,12 +947,11 @@ mod tests {
 
     /// The two-layer document is the one-layer document with a hole in it.
     ///
-    /// A live preview draws the code and the picture separately, so that the
-    /// picture is one image the renderer can recognize as the same one rather
-    /// than a fresh one per keystroke. That is only safe while the two halves
-    /// add back up to the file that gets saved, which is what this measures:
-    /// the shortened document is a prefix of the full one, and the box the
-    /// caller is handed is the box the full one draws the picture in.
+    /// A live preview draws the code and the picture separately so the picture
+    /// is one image the renderer can recognize. That is only safe while the two
+    /// halves add back up to the file that gets saved: the shortened document is
+    /// a prefix of the full one, and the box the caller is handed is the box the
+    /// full one draws the picture in.
     #[test]
     fn the_document_without_the_picture_is_the_document_with_it_taken_out() {
         let style = with_logo(Logo::new(logo_image(GREEN)));
@@ -1019,11 +998,10 @@ mod tests {
 
     /// The ceiling `largest_logo_size` reports is the one `check_logo` keeps.
     ///
-    /// Walked over every code version rather than asserted at one size,
-    /// because the point of the function is that the answer *moves*: the area
-    /// rule is a fixed share and the finder rule is a fixed number of modules,
-    /// so which of the two binds changes as the code grows. A hair under the
-    /// reported size has to pass and a hair over has to fail, at all of them.
+    /// Walked over every code version rather than asserted at one size, because
+    /// the point is that the answer *moves*: the area rule is a fixed share and
+    /// the finder rule a fixed number of modules, so which one binds changes as
+    /// the code grows.
     #[test]
     fn the_largest_size_that_fits_is_the_largest_size_that_is_accepted() {
         for version in 1..=40u32 {
@@ -1055,9 +1033,9 @@ mod tests {
 
     /// The smallest code takes the default size and not much more.
     ///
-    /// The number itself is the interesting part: it is what says that a size
-    /// control cannot simply offer a bigger logo and be done, because on a
-    /// twenty-one-module code there is barely a fifth of the width to give.
+    /// The number is the interesting part: it says a size control cannot simply
+    /// offer a bigger logo, because a twenty-one-module code has barely a fifth
+    /// of the width to give.
     #[test]
     fn the_smallest_code_has_almost_no_room_above_the_default_logo() {
         let largest = largest_logo_size(Logo::DEFAULT_PADDING, 21);

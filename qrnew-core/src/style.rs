@@ -75,16 +75,14 @@ pub enum ModuleShape {
 ///
 /// These are the finder patterns, which a scanner locates before it reads
 /// anything else. They are drawn separately from the rest of the matrix so a
-/// playful [`ModuleShape`] never breaks them up, and so they can be recolored
-/// on their own.
+/// playful [`ModuleShape`] never breaks them up, and so they can be recolored on
+/// their own.
 ///
-/// There is deliberately no fully circular option here, tempting as it is: a
-/// scanner recognizes a finder pattern by the 1:1:3:1:1 run of dark and light
-/// it leaves along any line drawn through it, and a circular ring only produces
-/// that on the one line through its middle. `rqrr` cannot find a code with
-/// circular finders at any resolution, and the codes in this crate are meant to
-/// be printed and read by whatever is pointed at them. [`Rounded`] gets most of
-/// the way there and does scan.
+/// There is deliberately no fully circular option, tempting as it is: a scanner
+/// recognizes a finder pattern by the 1:1:3:1:1 run it leaves along any line
+/// through it, and a circular ring only produces that on the one line through
+/// its middle. `rqrr` cannot find a code with circular finders at any
+/// resolution. [`Rounded`] gets most of the way there and does scan.
 ///
 /// [`Rounded`]: FinderShape::Rounded
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

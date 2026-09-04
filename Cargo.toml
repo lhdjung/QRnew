@@ -32,17 +32,14 @@ rust-embed = "8.8.0"
 # Dioxus rendered by Blitz: Stylo for style, Taffy for layout, Parley for text,
 # `vello_hybrid` onto the GPU. No webview and no JavaScript.
 #
-# A git dependency rather than crates.io because `blitz-test-harness` — which
-# the interface tests in `tests/` are driven by — is `publish = false` and will
-# never be on crates.io. Everything else here is published as `0.3.0-beta.2`,
-# and pinning the whole tree to one revision is what keeps the harness and the
-# app on the same `blitz-dom`.
+# A git dependency rather than crates.io because `blitz-test-harness`, which
+# drives the interface tests, is `publish = false`. Pinning the whole tree to
+# one revision keeps the harness and the app on the same `blitz-dom`.
 #
-# `net` is **off**, and it is off on purpose: the default feature set pulls
-# `blitz-net` → `reqwest` → `native-tls`, and QRnew's privacy claim is "look at
-# the dependency list, there is nothing in it that can talk to a network."
-# `data-uri` is the provider that replaces it, and a data URL is the only
-# resource this app ever loads — the preview is one.
+# `net` is **off on purpose**: the default feature set pulls `blitz-net` →
+# `reqwest` → `native-tls`, and QRnew's privacy claim is that nothing in the
+# dependency list can talk to a network. `data-uri` replaces it, and a data URL
+# is the only resource this app ever loads.
 [dependencies.dioxus-native]
 git = "https://github.com/DioxusLabs/blitz"
 rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e"
@@ -64,7 +61,7 @@ features = [
 [dev-dependencies]
 # Upstream's headless harness: a document, laid out and hit-tested, with no
 # window, no GPU and no compositor. It is what makes `tests/interface.rs`
-# possible, and QRnew has never had a UI test before.
+# possible.
 blitz-test-harness = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
 blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
 dioxus = { version = "0.7.3", default-features = false, features = [

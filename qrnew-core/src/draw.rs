@@ -29,22 +29,19 @@ const MODULE_RADIUS: f32 = 0.5;
 /// Corner radius of a rounded finder pattern's outer ring, in modules.
 ///
 /// This one is not a matter of taste. A scanner finds a code by sweeping lines
-/// across it and looking for the 1:1:3:1:1 run of dark and light that a finder
-/// pattern produces; rounding the outer corners shortens the runs near the top
-/// and bottom of the ring and eventually breaks that signature.
+/// across it and looking for the 1:1:3:1:1 run a finder pattern produces;
+/// rounding the outer corners shortens the runs near the top and bottom of the
+/// ring and eventually breaks that signature.
 ///
-/// How much rounding is too much depends on the resolution the code is read
-/// at, which is why the round-trip tests sweep both. At 1.25 modules a code
-/// fails to decode however large it is drawn. At 1.0 it decodes from ten
-/// pixels per module upwards and is unreliable below that — a trap, since it
-/// looks perfectly fine at whatever single size you happen to test. At 0.8 and
-/// below that fragility is gone: a plain code reads down to four or five
-/// pixels per module instead of ten. The crate only claims ten either way, but
-/// that margin is what absorbs the printing and camera angle the tests do not
-/// model, so this sits at 0.75.
+/// How much is too much depends on the resolution the code is read at, which is
+/// why the round-trip tests sweep both. At 1.25 modules a code fails to decode
+/// however large it is drawn. At 1.0 it decodes from ten pixels per module up
+/// and is unreliable below — a trap, since it looks fine at whatever single size
+/// you happen to test. At 0.8 and below that fragility is gone. The crate claims
+/// ten either way, and the margin is what absorbs the printing and camera angle
+/// the tests do not model, so this sits at 0.75.
 ///
-/// The rest of the pattern is unconstrained: the hole and the center can be as
-/// round as they like, and the center is a full circle.
+/// The hole and the center are unconstrained; the center is a full circle.
 const FINDER_RADIUS: f32 = 0.75;
 
 /// Writes the matrix as an SVG document.

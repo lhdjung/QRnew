@@ -9,8 +9,8 @@
 //!
 //! It is `rqrr`'s twice over when it has to be, and [`read`] says why: a code
 //! drawn light on dark is one the standard does not describe, one every phone
-//! reads anyway, and one this crate will draw the moment somebody swaps the
-//! two colours.
+//! reads anyway, and one this crate will draw the moment somebody swaps the two
+//! colours.
 
 use std::fmt;
 
@@ -60,32 +60,25 @@ impl std::error::Error for ReadError {}
 /// The image may be a PNG, JPEG, GIF, WebP or SVG, including an SVG this crate
 /// wrote. If it holds more than one code, the first one located wins.
 ///
-/// A word on expectations: this reads a rendering, not a photograph. Clean
-/// images — a saved file, a screenshot, an export from some other tool — read
-/// reliably. A picture taken at an angle, in poor light or out of focus is a
-/// harder problem than this does, and a phone camera will often succeed where
-/// this returns [`ReadError::NoCode`].
+/// This reads a rendering, not a photograph. Clean images — a saved file, a
+/// screenshot, an export from another tool — read reliably; a picture taken at
+/// an angle, in poor light or out of focus is a harder problem than this does,
+/// and a phone camera will often succeed where this returns
+/// [`ReadError::NoCode`].
 ///
 /// # Light codes on a dark ground
 ///
 /// **A code drawn the other way round is read the other way round**, and it
-/// takes a second pass to do it. The standard says dark on light and `rqrr`
-/// takes it at its word: the finder patterns it looks for are dark rings, so an
-/// inverted code is not a code it decodes badly, it is a code it does not
-/// locate at all — `detect_grids` comes back empty and the answer is
-/// [`ReadError::NoCode`].
+/// takes a second pass. The standard says dark on light and `rqrr` takes it at
+/// its word: the finder patterns it looks for are dark rings, so an inverted
+/// code is not decoded badly, it is not located at all.
 ///
-/// That is the wrong answer for the thing actually holding a phone. Both
-/// platform scanners read a light code on a dark ground without being asked,
-/// so the everyday standard is not the written one, and this crate can draw
-/// such a code — the app above it hands the colours straight through. Refusing
-/// to read back what it will happily write is the one inconsistency worth
-/// spending a second decode on, and it is a second decode only when the first
-/// one failed: an ordinary code pays nothing.
-///
+/// Both platform scanners read a light code on a dark ground without being
+/// asked, and this crate will draw one, so refusing to read back what it will
+/// happily write is worth a second decode — and only when the first one failed.
 /// The inversion is in brightness, on the greyscale the decoder already works
-/// from, so it costs one pass over the buffer and no rendering. What comes back
-/// when both attempts fail is the *first* attempt's error, because the image as
+/// from, so it costs one pass over the buffer and no rendering. When both
+/// attempts fail, the *first* attempt's error comes back, because the image as
 /// it was handed over is the image somebody is being told about.
 pub fn read(image: &[u8]) -> Result<String, ReadError> {
     let pixmap = rasterize(image)?;
@@ -221,11 +214,10 @@ mod tests {
 
     /// **A light code on a dark ground reads.**
     ///
-    /// `rqrr` on its own does not read one — it looks for dark finder rings,
-    /// so it does not locate the code at all — and this crate will draw one the
-    /// moment somebody swaps the two colours. Both platform scanners manage it,
-    /// which makes it a code that works everywhere except in the app that made
-    /// it. The second pass in [`read`] is what closes that.
+    /// `rqrr` on its own does not — it looks for dark finder rings, so it does
+    /// not locate the code at all — and this crate draws one the moment somebody
+    /// swaps the two colours. Both platform scanners manage it, which makes it a
+    /// code that works everywhere except in the app that made it.
     #[test]
     fn a_code_drawn_light_on_dark_reads() {
         let inverted = Qr::new(
