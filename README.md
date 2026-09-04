@@ -12,7 +12,13 @@ The code does not have to be drawn in squares. *Shape* offers rounded modules or
 
 A picture can sit in the middle of a code, too. Choose one and it is drawn into the middle of the modules; error correction rises to 30% while it is there, which is what pays for the part it covers. Three sizes, and the largest is not always on offer: a picture has to stay clear of the corner squares, which sit a fixed number of modules in from each edge — so a code holding a few characters has barely room for the middle size, and one holding a web address has room for all three. The row only offers what the code in front of it can carry.
 
-The window follows the desktop's light or dark setting, and *Theme* in the corner overrules that when you want it to — and remembers, which is the only thing QRnew writes down anywhere: a code looks like a different code matted on graphite than it does on paper, and paper is usually what it ends up printed on. The dashed line around the preview is where the code ends, so the blank border that gets saved with it stays visible even when you give it the same colour as the window behind it.
+The window follows the desktop's light or dark setting, and *Appearance* in the corner overrules that when you want it to — and remembers: a code looks like a different code matted on graphite than it does on paper, and paper is usually what it ends up printed on. The dashed line around the preview is where the code ends, so the blank border that gets saved with it stays visible even when you give it the same colour as the window behind it.
+
+A set of colours and a logo is usually a house style rather than a one-off, so *Themes* keeps them: name what is on screen, and it comes back in two clicks over any text you like. A theme is everything about the code but the text: the two colours, the picture in the middle and how big it is drawn, the margin, the shape and the error-correction level. Never the text, which is the thing you are changing when you reach for one. Two of those are preferences rather than instructions, and the card says so when either gives way — a picture has to clear the corner squares, so the large size over a very short code becomes the largest that fits, and a picture in the middle needs 30% error correction whatever the theme asked for.
+
+Each theme is a folder in QRnew's config directory, named `qrnew-theme-…` so it still says what it is once it leaves, holding a `settings.toml` and, if it has one, the picture itself — so a theme can be written, edited, or copied to another machine by hand, and two themes can both have a `logo.png`. The file holds only what the theme changes: a key it leaves out is whatever QRnew would have done anyway, and the only one it cannot leave out is `name`. *Import theme…* takes such a folder from anywhere and files it with the rest.
+
+Those two — the appearance and the themes — are the only things QRnew writes down anywhere.
 
 ![demo](resources/qrnew-demo.png)
 

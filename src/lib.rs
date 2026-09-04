@@ -8,4 +8,5 @@
 
 pub mod i18n;
 pub mod settings;
+pub mod themes;
 pub mod ui;

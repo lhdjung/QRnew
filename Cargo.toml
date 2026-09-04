@@ -74,6 +74,7 @@ keyboard-types = "0.7"
 # The core again: an integration test links against the crate under test and
 # its dev-dependencies, not against its dependencies.
 qrnew-core = { path = "qrnew-core" }
+toml = { version = "1.1.5", default-features = false, features = ["parse"] }
 
 # Image work — rasterizing and decoding — is unusably slow in an unoptimized
 # build, and it is all in dependencies. Optimizing those keeps `cargo test`

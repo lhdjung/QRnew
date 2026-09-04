@@ -34,8 +34,8 @@
 //! a rail can move the code. Height is the scarce thing; the arithmetic is in
 //! `ui.css` and `no_control_is_below_the_fold` checks it.
 //!
-//! The theme is a class on `.app` rather than a media query, because nothing an
-//! app can call from a component moves `prefers-color-scheme`: see [`Theme`].
+//! The appearance is a class on `.app` rather than a media query, because nothing an
+//! app can call from a component moves `prefers-color-scheme`: see [`Appearance`].
 //! Text editing on macOS is split between AppKit and Blitz, and both halves had
 //! to be arranged for: [`open_the_text_input_client`], [`appkit_has_this_key`],
 //! and `blitz-mac-keys.md` for what this app cannot fix. The caret blink is the
@@ -57,9 +57,31 @@ use qrnew_core::{
 };
 
 use crate::fl;
+use crate::themes;
 
-/// Resolution of saved and copied images, in pixels per module.
+/// The fewest pixels a module gets in a saved or copied image.
+///
+/// A floor rather than the answer: see [`export_scale`].
 const EXPORT_SCALE: u32 = 10;
+
+/// The least a saved or copied code is across, in pixels, border included.
+///
+/// **Pixels per module on its own is the wrong unit to export in.** It makes
+/// the file's size a function of how much text was typed, and the shortest
+/// input is the commonest one: two dozen characters is a twenty-one-module
+/// code, which at [`EXPORT_SCALE`] saved as a 250-pixel picture — 21mm on
+/// paper at 300dpi. Nothing was lost on the way out and the file is not
+/// compressed; there was simply not much of it. Somebody saving a code cares
+/// that it is big enough to use, not how many modules went into it.
+const MIN_EXPORT_PX: u32 = 1000;
+
+/// The most a saved or copied code is across, in pixels, border included.
+///
+/// Only a picture in the middle ever asks for this much, and this is where it
+/// stops being asked: the rasterizer holds the whole thing at once, which is
+/// 36 MB of pixmap here, and 380 MB at the size the smallest inset would
+/// otherwise want. Past this the file costs more than the detail is worth.
+const MAX_EXPORT_PX: u32 = 3000;
 
 /// The least the code's two colours may differ before the app says so, as a
 /// difference in [`luminance`] on 0…1.
@@ -75,6 +97,35 @@ const EXPORT_SCALE: u32 = 10;
 /// What the sweep settles is that this cannot be a check that the code
 /// *decodes*. It decodes long past where anybody could scan it.
 pub const SAFE_CONTRAST: f32 = 0.4;
+
+/// How many pixels a module gets when `qr` is saved or copied.
+///
+/// **A picture in the middle is what decides this.** Everything else in the
+/// document is flat rectangles, which come out clean at any scale worth having;
+/// the picture is the only fine detail in it, and the only part the app did not
+/// draw. Exporting below the picture's own resolution throws away the one thing
+/// somebody brought themselves — and it is easy to do without noticing, because
+/// the inset is a seventh of the width, so a thousand-pixel code gives a
+/// 450-pixel logo 140 pixels to live in.
+///
+/// So a code with an inset is made wide enough to hold [`MAX_LOGO_SIDE`] in
+/// that box — the largest picture the app will take — bounded by
+/// [`MAX_EXPORT_PX`], and one without stays at [`MIN_EXPORT_PX`].
+///
+/// **A whole number of pixels per module**, so every module is the same size as
+/// every other and no edge lands halfway through a pixel. That is why the
+/// picture is *at least* the size asked for rather than exactly it: rounding the
+/// scale up is free, and rounding the size down would put a seam in the code.
+fn export_scale(qr: &Qr) -> u32 {
+    let across = match qr.inset_box() {
+        Some(inset) => (qrnew_core::MAX_LOGO_SIDE as f32 / inset.side) as u32,
+        None => MIN_EXPORT_PX,
+    };
+    across
+        .clamp(MIN_EXPORT_PX, MAX_EXPORT_PX)
+        .div_ceil(qr.size_in_modules())
+        .max(EXPORT_SCALE)
+}
 
 /// The narrowest border the app is prepared to vouch for, in modules.
 ///
@@ -111,6 +162,26 @@ pub const CONFIRM_FOR: Duration = Duration::from_secs(3);
 ///
 /// 530ms is what GTK, Qt and AppKit all ship.
 pub const CARET_BEAT: Duration = Duration::from_millis(530);
+
+/// How long to wait after a file dialog closes before changing anything on
+/// screen.
+///
+/// **This is a workaround for an upstream crash**, written up in
+/// `blitz-hit-test.md`. Removing a node leaves its id in its parent's
+/// `paint_children` until the next `resolve`, and `Node::hit_inner` unwraps
+/// `tree().get(id)` — so a pointer event delivered between a removal and the
+/// next redraw takes the window with it. Every ordinary click is safe because
+/// the redraw lands first; a modal file dialog is not, because it parks a burst
+/// of pointer motion that winit delivers all at once the moment the panel goes
+/// away, and the mutation rides in ahead of it.
+///
+/// Waiting hands that burst an unchanged tree and puts the mutation on an empty
+/// queue, which is exactly the situation an ordinary click is already in. A
+/// twentieth of a second is invisible after a file dialog.
+///
+/// ponytail: a delay, not a guarantee. Delete it — and the two `await`s that
+/// use it — the day `remove_node` keeps `paint_children` honest upstream.
+const SETTLE: Duration = Duration::from_millis(50);
 
 /// The blinking caret, and the two things a text field has to tell it.
 ///
@@ -281,7 +352,18 @@ impl Inset {
     /// it opened but is not an image — because the card says the same thing
     /// about either and neither is something the person can act on.
     fn read(path: &std::path::Path) -> Option<Self> {
-        let bytes = std::fs::read(path).ok()?;
+        let name = path
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        Self::adopt(name, std::fs::read(path).ok()?)
+    }
+
+    /// The same picture, already in hand.
+    ///
+    /// The other way in: a theme carries the bytes it was saved with, and
+    /// they go through the same detection and the same shrink — because a
+    /// theme folder is a place somebody can drop a photograph by hand.
+    fn adopt(name: String, bytes: Vec<u8>) -> Option<Self> {
         // What the file *is*, not what it is called: a dialog filter is a
         // convenience and an extension is a claim, so the bytes decide.
         let format = ImageFormat::detect(&bytes)?;
@@ -299,9 +381,7 @@ impl Inset {
         };
 
         Some(Self {
-            name: path
-                .file_name()
-                .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+            name,
             format,
             bytes,
         })
@@ -375,22 +455,32 @@ impl Confirmation {
 #[derive(Clone)]
 pub struct Inlay(pub String);
 
-/// The theme to open in, provided as a root context by `main.rs`.
+/// The appearance to open in, provided as a root context by `main.rs`.
 ///
-/// For `--theme`: the choice is behind a button and a sheet, so there is no
+/// For `--appearance`: the choice is behind a button and a sheet, so there is no
 /// other way to photograph a dark window. An absent context is
-/// [`Theme::System`].
+/// [`Appearance::System`].
 #[derive(Clone)]
-pub struct Tone(pub Theme);
+pub struct Tone(pub Appearance);
 
-/// Somewhere to write the theme down, provided as a root context by `main.rs`.
+/// Somewhere to write the appearance down, provided as a root context by `main.rs`.
 ///
-/// Handed in rather than reached for: a test clicks through the theme sheet
+/// Handed in rather than reached for: a test clicks through the appearance sheet
 /// several times, and a component that saved to disk would edit the settings
 /// of whoever ran it. An absent context is an app that does not remember —
 /// which is also what a machine with no writable home gets.
 #[derive(Clone)]
-pub struct Remember(pub Arc<dyn Fn(Theme) + Send + Sync>);
+pub struct Remember(pub Arc<dyn Fn(Appearance) + Send + Sync>);
+
+/// Where saved themes live, provided as a root context by `main.rs`.
+///
+/// Handed in rather than reached for, for [`Remember`]'s reason doubled: the
+/// tests save and delete themes, and a component that knew its own path would
+/// be editing the themes of whoever ran them. An absent context is an app with
+/// no themes — which is also what a machine with no writable home gets, and
+/// the topbar simply has one button fewer.
+#[derive(Clone)]
+pub struct Themes(pub std::path::PathBuf);
 
 /// Which of the two colours the picker is pointed at.
 ///
@@ -442,7 +532,7 @@ impl Look {
 
     /// The name this look goes by in the markup.
     ///
-    /// A `data-look` for the tests to select on, like [`Theme::slug`]: a test
+    /// A `data-look` for the tests to select on, like [`Appearance::slug`]: a test
     /// that clicked the visible label would pass in English and nowhere else.
     const fn slug(self) -> &'static str {
         match self {
@@ -450,6 +540,15 @@ impl Look {
             Look::Rounded => "rounded",
             Look::Dots => "dots",
         }
+    }
+
+    /// The look `name` names, for a theme read back off disk. An unknown word
+    /// is the default, like [`InsetSize::named`].
+    fn named(name: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|look| look.slug() == name)
+            .unwrap_or_default()
     }
 
     /// The outline each module is given.
@@ -477,6 +576,36 @@ impl Look {
             center: None,
         }
     }
+}
+
+/// The four levels, in the order the row offers them, each with the name it
+/// goes by in the markup and in a saved theme.
+///
+/// A list rather than four inherent methods because [`ErrorCorrection`] is
+/// `qrnew-core`'s type: the *words* are the interface's business, like
+/// [`Look::slug`], and this is the one place they are written down.
+const LEVELS: [(ErrorCorrection, &str); 4] = [
+    (ErrorCorrection::Low, "low"),
+    (ErrorCorrection::Medium, "medium"),
+    (ErrorCorrection::Quartile, "quartile"),
+    (ErrorCorrection::High, "high"),
+];
+
+/// The name `level` goes by.
+fn level_slug(level: ErrorCorrection) -> &'static str {
+    LEVELS
+        .into_iter()
+        .find(|(known, _)| *known == level)
+        .map_or("medium", |(_, name)| name)
+}
+
+/// The level `name` names, for a theme read back off disk. An unknown word is
+/// the app's own default, which is what a hand-edited file gets.
+fn level_named(name: &str) -> ErrorCorrection {
+    LEVELS
+        .into_iter()
+        .find(|(_, known)| *known == name)
+        .map_or(ErrorCorrection::Medium, |(level, _)| level)
 }
 
 /// How much of the code the picture in the middle of it takes up.
@@ -507,13 +636,25 @@ impl InsetSize {
     /// The three, in the order the row offers them.
     const ALL: [Self; 3] = [Self::Small, Self::Medium, Self::Large];
 
-    /// The name this size goes by in the markup, for the tests to select on.
+    /// The name this size goes by in the markup, for the tests to select on
+    /// and for a theme to file it under.
     const fn slug(self) -> &'static str {
         match self {
             InsetSize::Small => "small",
             InsetSize::Medium => "medium",
             InsetSize::Large => "large",
         }
+    }
+
+    /// The size `name` names, for a theme read back off disk.
+    ///
+    /// A word that is not one of the three is the default, which is the size
+    /// that fits every code — a hand-edited file is not worth refusing over.
+    fn named(name: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|size| size.slug() == name)
+            .unwrap_or_default()
     }
 
     /// Side of the picture as a fraction of the code's width, quiet zone not
@@ -548,41 +689,41 @@ struct Drawn {
 
 /// Which palette the window is painted in, and who decides.
 ///
-/// [`Theme::System`] is the default and the only one that hands the decision
+/// [`Appearance::System`] is the default and the only one that hands the decision
 /// back to the desktop and follows it live. The other two overrule it, which is
 /// worth being able to do: a code is judged against the surface around it, and
 /// that is usually the paper it will be printed on rather than whatever the
 /// desktop is set to after dark.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Theme {
+pub enum Appearance {
     /// Whatever the desktop says, changing when the desktop changes.
     System,
     Light,
     Dark,
 }
 
-impl Theme {
+impl Appearance {
     /// The three, in the order the sheet offers them.
     const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
 
-    /// The name this theme goes by in the markup.
+    /// The name this appearance goes by in the markup.
     ///
-    /// Both half of the class on `.app` — `theme-{slug}`, which every themed
-    /// rule in `ui.css` hangs off — and the `data-theme` a test selects by. A
+    /// Both half of the class on `.app` — `appearance-{slug}`, which every rule
+    /// with a palette in it hangs off — and the `data-appearance` a test selects by. A
     /// test that clicked the visible label would pass in English only.
     pub const fn slug(self) -> &'static str {
         match self {
-            Theme::System => "system",
-            Theme::Light => "light",
-            Theme::Dark => "dark",
+            Appearance::System => "system",
+            Appearance::Light => "light",
+            Appearance::Dark => "dark",
         }
     }
 
-    /// The theme `name` names, for `--theme` on the command line.
+    /// The appearance `name` names, for `--appearance` on the command line.
     ///
-    /// The same three words the sheet's buttons carry as `data-theme`.
+    /// The same three words the sheet's buttons carry as `data-appearance`.
     pub fn named(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|theme| theme.slug() == name)
+        Self::ALL.into_iter().find(|appearance| appearance.slug() == name)
     }
 
     /// What winit is asked to make the title bar.
@@ -590,12 +731,12 @@ impl Theme {
     /// `None` is "stop holding an opinion": it clears any appearance the app
     /// set, putting the window back under the desktop — and, on macOS, starts
     /// the `ThemeChanged` events flowing again so `prefers-color-scheme` is
-    /// live for the `theme-system` branch of the stylesheet.
+    /// live for the `appearance-system` branch of the stylesheet.
     const fn window(self) -> Option<WinitTheme> {
         match self {
-            Theme::System => None,
-            Theme::Light => Some(WinitTheme::Light),
-            Theme::Dark => Some(WinitTheme::Dark),
+            Appearance::System => None,
+            Appearance::Light => Some(WinitTheme::Light),
+            Appearance::Dark => Some(WinitTheme::Dark),
         }
     }
 }
@@ -731,10 +872,153 @@ pub fn App() -> Element {
         light.set(was_dark);
     };
     let mut about = use_signal(|| false);
-    let mut theme = use_signal(|| {
-        dioxus_core::try_consume_context::<Tone>().map_or(Theme::System, |Tone(seed)| seed)
+    // Where saved looks live, or `None` on a machine that has nowhere to put
+    // them — in which case the button that opens them is not drawn at all.
+    let library = use_hook(|| dioxus_core::try_consume_context::<Themes>().map(|Themes(dir)| dir));
+    // Read once at mount and rewritten by the two things that change the
+    // folder, so the sheet does not walk the disk on every render.
+    let mut saved = use_signal(|| library.as_deref().map_or_else(Vec::new, themes::list));
+    let mut themes_sheet = use_signal(|| false);
+    // The name a theme is about to be saved under. Its own draft, like the
+    // margin and hex fields: it is emptied by saving rather than by anything
+    // the app computes.
+    let mut theme_name = use_signal(String::new);
+    // **Which theme has been asked about, not which is being deleted.** A theme
+    // is a picture somebody chose and a colour they matched by eye, and the
+    // cross that takes it away sits a few points from the row that applies it —
+    // so the cross asks, and the row it is on answers in place. One at a time:
+    // opening a second question closes the first.
+    let mut condemned = use_signal(|| None::<String>);
+    // Why the last folder offered for importing was not a theme, if it was not.
+    // **Two answers rather than one flag**, because they are two different
+    // things to do about it: a folder with no settings file in it is the wrong
+    // folder, and a settings file with no name in it is a file to fix.
+    let mut import_error = use_signal(|| None::<themes::NotATheme>);
+    // Neither a question nor a complaint outlives the sheet it was made in. One
+    // effect rather than a line in each of the five ways out — the cross, the
+    // scrim, Escape twice over, and the button in the top bar.
+    use_effect(move || {
+        if !themes_sheet() {
+            condemned.set(None);
+            import_error.set(None);
+        }
     });
-    let mut theme_sheet = use_signal(|| false);
+
+    // Both stepper buttons, the field itself and an applied theme go through
+    // here, so the number and the text under it cannot disagree about what the
+    // margin is.
+    let mut set_margin = move |next: u32| {
+        let next = next.min(MAX_MARGIN);
+        margin.set(next);
+        margin_draft.set(next.to_string());
+    };
+
+    // **A theme is the whole look, including its absence.** One with no
+    // picture takes the picture away, because otherwise applying two themes in
+    // a row would leave a mark from the first inside the second's colours, and
+    // nothing on screen would say where it came from.
+    let mut apply = move |theme: themes::Theme| {
+        dark.set(theme.mark());
+        light.set(theme.ground());
+        set_margin(theme.margin.unwrap_or(DEFAULT_MARGIN));
+        look.set(Look::named(theme.shape.as_deref().unwrap_or_default()));
+        // A *preferred* level, and the one thing in a theme the app is allowed
+        // to overrule: a picture in the middle needs 30%, so the row shows High
+        // and says why. The preference is kept rather than rewritten, so taking
+        // the picture away gives it back.
+        ec.set(level_named(theme.error_correction.as_deref().unwrap_or_default()));
+        // A *preferred* size: the largest does not fit a short code, and the
+        // memo below draws the largest that does — see `Drawn::capped`.
+        inset_size.set(InsetSize::named(theme.image_size.as_deref().unwrap_or_default()));
+        inset.set(
+            theme
+                .image_file
+                .and_then(|(name, bytes)| Inset::adopt(name, bytes)),
+        );
+        inset_error.set(false);
+        // Two clicks was the ask: the sheet, then the theme.
+        themes_sheet.set(false);
+    };
+
+    // The other direction: what is on screen now, filed under a name.
+    //
+    // The list is re-read off disk rather than pushed onto, so what the sheet
+    // shows is what a later run will find — including the case where the write
+    // silently failed.
+    let save_theme = {
+        let dir = library.clone();
+        move |_| {
+            let name = theme_name().trim().to_string();
+            let Some(dir) = dir.as_deref() else { return };
+            if name.is_empty() {
+                return;
+            }
+            // **A theme holds what it changes.** A control left where the app
+            // opened it is a key the file does not need: an absent one already
+            // means that value, and every line written is a line somebody
+            // reading the theme by hand has to take in.
+            let changed = |changed: bool, word: &str| changed.then(|| word.to_string());
+            themes::save(
+                dir,
+                &themes::Theme {
+                    name,
+                    foreground: (dark() != Rgb::BLACK).then_some(dark()),
+                    background: (light() != Rgb::WHITE).then_some(light()),
+                    image_file: inset
+                        .read()
+                        .as_ref()
+                        .map(|chosen| (chosen.name.clone(), chosen.bytes.clone())),
+                    image_size: changed(
+                        inset_size() != InsetSize::default(),
+                        inset_size().slug(),
+                    ),
+                    // The preference, not what the code was drawn at: a theme
+                    // saved while an inset held the row at 30% would otherwise
+                    // come back as a theme that asks for 30% forever.
+                    error_correction: changed(
+                        ec() != ErrorCorrection::Medium,
+                        level_slug(ec()),
+                    ),
+                    shape: changed(look() != Look::default(), look().slug()),
+                    margin: (margin() != DEFAULT_MARGIN).then_some(margin()),
+                },
+            );
+            saved.set(themes::list(dir));
+            theme_name.set(String::new());
+            condemned.set(None);
+        }
+    };
+
+    // A theme somebody else made: the same folder this app writes, picked with
+    // the platform's own dialog and copied in beside the rest. The list is
+    // re-read off disk afterwards for `save_theme`'s reason — what the sheet
+    // shows is what a later run will find.
+    let import_theme = {
+        let library = library.clone();
+        move |_| {
+            let library = library.clone();
+            spawn(async move {
+                let Some(handle) = rfd::AsyncFileDialog::new().pick_folder().await else {
+                    return;
+                };
+                // Before anything on screen changes: see `SETTLE`.
+                after(SETTLE).await;
+                let Some(dir) = library.as_deref() else { return };
+                match themes::import(dir, handle.path()) {
+                    Ok(()) => {
+                        import_error.set(None);
+                        saved.set(themes::list(dir));
+                    }
+                    Err(why) => import_error.set(Some(why)),
+                }
+            });
+        }
+    };
+
+    let mut appearance = use_signal(|| {
+        dioxus_core::try_consume_context::<Tone>().map_or(Appearance::System, |Tone(seed)| seed)
+    });
+    let mut appearance_sheet = use_signal(|| false);
     let mut caret = use_caret();
     let remember = use_hook(dioxus_core::try_consume_context::<Remember>);
 
@@ -760,7 +1044,7 @@ pub fn App() -> Element {
     }
     use_effect(move || {
         if let Some(window) = &window {
-            window.set_theme(theme().window());
+            window.set_theme(appearance().window());
         }
     });
 
@@ -775,7 +1059,7 @@ pub fn App() -> Element {
     //
     //   * This one, on the window. `clicking_a_chip_blurs_the_field` records the
     //     rule that makes it necessary: a click matching none of Blitz's known
-    //     controls *clears* the focus, so after clicking a theme the keyboard is
+    //     controls *clears* the focus, so after clicking a appearance the keyboard is
     //     on `<html>`, above `.app`, and bubbles away from it.
     //
     // The gate is constant for the life of the component, so hook order does not
@@ -788,7 +1072,8 @@ pub fn App() -> Element {
                 && !event.repeat
                 && event.logical_key == WinitKey::Named(NamedKey::Escape)
             {
-                theme_sheet.set(false);
+                appearance_sheet.set(false);
+                themes_sheet.set(false);
                 about.set(false);
             }
         });
@@ -874,6 +1159,8 @@ pub fn App() -> Element {
             else {
                 return;
             };
+            // Before anything on screen changes: see `SETTLE`.
+            after(SETTLE).await;
             let outcome = match std::fs::read(handle.path()) {
                 Ok(bytes) => qrnew_core::read(&bytes),
                 Err(error) => Err(ReadError::Damaged(error.to_string())),
@@ -903,6 +1190,8 @@ pub fn App() -> Element {
             else {
                 return;
             };
+            // Before anything on screen changes: see `SETTLE`.
+            after(SETTLE).await;
             match Inset::read(handle.path()) {
                 Some(chosen) => {
                     inset_error.set(false);
@@ -924,7 +1213,7 @@ pub fn App() -> Element {
             else {
                 return;
             };
-            if let Ok(png) = qr.to_png(EXPORT_SCALE) {
+            if let Ok(png) = qr.to_png(export_scale(&qr)) {
                 let _ = std::fs::write(handle.path(), png);
             }
         });
@@ -947,7 +1236,7 @@ pub fn App() -> Element {
 
     let copy = move |_| {
         let Some(Drawn { qr, .. }) = code() else { return };
-        let Ok(raster) = qr.to_rgba(EXPORT_SCALE) else {
+        let Ok(raster) = qr.to_rgba(export_scale(&qr)) else {
             return;
         };
         if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -981,14 +1270,6 @@ pub fn App() -> Element {
         copied_image.lower();
     });
 
-    // Both stepper buttons and the field itself go through here, so the number
-    // and the text under it cannot disagree about what the margin is.
-    let mut set_margin = move |next: u32| {
-        let next = next.min(MAX_MARGIN);
-        margin.set(next);
-        margin_draft.set(next.to_string());
-    };
-
     // Whether there is anything to save, copy or look at. It decides both the
     // stage's content and how the three export buttons are drawn.
     let ready = preview().is_some();
@@ -996,28 +1277,15 @@ pub fn App() -> Element {
     // Whether an inset is in place — asked three times below, so read once here.
     let has_inset = inset.read().is_some();
     let shown_ec = if has_inset { ErrorCorrection::High } else { ec() };
-    // The largest inset this code can carry, as the fraction of its width that
-    // [`InsetSize::fraction`] is measured in; `None` while there is no code.
-    //
-    // It moves with the text, because the rule behind it counts *modules* and
-    // the text decides the module count. `size_in_modules` counts the quiet
-    // zone, which the fraction does not.
-    let room = code.read().as_ref().map(|drawn| {
-        let modules = drawn.qr.size_in_modules() - 2 * margin();
-        qrnew_core::largest_logo_size(Logo::DEFAULT_PADDING, modules)
-    });
+    // Whether the level the code is drawn at is not the level that was asked
+    // for. Only ever one way round: an inset raises the row to 30% and nothing
+    // lowers it, so this is true exactly when a picture is in the way of a
+    // choice somebody made.
+    let ec_overridden = has_inset && ec() != ErrorCorrection::High;
     // Whether the size the row points at is the size the code was drawn at.
-    // Read out of the memo rather than recomputed: the encode that already
-    // happened is the only thing that knows, and `room` is the app's own
-    // arithmetic about the same rule. Where a rounding at the boundary makes
-    // them disagree the memo is right, which is why either dims the chip.
+    // Read out of the memo rather than recomputed by the app: the encode that
+    // already happened is the only thing that knows.
     let capped = code.read().as_ref().is_some_and(|drawn| drawn.capped);
-    // Whether a size in the row is one this code cannot take: it does not fit,
-    // or it is the one that was asked for and did not. The second half covers a
-    // code that *shrank* — text deleted out from under a size that was fine.
-    let held = move |choice: InsetSize| {
-        room.is_some_and(|room| choice.fraction() > room) || (capped && inset_size() == choice)
-    };
 
     // Where the picture goes on the stage, as the style the layer over the code
     // wears. The code that says where is the code that drew the hole, so the two
@@ -1065,24 +1333,28 @@ pub fn App() -> Element {
     // Cloned rather than borrowed through the markup: holding a `Ref` while the
     // tree is built is a lock held over a lot of other people's code.
     let inset_name = inset.read().as_ref().map(|chosen| chosen.name.clone());
+    // A theme has to be called something: the button is dimmed and inert
+    // until the field says what.
+    let can_save = !theme_name().trim().is_empty();
     let export_ink = if ready { Ink::Plain } else { Ink::Faint };
     let export_class = if ready { "btn" } else { "btn off" };
 
     rsx! {
         style { {include_str!("ui.css")} }
 
-            // The theme is a class here rather than a media query in `ui.css`,
+            // The appearance is a class here rather than a media query in `ui.css`,
             // and both sheets are inside it: a custom property is inherited, so
             // anything painted in the app's colours has to descend from the
             // element the palette is written on.
         div {
-            class: "app theme-{theme().slug()}{caret.class()}",
+            class: "app appearance-{appearance().slug()}{caret.class()}",
             // Escape, for every keystroke made while the keyboard is inside
             // the interface. The other half is on the window; the whole story
             // is above `use_window_event` in this component.
             onkeydown: move |event| {
-                if event.key() == Key::Escape && (theme_sheet() || about()) {
-                    theme_sheet.set(false);
+                if event.key() == Key::Escape && (appearance_sheet() || themes_sheet() || about()) {
+                    appearance_sheet.set(false);
+                    themes_sheet.set(false);
                     about.set(false);
                 }
             },
@@ -1093,16 +1365,26 @@ pub fn App() -> Element {
                     span { {fl!("app-title")} }
                 }
                 div { class: "spacer" }
+                // Only where there is somewhere to keep them. The other two
+                // buttons are always drawn, because neither needs a disk.
+                if library.is_some() {
+                    button {
+                        class: "chrome-btn themes-open",
+                        onclick: move |_| themes_sheet.toggle(),
+                        {glyph(Glyph::Bookmark, Ink::Plain, "glyph")}
+                        span { {fl!("themes")} }
+                    }
+                }
                 button {
-                    class: "chrome-btn theme-open",
-                    onclick: move |_| theme_sheet.toggle(),
-                    {glyph(Glyph::Theme, Ink::Faint, "glyph")}
-                    span { {fl!("theme")} }
+                    class: "chrome-btn appearance-open",
+                    onclick: move |_| appearance_sheet.toggle(),
+                    {glyph(Glyph::Appearance, Ink::Plain, "glyph")}
+                    span { {fl!("appearance")} }
                 }
                 button {
                     class: "chrome-btn about-open",
                     onclick: move |_| about.toggle(),
-                    {glyph(Glyph::Info, Ink::Faint, "glyph")}
+                    {glyph(Glyph::Info, Ink::Plain, "glyph")}
                     span { {fl!("about")} }
                 }
             }
@@ -1136,13 +1418,14 @@ pub fn App() -> Element {
                         }
                         // **Blitz has no `placeholder`.** There is no such
                         // attribute in `blitz-dom` at all, so setting one left
-                        // the field blank. The prompt is a sibling rather than
-                        // an overlay because `pointer-events: none` is also
-                        // missing, so anything laid over the field would eat
-                        // the click meant to focus it.
+                        // the field blank.
                         //
-                        // The line keeps its height when it has nothing to say,
-                        // so the button below never moves.
+                        // A line under the field rather than the overlay the
+                        // theme sheet's name field uses, because it is not only
+                        // a prompt: it is also where text too long for a code
+                        // says so, and that sentence does not belong on top of
+                        // the text it is about. It keeps its height when it has
+                        // nothing to say, so the button below never moves.
                         p { class: "{note_class}", "{note}" }
                         button {
                             class: "btn wide",
@@ -1210,12 +1493,7 @@ pub fn App() -> Element {
                             // label, because the label is a translation and a
                             // test that selected on it would pass in English
                             // and nowhere else.
-                            for (level , name , label) in [
-                                (ErrorCorrection::Low, "low", fl!("ec-low")),
-                                (ErrorCorrection::Medium, "medium", fl!("ec-medium")),
-                                (ErrorCorrection::Quartile, "quartile", fl!("ec-quartile")),
-                                (ErrorCorrection::High, "high", fl!("ec-high")),
-                            ] {
+                            for (level , name) in LEVELS {
                                 button {
                                     key: "{name}",
                                     class: chip_class(shown_ec == level, has_inset),
@@ -1226,12 +1504,44 @@ pub fn App() -> Element {
                                             ec.set(level);
                                         }
                                     },
-                                    span { {label.clone()} }
+                                    span {
+                                        match level {
+                                            ErrorCorrection::Low => fl!("ec-low"),
+                                            ErrorCorrection::Medium => fl!("ec-medium"),
+                                            ErrorCorrection::Quartile => fl!("ec-quartile"),
+                                            ErrorCorrection::High => fl!("ec-high"),
+                                        }
+                                    }
                                 }
                             }
                         }
-                        p { class: "hint",
-                            {if has_inset { fl!("ec-locked") } else { fl!("ec-hint") }}
+                        // Three states, one line: the choice is being
+                        // overruled, the choice happens to agree with what the
+                        // inset needs, or there is no inset and the row is the
+                        // whole story.
+                        //
+                        // **Read off the state rather than remembered from an
+                        // apply**, so it is right however the two came to
+                        // disagree — a theme carrying 15% and a picture, or a
+                        // picture added to a code already set to 15%. It goes
+                        // when the picture goes, and the choice underneath comes
+                        // back with it.
+                        //
+                        // A hint rather than the banner the margin and the shape
+                        // wear. Those three say *this code may not scan*, which
+                        // is the one thing in the window worth a triangle; 30%
+                        // error correction is the app doing the safe thing and
+                        // saying which choice it took over to do it.
+                        p { class: "hint", "data-ec-note": "{ec_overridden}",
+                            {
+                                if ec_overridden {
+                                    fl!("ec-overridden")
+                                } else if has_inset {
+                                    fl!("ec-locked")
+                                } else {
+                                    fl!("ec-hint")
+                                }
+                            }
                         }
                     }
 
@@ -1599,23 +1909,22 @@ pub fn App() -> Element {
                             // is one: a size control over an empty card is a
                             // question about nothing, in the taller rail.
                             //
-                            // A size this code has no room for is dimmed and
-                            // inert, like the error-correction row while an
-                            // inset holds it. The row's top end is set by the
-                            // module count and the module count by how much text
-                            // there is, so a few more characters brings it back.
+                            // **Every size is always choosable**, because the
+                            // row is a preference rather than an instruction —
+                            // the same thing the error-correction row is while
+                            // an inset holds it at 30%. A size this code has no
+                            // room for is taken, drawn at the middle size, and
+                            // shown as held with the hint below saying why; a
+                            // few more characters and it is drawn as asked,
+                            // with nothing to click again.
                             div { class: "segments segments-3",
                                 for choice in InsetSize::ALL {
                                     button {
                                         key: "{choice.slug()}",
-                                        class: chip_class(inset_size() == choice, held(choice)),
+                                        class: chip_class(inset_size() == choice, capped && inset_size() == choice),
                                         "data-inset-size": "{choice.slug()}",
                                         aria_pressed: if inset_size() == choice { "true" } else { "false" },
-                                        onclick: move |_| {
-                                            if !held(choice) {
-                                                inset_size.set(choice);
-                                            }
-                                        },
+                                        onclick: move |_| inset_size.set(choice),
                                         span {
                                             match choice {
                                                 InsetSize::Small => fl!("inset-small"),
@@ -1624,6 +1933,26 @@ pub fn App() -> Element {
                                             }
                                         }
                                     }
+                                }
+                            }
+                            // The size that was asked for did not fit, so the
+                            // picture is drawn at the middle size — the one
+                            // that fits every code there is. The chip above is
+                            // already dimmed; this says why, because a dimmed
+                            // control explains itself to nobody.
+                            //
+                            // Read off the encode rather than off an apply, so
+                            // it covers a size chosen by hand and a code that
+                            // shrank under one just as well as a theme that
+                            // asked for more than this code has room for.
+                            //
+                            // A hint, for the reason the error-correction line
+                            // is one: the triangle belongs to the three cautions
+                            // about a code that may not scan, and a picture
+                            // drawn smaller than asked scans perfectly well.
+                            if capped {
+                                p { class: "hint", "data-inset-capped": "true",
+                                    {fl!("inset-capped")}
                                 }
                             }
                         } else {
@@ -1649,20 +1978,212 @@ pub fn App() -> Element {
                 }
             }
 
-            if theme_sheet() {
-                div { class: "scrim", onclick: move |_| theme_sheet.set(false),
+            // The saved looks. Everything in a theme is on the face of the
+            // window already — this sheet only remembers a set of answers and
+            // gives them back, which is why it is a sheet rather than a fourth
+            // card in a rail that has no room.
+            if themes_sheet() {
+                div { class: "scrim", onclick: move |_| themes_sheet.set(false),
                     div {
-                        class: "sheet theme-sheet",
+                        class: "sheet themes-sheet",
+                        onclick: move |event| event.stop_propagation(),
+                        div { class: "sheet-head",
+                            h2 {
+                                {glyph(Glyph::Bookmark, Ink::Accent, "glyph-brand")}
+                                span { {fl!("themes")} }
+                            }
+                            button {
+                                class: "sheet-close themes-close",
+                                aria_label: fl!("close"),
+                                autofocus: true,
+                                onclick: move |_| themes_sheet.set(false),
+                                {glyph_hover(Glyph::Close, Ink::Faint, Ink::Danger, "glyph")}
+                            }
+                        }
+                        if saved().is_empty() {
+                            p { {fl!("themes-empty")} }
+                        } else {
+                            div { class: "themes-list",
+                                for theme in saved() {
+                                    div { key: "{theme.name}", class: "theme-row",
+                                        // **The question is asked in the row's
+                                        // own place.** A second sheet over this
+                                        // one would need a second scrim and a
+                                        // second way out; here the thing being
+                                        // deleted is still on screen, named, and
+                                        // the two answers are the same size.
+                                        if condemned() == Some(theme.name.clone()) {
+                                            span { class: "theme-asking",
+                                                {glyph(Glyph::Alert, Ink::Warn, "glyph")}
+                                                span { {fl!("themes-remove-ask", name = theme.name.clone())} }
+                                            }
+                                            button {
+                                                class: "btn danger",
+                                                "data-theme-remove-yes": "{theme.name}",
+                                                onclick: {
+                                                    let name = theme.name.clone();
+                                                    let dir = library.clone();
+                                                    move |_| {
+                                                        let Some(dir) = dir.as_deref() else { return };
+                                                        themes::remove(dir, &name);
+                                                        saved.set(themes::list(dir));
+                                                        condemned.set(None);
+                                                    }
+                                                },
+                                                span { {fl!("themes-remove-yes")} }
+                                            }
+                                            button {
+                                                class: "btn",
+                                                "data-theme-remove-no": "{theme.name}",
+                                                onclick: move |_| condemned.set(None),
+                                                span { {fl!("themes-remove-no")} }
+                                            }
+                                        } else {
+                                            button {
+                                                class: "theme-apply",
+                                                // The name rather than an index:
+                                                // a test selecting on a position
+                                                // would pass until somebody saved
+                                                // a second theme alphabetically
+                                                // before it.
+                                                "data-theme": "{theme.name}",
+                                                onclick: {
+                                                    let chosen = theme.clone();
+                                                    move |_| apply(chosen.clone())
+                                                },
+                                                // The two colours as the thing
+                                                // they are: a mark on its own
+                                                // ground, which is what a code is.
+                                                span {
+                                                    class: "theme-swatch",
+                                                    style: "background: {theme.ground().to_hex()}; border-color: {mat_line(theme.ground())}",
+                                                    span {
+                                                        class: "theme-mark",
+                                                        style: "background: {theme.mark().to_hex()}",
+                                                    }
+                                                }
+                                                span { class: "theme-name", "{theme.name}" }
+                                                // Which picture is in it, if
+                                                // there is one — the one part of
+                                                // a theme the swatch cannot
+                                                // show, and the one that tells
+                                                // two otherwise similar themes
+                                                // apart.
+                                                if let Some((file, _)) = theme.image_file.as_ref() {
+                                                    span {
+                                                        class: "theme-image",
+                                                        "data-theme-image": "{theme.name}",
+                                                        "{file}",
+                                                    }
+                                                }
+                                            }
+                                            button {
+                                                class: "sheet-close theme-remove",
+                                                "data-theme-remove": "{theme.name}",
+                                                aria_label: fl!("themes-remove"),
+                                                onclick: {
+                                                    let name = theme.name.clone();
+                                                    move |_| condemned.set(Some(name.clone()))
+                                                },
+                                                {glyph_hover(Glyph::Trash, Ink::Faint, Ink::Danger, "glyph")}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Bringing one in, under the ones already here: it
+                        // adds a row to the list above rather than changing
+                        // anything in the window, so it belongs to the list.
+                        button {
+                            class: "btn wide",
+                            "data-theme-import": "true",
+                            onclick: import_theme,
+                            {glyph(Glyph::Download, Ink::Plain, "glyph")}
+                            span { {fl!("themes-import")} }
+                        }
+                        if let Some(why) = import_error() {
+                            p { class: "error",
+                                {
+                                    match why {
+                                        themes::NotATheme::NoFile => fl!("themes-import-error-no-file"),
+                                        themes::NotATheme::NoName => fl!("themes-import-error-no-name"),
+                                    }
+                                }
+                            }
+                        }
+                        // What the row under it does, in the words of what is
+                        // on screen right now — a picture in the middle of the
+                        // code is the one part of a theme the sheet cannot
+                        // show. Directly over the field it is about, with
+                        // nothing in between: a sentence explaining a control
+                        // has to be the thing nearest to it.
+                        p { class: "sheet-sub", "data-themes-subhead": "true",
+                            {
+                                if has_inset {
+                                    fl!("themes-subhead-image")
+                                } else {
+                                    fl!("themes-subhead-plain")
+                                }
+                            }
+                        }
+                        div { class: "theme-save",
+                            // **Blitz has no `placeholder`** — there is no such
+                            // attribute in `blitz-dom` — so the prompt is a
+                            // sibling laid over the field, held out of the way
+                            // of the pointer by `pointer-events: none`. That
+                            // property *is* implemented (`Node::hit_inner`
+                            // consults it), which is what makes an overlay safe
+                            // here where the field's own prompt in the Content
+                            // card had to be a line underneath.
+                            div { class: "ghosted",
+                                input {
+                                    class: "field",
+                                    r#type: "text",
+                                    "data-theme-name": "true",
+                                    aria_label: fl!("themes-name"),
+                                    value: "{theme_name}",
+                                    oninput: move |event| theme_name.set(event.value()),
+                                    onkeydown: move |event| {
+                                        caret.struck();
+                                        appkit_has_this_key(&event);
+                                    },
+                                    onfocusin: move |_| caret.arrived(),
+                                    onfocusout: move |_| caret.left(),
+                                }
+                                if theme_name().is_empty() {
+                                    span { class: "ghost", "data-theme-prompt": "true",
+                                        {fl!("themes-name-prompt")}
+                                    }
+                                }
+                            }
+                            button {
+                                class: if can_save { "btn" } else { "btn off" },
+                                "data-theme-save": "true",
+                                aria_disabled: if can_save { "false" } else { "true" },
+                                onclick: save_theme,
+                                {glyph(Glyph::Bookmark, step_ink(can_save), "glyph")}
+                                span { {fl!("themes-save")} }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if appearance_sheet() {
+                div { class: "scrim", onclick: move |_| appearance_sheet.set(false),
+                    div {
+                        class: "sheet appearance-sheet",
                         // The scrim closes on a click; the panel is not the
                         // scrim.
                         onclick: move |event| event.stop_propagation(),
                         div { class: "sheet-head",
                             h2 {
-                                {glyph(Glyph::Theme, Ink::Accent, "glyph-brand")}
-                                span { {fl!("theme")} }
+                                {glyph(Glyph::Appearance, Ink::Accent, "glyph-brand")}
+                                span { {fl!("appearance")} }
                             }
                             button {
-                                class: "sheet-close theme-close",
+                                class: "sheet-close appearance-close",
                                 // The word this button used to carry, kept
                                 // where a screen reader still reads it: an
                                 // unlabelled cross is a shape rather than a
@@ -1673,26 +2194,26 @@ pub fn App() -> Element {
                                 // is what lets the element half of the Escape
                                 // handling see the key at all.
                                 autofocus: true,
-                                onclick: move |_| theme_sheet.set(false),
+                                onclick: move |_| appearance_sheet.set(false),
                                 {glyph_hover(Glyph::Close, Ink::Faint, Ink::Danger, "glyph")}
                             }
                         }
                         // The same segmented row the error-correction levels
                         // use: the same shape of question.
                         div { class: "segments segments-3",
-                            for choice in Theme::ALL {
+                            for choice in Appearance::ALL {
                                 button {
                                     key: "{choice.slug()}",
-                                    class: chip_class(theme() == choice, false),
-                                    "data-theme": "{choice.slug()}",
-                                    aria_pressed: if theme() == choice { "true" } else { "false" },
+                                    class: chip_class(appearance() == choice, false),
+                                    "data-appearance": "{choice.slug()}",
+                                    aria_pressed: if appearance() == choice { "true" } else { "false" },
                                     onclick: {
                                         let remember = remember.clone();
                                         move |_| {
-                                            theme.set(choice);
+                                            appearance.set(choice);
                                             // Written here rather than in an
-                                            // effect on `theme`, so that
-                                            // `--theme` and the saved value
+                                            // effect on `appearance`, so that
+                                            // `--appearance` and the saved value
                                             // itself seed the window without
                                             // writing themselves back.
                                             if let Some(Remember(write)) = &remember {
@@ -1702,9 +2223,9 @@ pub fn App() -> Element {
                                     },
                                     span {
                                         match choice {
-                                            Theme::System => fl!("theme-system"),
-                                            Theme::Light => fl!("theme-light"),
-                                            Theme::Dark => fl!("theme-dark"),
+                                            Appearance::System => fl!("appearance-system"),
+                                            Appearance::Light => fl!("appearance-light"),
+                                            Appearance::Dark => fl!("appearance-dark"),
                                         }
                                     }
                                 }
@@ -1803,9 +2324,14 @@ fn ColorWell(
 /// **The markers are background layers rather than child elements**, which is
 /// the one non-obvious decision here. A child on top of the square is what the
 /// pointer hits, and Blitz measures element coordinates once against the hit
-/// node — so `element_coordinates()` would come back relative to the marker,
-/// and `pointer-events: none`, the usual answer, is not implemented. A
-/// background layer has no hit box at all.
+/// node — so `element_coordinates()` would come back relative to the marker.
+/// A background layer has no hit box at all.
+///
+/// `pointer-events: none` would also answer it — `Node::hit_inner` does consult
+/// it, and the theme sheet's name prompt is laid over a field that way. It is
+/// the layers here that the square's own arithmetic and its tests are built
+/// around, so this stays as it is; the note is here so the next person does not
+/// re-derive a limit that is not there.
 ///
 /// `onhold` says when a pointer has taken hold of the square or the strip. It
 /// is the picker's own business except that the colour caution above holds
@@ -2054,7 +2580,7 @@ struct Hsv {
 /// handed to `usvg` as a document of its own. A presentation attribute cannot
 /// read a custom property and cannot be inside a media query, so each of these
 /// is two colours rather than one: see [`glyph`], which draws both and lets
-/// the stylesheet hide the one that does not belong to the theme in force.
+/// the stylesheet hide the one that does not belong to the appearance in force.
 ///
 /// Three of the five are a palette token written a second time — the accent,
 /// the caution and the danger, which have to match the chrome they sit in;
@@ -2126,8 +2652,8 @@ enum Glyph {
     Check,
     /// A border around a smaller square: the margin, drawn as what it is.
     Frame,
-    /// A circle half hatched: the theme, and the sheet that chooses it.
-    Theme,
+    /// A circle half hatched: the appearance, and the sheet that chooses it.
+    Appearance,
     /// A square with something round in the middle of it: the inset, drawn as
     /// what it is, and deliberately not [`Frame`](Glyph::Frame) with the inner
     /// shape filled — the two sit in the same column and have to be told apart
@@ -2144,9 +2670,17 @@ enum Glyph {
     Plus,
     Close,
     External,
+    /// A bookmark: the saved looks, and the sheet that keeps them. A shape
+    /// that says *put away and come back to* without being a star, which
+    /// would read as a rating.
+    Bookmark,
+    /// A bin, for the one control in the window that destroys something. Kept
+    /// apart from [`Close`](Glyph::Close), which is eight points away in the
+    /// same sheet and only closes it.
+    Trash,
     /// Two arrows passing: the button that exchanges the code's two colours.
     /// Not a half-hatched circle, which is what "invert" usually gets drawn
-    /// as, because [`Theme`](Glyph::Theme) is already that circle and the two
+    /// as, because [`Appearance`](Glyph::Appearance) is already that circle and the two
     /// are eight inches apart in the same window.
     Swap,
 }
@@ -2210,10 +2744,21 @@ impl Glyph {
             Glyph::Minus => &["M6.2 12 H17.8"],
             Glyph::Plus => &["M6.2 12 H17.8", "M12 6.2 V17.8"],
             Glyph::Close => &["M6.4 6.4 L17.6 17.6", "M17.6 6.4 L6.4 17.6"],
+            // A bin: lid, handle, body, and two lines down the inside of it.
+            // **Not the cross**, which in this window closes a panel — the two
+            // sit a few points apart in the same sheet, and one of them cannot
+            // be undone.
+            Glyph::Trash => &[
+                "M4.5 6.8 H19.5",
+                "M9.6 6.8 V4.9 H14.4 V6.8",
+                "M6.6 6.8 L7.4 19.8 H16.6 L17.4 6.8",
+                "M10.4 10.2 V16.4",
+                "M13.6 10.2 V16.4",
+            ],
             // Contrast: a circle split down the middle, one half hatched. Not
             // a sun and not a moon, because those two are the *answers* and
             // this is the button that asks the question.
-            Glyph::Theme => &[
+            Glyph::Appearance => &[
                 "M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12",
                 "M12 3 V21",
                 "M12 6.2 h3.1",
@@ -2222,6 +2767,7 @@ impl Glyph {
                 "M12 14.9 h5.2",
                 "M12 17.8 h3.1",
             ],
+            Glyph::Bookmark => &["M6.4 3.8 H17.6 V20.2 L12 16.1 L6.4 20.2 Z"],
             Glyph::External => &[
                 "M14.2 4.6 H19.4 V9.8",
                 "M19.4 4.6 L11.2 12.8",
@@ -2253,7 +2799,7 @@ const fn step_ink(live: bool) -> Ink {
 /// How a chip is drawn: selected, held, or neither.
 ///
 /// **Every chip's label goes in a `<span>`.** Bare text inside a `<button>`
-/// keeps the colour it was first painted in when the theme changes under it —
+/// keeps the colour it was first painted in when the appearance changes under it —
 /// the surface repaints and the word does not, leaving dark text on a dark
 /// chip until something rebuilds the node. Wrapping the text makes it a node
 /// with a style of its own. The headless harness resolves this correctly, so
@@ -2273,10 +2819,10 @@ const fn chip_class(selected: bool, locked: bool) -> &'static str {
 /// same route the preview takes — so an icon here is a real document, not a
 /// glyph in a font and not a rasterized image. That is also what makes it a
 /// pair: a document of its own is a document CSS cannot reach into, so the ink
-/// cannot follow the theme and the icon has to. One is drawn in each palette's
+/// cannot follow the appearance and the icon has to. One is drawn in each palette's
 /// ink and `ui.css` hides the wrong one.
 ///
-/// It is the price of a runtime theme switch, paid on every icon whether
+/// It is the price of a runtime appearance switch, paid on every icon whether
 /// anybody uses it or not. Worth knowing before spending the same trick on
 /// anything that appears in a list.
 fn glyph(kind: Glyph, ink: Ink, class: &'static str) -> Element {
@@ -2293,7 +2839,7 @@ fn glyph(kind: Glyph, ink: Ink, class: &'static str) -> Element {
 /// argument to the first — it is worth spending on the two crosses that close
 /// a sheet and on nothing else in the window.
 ///
-/// The swap is a `display` on the two wrappers, so the theme half of the
+/// The swap is a `display` on the two wrappers, so the appearance half of the
 /// choosing is not written twice: `.lit` / `.dim` still picks inside each pair.
 /// Both wrappers are flex boxes, which keeps the mark centred — an `<svg>` is
 /// inline by default, and a line box under a 34-point button would sit it low.
@@ -2329,7 +2875,7 @@ fn drawn(kind: Glyph, stroke: &'static str, class: String) -> Element {
 /// the case the app opens in and disappears the moment anybody clicks the
 /// middle of the greyscale row. The line is derived from the mat instead:
 /// pushed towards black if the mat is light, towards white if it is dark, which
-/// keeps it on the mat's own hue and independent of the theme.
+/// keeps it on the mat's own hue and independent of the appearance.
 ///
 /// The two fractions differ because the eye does. A third of the way to black
 /// off white reads without looking; the same third towards white off black is
@@ -2480,7 +3026,7 @@ fn from_hsv(hsv: Hsv) -> Rgb {
 /// is `abc` and also `aé`, where `&text[1..2]` is not a character boundary: the
 /// field panics, and a panic in a Dioxus event handler takes the window with
 /// it. Every path below indexes a byte and asks whether it is a hex digit.
-fn parse_hex(text: &str) -> Option<Rgb> {
+pub(crate) fn parse_hex(text: &str) -> Option<Rgb> {
     let text = text.trim().trim_start_matches('#').as_bytes();
     // A byte at or above 0x80 becomes a Latin-1 character here, and none of
     // those is a hex digit — so a multi-byte character is refused one byte at
@@ -2655,6 +3201,60 @@ impl Future for After {
 mod tests {
     use super::*;
 
+    /// **A saved code is big enough to use whatever is in it.** The shortest
+    /// input makes the smallest code, so a fixed number of pixels per module
+    /// gave the commonest case the worst file.
+    #[test]
+    fn a_saved_code_is_never_smaller_than_the_minimum() {
+        let style = QrStyle::default();
+        for text in ["hi", "https://example.org", &"x".repeat(1000)] {
+            let qr = Qr::new(text, ErrorCorrection::Medium, &style).expect("a code");
+            let across = qr.size_in_modules() * export_scale(&qr);
+            assert!(
+                across >= MIN_EXPORT_PX,
+                "{} modules came out {across} pixels across",
+                qr.size_in_modules()
+            );
+        }
+
+        // Past the point where the floor is what binds, the scale is the one
+        // that always was: a code that big is already wide enough.
+        let long = Qr::new(&"x".repeat(2000), ErrorCorrection::Low, &style).expect("a code");
+        assert_eq!(export_scale(&long), EXPORT_SCALE);
+    }
+
+    /// **A picture in the middle is not exported below its own resolution.**
+    /// The inset is a fraction of the width, so the size that is generous for
+    /// the code starves the one thing in it the app did not draw.
+    #[test]
+    fn a_saved_inset_gets_pixels_of_its_own() {
+        let picture = Qr::new(
+            "hi",
+            ErrorCorrection::Medium,
+            &QrStyle {
+                quiet_zone: DEFAULT_MARGIN,
+                logo: Some(Logo::new(
+                    br#"<svg xmlns="http://www.w3.org/2000/svg" width="447" height="447"><rect width="447" height="447"/></svg>"#
+                        .to_vec(),
+                )),
+                ..QrStyle::default()
+            },
+        )
+        .expect("a code with a picture in it");
+
+        let across = picture.size_in_modules() * export_scale(&picture);
+        let box_px = across as f32 * picture.inset_box().expect("a picture").side;
+        // Not the whole 512: [`MAX_EXPORT_PX`] is what stops it, and that is
+        // the trade being made rather than a rounding. The picture that
+        // prompted this is 447 pixels and comes out at 420.
+        assert!(
+            box_px >= qrnew_core::MAX_LOGO_SIDE as f32 * 0.8,
+            "a {} pixel picture was given {box_px} pixels",
+            qrnew_core::MAX_LOGO_SIDE
+        );
+        assert!(across <= MAX_EXPORT_PX, "{across} pixels is past the ceiling");
+    }
+
     /// **An icon's ink and the stylesheet's have to be the same colour.**
     ///
     /// They are written twice — once as a presentation attribute in [`Ink`],
@@ -2710,7 +3310,7 @@ mod tests {
     /// It applies when somebody picked dark and when somebody left the choice to
     /// a dark desktop — a selector and a media query, which CSS gives no way to
     /// share a block between. A colour edited in one copy and not the other
-    /// would be a theme that looked different depending on how it was reached.
+    /// would be a appearance that looked different depending on how it was reached.
     #[test]
     fn the_dark_palette_says_the_same_thing_twice() {
         /// Every `--token: value` between `selector` and the `}` that ends it.
@@ -2735,9 +3335,9 @@ mod tests {
                 .collect()
         }
 
-        let chosen = block(".theme-dark {");
+        let chosen = block(".appearance-dark {");
         assert!(chosen.len() > 20, "the palette is most of the window");
-        assert_eq!(chosen, block(".theme-system {"), "the two copies have drifted");
+        assert_eq!(chosen, block(".appearance-system {"), "the two copies have drifted");
     }
 
     #[test]

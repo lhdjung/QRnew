@@ -3,9 +3,9 @@
 /* QRnew's whole appearance.
  *
  * Two palettes, three ways of choosing between them. `.app` carries
- * `theme-system`, `theme-light` or `theme-dark`, and everything below hangs off
- * that class: light is written on `:root` and is the fallback, `.theme-dark`
- * redefines the same token names, and `.theme-system` picks between them with
+ * `appearance-system`, `appearance-light` or `appearance-dark`, and everything below hangs off
+ * that class: light is written on `:root` and is the fallback, `.appearance-dark`
+ * redefines the same token names, and `.appearance-system` picks between them with
  * `prefers-color-scheme`.
  *
  * **A class rather than a media query alone, and that is forced.**
@@ -13,7 +13,7 @@
  * Stylo — but nothing an app can call from inside a component moves it, and on
  * macOS asking winit to change the window's appearance deliberately does *not*
  * raise the `ThemeChanged` event that would. So the media query is consulted
- * only inside `.theme-system`, the one case where the desktop is the authority.
+ * only inside `.appearance-system`, the one case where the desktop is the authority.
  *
  * The palette lives on `.app` rather than `:root`, and a custom property is
  * inherited, so **anything painted in these colours has to descend from
@@ -77,8 +77,8 @@
 
   /* The one accent: a leaf green, for state and section marks and nothing else.
    * `--accent-ink` is what goes *on* the accent — white here, because a filled
-   * button in this theme is a dark colour carrying light text. The green is a
-   * deeper leaf than the dark theme's for the same reason: one colour cannot
+   * button in this appearance is a dark colour carrying light text. The green is a
+   * deeper leaf than the dark appearance's for the same reason: one colour cannot
    * carry text on white and stay the same colour on graphite. */
   --accent: #0f9d63;
   --accent-ink: #ffffff;
@@ -120,7 +120,7 @@
  * choice to a dark desktop — a selector and a media query, with no way to say
  * "this selector, but only inside that query". `the_dark_palette_says_the_same_
  * thing_twice` in `ui.rs` compares the two copies token by token. */
-.theme-dark {
+.appearance-dark {
   /* Warm-neutral graphite rather than blue-black. */
   --bg: #131417;
   --card: #1c1e22;
@@ -161,10 +161,10 @@
 /* And the same again for somebody who has left the choice to the desktop. This
  * is the *only* place `prefers-color-scheme` is asked in this file, because it
  * is the only place the desktop is the authority — and it is also the only
- * case Blitz keeps live, since macOS stops reporting theme changes once the
+ * case Blitz keeps live, since macOS stops reporting appearance changes once the
  * app has set an appearance of its own. */
 @media (prefers-color-scheme: dark) {
-  .theme-system {
+  .appearance-system {
     /* Warm-neutral graphite rather than blue-black. */
     --bg: #131417;
     --card: #1c1e22;
@@ -241,7 +241,7 @@ body {
 /* The whole window: a slim header over a three-column body.
  *
  * **It paints its own background, and `body` above is only the fallback.** The
- * palette is written on this element rather than on `:root`, because the theme
+ * palette is written on this element rather than on `:root`, because the appearance
  * is a class and this is the element that carries it — so `body` can only ever
  * see the light `--bg`. Covering the viewport is what makes that moot.
  *
@@ -555,7 +555,7 @@ body {
 
 /* A three-wide track, for the three rows that ask a three-way question: the
  * shape of the code's modules, the size of the picture in the middle of it,
- * and the theme. Only the columns and the gutter, so a row in a card is the
+ * and the appearance. Only the columns and the gutter, so a row in a card is the
  * same height as the four-wide one above it. */
 .segments-3 {
   grid-template-columns: repeat(3, 1fr);
@@ -565,7 +565,7 @@ body {
 /* The sheet's segments are roomier than a card's, because one of the three is
  * two words and a segment that only just fits its label reads as a mistake. The
  * sheet is sized by them rather than the other way. */
-.theme-sheet .chip {
+.appearance-sheet .chip {
   padding: 12px 10px;
   font-size: 15px;
 }
@@ -1062,10 +1062,10 @@ body {
  * against nothing the first time an ancestor's *inherited* style changes: the
  * box comes back zero-high and the code goes off the stage, leaving the mat,
  * which looks exactly like the code's foreground being deleted. It lasts until
- * something rebuilds the node, and changing the theme back does not fix it.
+ * something rebuilds the node, and changing the appearance back does not fix it.
  *
  * The one thing here that changes an inherited property on an ancestor is the
- * theme: `.theme-dark` and `.theme-system` redefine the custom properties at the
+ * appearance: `.appearance-dark` and `.appearance-system` redefine the custom properties at the
  * top of this file, and a custom property is inherited.
  *
  * Measured against the pinned Blitz on a document cut down to a flex column
@@ -1082,7 +1082,7 @@ body {
  * picture is drawn over the code, which
  * `the_picture_on_the_stage_is_where_the_document_puts_it` hit-tests.
  *
- * `the_theme_does_not_take_the_code_off_the_stage` is the regression test. */
+ * `the_appearance_does_not_take_the_code_off_the_stage` is the regression test. */
 .code > .doc,
 .code > img {
   position: absolute;
@@ -1151,15 +1151,15 @@ body {
   padding: 8px 13px;
   font: inherit;
   font-size: 14px;
-  color: var(--ink-2);
-  background: rgba(0, 0, 0, 0);
-  border: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--raised);
+  border: 1px solid var(--line-2);
   border-radius: 10px;
 }
 
 .chrome-btn:hover {
-  color: var(--ink);
-  background: var(--raised);
+  background: var(--raised-hi);
+  border-color: var(--line-3);
 }
 
 .scrim {
@@ -1175,7 +1175,7 @@ body {
   background: var(--scrim);
 }
 
-/* A modal panel: the About card and the theme sheet are the same object with
+/* A modal panel: the About card and the appearance sheet are the same object with
  * different contents, so the box is `.sheet` and what is peculiar to one of
  * them is the second class it carries. */
 .sheet {
@@ -1194,8 +1194,204 @@ body {
  * track, one of them two words. It is here rather than beside `.segments-3`
  * because both selectors are one class deep — put it above `.sheet` and source
  * order hands the width back. */
-.theme-sheet {
+.appearance-sheet {
   width: 440px;
+}
+
+/* The saved looks. The widest panel in the window, and the widest thing in it
+ * decides: a row carries a swatch, a name, the file name of the picture in it
+ * and the cross that asks about deleting it — and in the asking state, a
+ * question and two answers on one line. */
+.themes-sheet {
+  width: 640px;
+}
+
+/* Seven rows and then it scrolls, so a long list cannot push the name field off
+ * the bottom of the window. */
+.themes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 324px;
+  overflow-y: auto;
+  /* The list scrolls, and a scrollbar is drawn inside the box. Without this the
+   * cross at the end of a row is the thing it is drawn over. */
+  padding-right: 6px;
+}
+
+.theme-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  /* A row is one line high whichever state it is in, so the list does not jump
+   * when a question is asked in it. */
+  min-height: 40px;
+}
+
+/* The question, in the row's own place. It takes the room the name had, so the
+ * two answers land where the cross was and nothing else moves. */
+.theme-asking {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+/* The one destructive button in the window, and the only place this colour is
+ * spent: it is the difference between the answer that keeps the theme and the
+ * one that does not, and they are side by side. */
+.btn.danger {
+  color: var(--danger);
+  border-color: var(--danger-ring);
+}
+
+.btn.danger:hover {
+  background: var(--danger-ring);
+  border-color: var(--danger);
+}
+
+/* The whole line is the button: applying a theme is the thing this sheet is
+ * for, so it is the largest target in it. Built like `.well`, which is the
+ * other control in the window that is a colour and a name in one press. */
+.theme-apply {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  /* Said out loud: the user agent centres a button's contents, and every other
+   * button in the window wants that. This one is a list row. */
+  justify-content: flex-start;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  color: var(--ink);
+  background: var(--sunken);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+}
+
+.theme-apply:hover {
+  background: var(--raised);
+  border-color: var(--line-3);
+}
+
+/* The two colours as the thing they are — a mark on its own ground — rather
+ * than two dots side by side, which says nothing about which is which.
+ *
+ * The border is `mat_line`'s, for the theme whose background is the sheet's
+ * own colour: the same problem the preview has, answered the same way. */
+.theme-swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+}
+
+.theme-mark {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+/* A name longer than the row is cut off rather than wrapped: two-line rows in a
+ * list of one-line rows read as two themes. */
+.theme-name {
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+
+/* The picture's file name, after the theme's own. Quieter and smaller, because
+ * it is the answer to a question about a theme rather than what the theme is
+ * called — and it is the only thing in the row that gives way when the name is
+ * long. */
+.theme-image {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+/* Built like the cross that closes a sheet — the same box, the same faint-to-red
+ * hover — but **not the same mark**. A cross in this sheet already means "close
+ * this", and the one that empties a theme sits eight points from the row that
+ * applies it; a bin says which of the two it is before it is pressed. Smaller,
+ * and without the optical nudge that belongs to a panel's corner. */
+.theme-remove {
+  width: 30px;
+  height: 30px;
+  margin-right: 0;
+  border-radius: 15px;
+}
+
+/* What the row under it does, said once and in the sheet's own voice: heavier
+ * than a hint and quieter than the panel's title, because it introduces one
+ * control rather than the panel. */
+.sheet-sub {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* The field and the button that files what is on screen under a name. */
+.theme-save {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The field and the prompt over it. `position: relative` is what the prompt is
+ * absolute against. */
+.ghosted {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.theme-save .field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The prompt an empty field would carry if Blitz had `placeholder`. Laid over
+ * the field and made transparent to the pointer, so the click that looks like
+ * it lands on the prompt lands on the field under it.
+ *
+ * The offsets are the field's own padding, so the prompt sits exactly where the
+ * first typed character will. */
+.ghost {
+  position: absolute;
+  left: 13px;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  color: var(--ink-3);
+  font-size: 15px;
+  font-style: italic;
+}
+
+.theme-save .btn {
+  flex: 0 0 auto;
 }
 
 /* The top line of a sheet: what the panel is, and the way out of it.
@@ -1261,19 +1457,19 @@ body {
   background: var(--raised-hi);
 }
 
-/* ...and the mark turns with it. `glyph_hover` in `ui.rs` draws the cross twice
+/* ...and the mark turns with it. `glyph_hover` in `ui.rs` draws the mark twice
  * over — once in the faint ink it rests in, once in the red every close button
  * on the desktop turns under a pointer — and these four rules choose between the
- * two wrappers. The theme is not asked again: `.lit` / `.dim` at the foot of
+ * two wrappers. The appearance is not asked again: `.lit` / `.dim` at the foot of
  * this file picks the palette inside whichever pair is showing, which is why the
  * swap is a wrapper rather than two more classes on the icons.
  *
  * `flex` rather than `block`: an `<svg>` is inline, and a line box inside the
  * button would sit the cross off centre by the descender.
  *
- * Four documents for one mark is the price, worth paying on these two crosses
- * and nothing else — a cross is a shape rather than a word, and the colour is
- * what says which of the things a cross can mean this one is. */
+ * Four documents for one mark is the price, worth paying on these buttons and
+ * nothing else — a mark is a shape rather than a word, and the colour is what
+ * says which of the things it can mean this one is. */
 .ink-rest,
 .ink-hot {
   display: flex;
@@ -1324,20 +1520,20 @@ body {
   display: none;
 }
 
-.theme-dark .lit {
+.appearance-dark .lit {
   display: none;
 }
 
-.theme-dark .dim {
+.appearance-dark .dim {
   display: block;
 }
 
 @media (prefers-color-scheme: dark) {
-  .theme-system .lit {
+  .appearance-system .lit {
     display: none;
   }
 
-  .theme-system .dim {
+  .appearance-system .dim {
     display: block;
   }
 }

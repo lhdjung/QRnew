@@ -1,18 +1,24 @@
 // SPDX-License-Identifier: MPL-2.0
 
-//! The one thing QRnew remembers between runs: the theme.
+//! One line per setting, and at the time of writing there is one: the
+//! appearance — whether the window is light or dark.
 //!
-//! Not a settings system, and it should not become one. Everything else in the
+//! Not a settings system, and it should not become one. Everything in the
 //! window belongs to the *code being made* — text, colours, margin, inset — and
-//! the next code is a different code. The theme is the only setting about the
-//! person rather than the picture.
+//! the next code is a different code. The appearance is the only one of them
+//! that is about the person rather than the picture.
+//!
+//! Saved *themes* are the other thing on disk, and they are [`crate::themes`]'
+//! rather than a key here: a theme is a set of answers somebody named, not a
+//! setting, and there are as many of them as they care to make.
 //!
 //! Every operation is best-effort and silent. A read-only home, a sandbox, an
 //! unset `$HOME`, a file edited into nonsense: the fallback is the default the
 //! app would have used anyway, and the control that sets it is on screen.
 //!
-//! `read` and `write` are the only two things in QRnew that touch a path the
-//! user did not choose in a dialog. Nothing is sent anywhere.
+//! `read` and `write`, and the same pair in [`crate::themes`], are the only
+//! things in QRnew that touch a path the user did not choose in a dialog.
+//! Nothing is sent anywhere.
 
 use std::path::PathBuf;
 
@@ -40,7 +46,7 @@ pub fn read(key: &str) -> Option<String> {
 /// Stores `value` under `key`, keeping whatever else the file holds.
 ///
 /// The read-modify-write is not a transaction: two copies of QRnew writing the
-/// same key at once leave one of the two answers, and both are a theme
+/// same key at once leave one of the two answers, and both are an answer
 /// somebody just asked for.
 pub fn write(key: &str, value: &str) {
     let Some(path) = file() else { return };
@@ -68,7 +74,11 @@ fn key_of(line: &str) -> Option<&str> {
 
 /// The value `key` is given in `text`. The last one wins, which is what makes
 /// [`write`]'s append safe.
-fn value_of<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+///
+/// Shared with [`crate::themes`], which files each saved look in the same
+/// `key = value` lines for the same reason: it is a format a person can read
+/// and edit, and it needs no crate to parse.
+pub(crate) fn value_of<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     text.lines()
         .filter_map(|line| line.split_once('='))
         .filter(|(name, _)| name.trim() == key)
@@ -76,12 +86,18 @@ fn value_of<'a>(text: &'a str, key: &str) -> Option<&'a str> {
         .next_back()
 }
 
-/// Where the settings file lives, by the convention of the platform.
+/// Where the settings file lives.
+fn file() -> Option<PathBuf> {
+    Some(dir()?.join(FILE))
+}
+
+/// The directory the app keeps its own files in, by the convention of the
+/// platform. [`crate::themes`] hangs its own folder off this one.
 ///
 /// Hand-rolled rather than `dirs` or `directories`: QRnew's pitch is that you
 /// can read its dependency list and see nothing in it can talk to a network,
 /// and three crates to join two strings is a poor trade against that.
-fn file() -> Option<PathBuf> {
+pub(crate) fn dir() -> Option<PathBuf> {
     let home = || std::env::var_os("HOME").filter(|home| !home.is_empty());
 
     let directory = if cfg!(target_os = "macos") {
@@ -102,7 +118,7 @@ fn file() -> Option<PathBuf> {
         }
     };
 
-    Some(directory.join(FILE))
+    Some(directory)
 }
 
 #[cfg(test)]
@@ -111,8 +127,8 @@ mod tests {
 
     #[test]
     fn a_value_is_read_back_off_its_own_line() {
-        let file = "theme = dark\n";
-        assert_eq!(value_of(file, "theme"), Some("dark"));
+        let file = "appearance = dark\n";
+        assert_eq!(value_of(file, "appearance"), Some("dark"));
         assert_eq!(value_of(file, "colour"), None);
     }
 
@@ -120,8 +136,8 @@ mod tests {
     /// contain, and none of them is a reason to give up on the rest of it.
     #[test]
     fn a_file_with_other_things_in_it_still_reads() {
-        let file = "\n  window  =  wide  \n\ntheme=light\nnonsense\n";
-        assert_eq!(value_of(file, "theme"), Some("light"));
+        let file = "\n  window  =  wide  \n\nappearance=light\nnonsense\n";
+        assert_eq!(value_of(file, "appearance"), Some("light"));
         assert_eq!(value_of(file, "window"), Some("wide"));
         assert_eq!(value_of(file, "missing"), None);
     }
@@ -130,13 +146,13 @@ mod tests {
     /// read as the value it appended.
     #[test]
     fn the_last_line_wins() {
-        assert_eq!(value_of("theme = light\ntheme = dark\n", "theme"), Some("dark"));
+        assert_eq!(value_of("appearance = light\nappearance = dark\n", "appearance"), Some("dark"));
     }
 
     #[test]
     fn a_line_says_which_key_it_sets() {
-        assert_eq!(key_of("theme = dark"), Some("theme"));
-        assert_eq!(key_of("  theme=dark"), Some("theme"));
+        assert_eq!(key_of("appearance = dark"), Some("appearance"));
+        assert_eq!(key_of("  appearance=dark"), Some("appearance"));
         assert_eq!(key_of("nonsense"), None);
     }
 

@@ -499,8 +499,14 @@ gradients, so the browser recipe works unchanged.
 **The thumbs are background layers rather than child elements**, which is the
 one thing worth carrying to another Blitz app. A child on top of the square is
 what the pointer hits, so `element_coordinates()` would come back relative to
-the thumb; `pointer-events: none` is not implemented in Blitz. A gradient has
-no hit box. Two costs: a background layer is clipped to its element, so the
+the thumb. A gradient has no hit box.
+
+*Corrected later:* `pointer-events: none` **is** implemented — `Node::hit_inner`
+consults it, and the Themes sheet lays a placeholder over a text field that way.
+The thumbs stay background layers because the square's arithmetic is built
+around them, not because the property is missing.
+
+Two costs: a background layer is clipped to its element, so the
 thumb is held a ring's width inside the box rather than overhanging the way a
 browser's does; and the square's size lives twice, in `ui.rs` and in `ui.css`,
 because `get_client_rect` panics from inside an event handler. A test asserts
@@ -806,15 +812,26 @@ black under both themes.
   characters plus a picture is a twenty-one-module code, so this is reachable
   rather than theoretical.
 
-  `qrnew_core::largest_logo_size` is new and is what the row asks, rather than
-  the app copying two rules that would then drift out of step with the ones
-  enforced. A size the code cannot take is dimmed and inert, the way the
-  error-correction row is while an inset holds it at 30%. The other half is a
-  code that *shrinks* — text deleted out from under a size that fitted — and
-  there the app redraws at the size that fits every code and marks the chip
-  held. The core refuses rather than shrinking, on the grounds that only the
-  caller knows which to give up; the app is the caller, and drawing nothing is
-  the one answer that is certainly wrong.
+  The row first answered this by dimming a size the code had no room for and
+  refusing the click, which asked `qrnew_core::largest_logo_size` what the
+  ceiling was. **That was wrong, and quietly so.** The row is a *preference* —
+  it is what a saved theme carries, and what the app falls back from — so a
+  refused click was a preference that could not be expressed: pick Large over
+  two characters of text, save the theme, and the file said `medium` with
+  nothing on screen having said no. It is the same mistake as dimming a chip
+  and saying nothing, which `Drawn::capped` was already written to answer.
+
+  Every size is choosable now. The ask is taken and kept, the code is drawn at
+  the size that fits, and the chip shows as held with the line under it saying
+  why — which is exactly the state a code that *shrinks* already reached, text
+  deleted out from under a size that fitted. One state instead of two, and the
+  app's own copy of the clearance rule is gone with it: the encode that already
+  happened is the only thing that knows, and it is the only thing asked.
+  `largest_logo_size` stays in the core, unused here.
+
+  The core refuses rather than shrinking, on the grounds that only the caller
+  knows which to give up; the app is the caller, and drawing nothing is the one
+  answer that is certainly wrong.
 
   The row cost the saturation square twelve more points, on top of the thirty
   the Inset card took. That column is where the height in this window comes
@@ -899,6 +916,141 @@ black under both themes.
   today. Nothing in QRnew can carry it until both halves land upstream: the
   `[patch]` sections and the `--atlas` flag that took these numbers were
   temporary and are reverted.
+- **A file dialog closing took the window with it.** Reported from use: choose
+  a picture for the middle of the code, and the process is gone with
+  `Option::unwrap()` on a `None` in `blitz-dom`'s `hit_inner`.
+
+  Every link is upstream and the chain is short. Removing a node retains it out
+  of `parent.children` and leaves it in `parent.paint_children`, which is only
+  rebuilt at `resolve`; hit-testing walks `paint_children` and does not resolve
+  first; and the shell resolves only in `redraw`. So a pointer event delivered
+  between a removal and the next redraw walks a dropped id. Ordinary clicks are
+  safe because the redraw always wins that race — **a modal file dialog is not**,
+  because it parks a burst of pointer motion that winit delivers all at once the
+  moment the panel goes away, with the mutation riding in ahead of it.
+
+  Worth keeping as a shape: this is the *third* upstream fault this app has met
+  that is about a cache nothing invalidates, after the two faces of the atlas
+  leak. `blitz-atlas.md`'s was keyed by a counter that never repeats;
+  this one is keyed by a node id that stops existing.
+
+  QRnew waits fifty milliseconds after a dialog closes before writing anything
+  to a signal — `SETTLE` in `ui.rs`, used by both dialogs. That hands the parked
+  burst an unchanged tree and puts the mutation on an empty queue, which is the
+  situation an ordinary click is already in. **It is a delay rather than a
+  guarantee**, and it is the one workaround in this tree that a test cannot
+  hold: the headless harness pumps and resolves between events by construction,
+  so the race it dodges cannot be staged in it. `blitz-hit-test.md` is the
+  report and the two-line patch.
+- **A theme is the whole code now, and two of its answers are preferences.**
+  The margin, the shape and the error-correction level joined the two colours
+  and the picture. Error correction is the interesting one: a picture in the
+  middle needs 30%, so a theme carrying both gets the picture's answer — and
+  since that is true however the two came to disagree, the card reads it off the
+  state rather than remembering it from an apply. `Drawn::capped` got the same
+  treatment: it had been dimming a chip and saying nothing, in every state that
+  reaches it and not only after a theme.
+
+  **Neither is a caution, and that is the part worth writing down.** The
+  triangle in this window means *this code may not scan* — the margin, the
+  shape, the two colours — and it is worth what it is because it means only
+  that. Holding error correction at 30% is the app taking the safe option, and
+  a picture drawn smaller than asked scans perfectly well. Both are hints,
+  replacing the hint that was there, so the height budget below did not have to
+  be reopened.
+
+  *Import theme…* is the other half: `themes::import` is `load` followed by
+  `save`, and the folder it reads is the folder this app writes. What no test
+  reaches is the button — it opens a native folder dialog — so the module's own
+  round trip is what holds it.
+
+  **The file went on a diet and both names changed.** Three things were wrong
+  with the format as first written, and they are one thing: it did not treat
+  the file as something a person would read.
+
+  *It wrote down what it was not saying.* Every theme carried all eight keys,
+  so `background = "#ffffff"` and `margin = 2` and `shape = "square"` sat in a
+  file whose whole content was two colours and a logo. Every setting is an
+  `Option` now — `None` is an absent key and the app's own default — and a
+  theme with one opinion is `name` and one line. Applying one still sets all
+  eight, because `None` means *the default* rather than *leave it alone*; that
+  is the same rule that makes a theme with no picture take the picture away.
+
+  *The two names argued with each other.* The folder is the theme — it holds
+  the picture as well — but it was named `uni-bern` and the file inside it was
+  named `theme.toml`, so the file looked like the whole thing and the picture
+  beside it looked like something else. Now the folder is
+  `qrnew-theme-uni-bern` and the file is `settings.toml`. The prefix earns its
+  length outside the app: a theme is shared by copying its folder, and a folder
+  called `uni-bern` in somebody's Downloads says neither what it is nor what
+  opens it. Inside the app's own directory it is redundant, which is the right
+  trade — the rename happens where nothing sees it, rather than every time
+  somebody sends one to a colleague.
+
+  *A refused import said one thing about three.* One `bool`, on the argument
+  that a folder with no theme file, a file that will not parse and a file the
+  app cannot read are not different things to do. That was wrong about the
+  first: it is the only one where the answer is "you picked the wrong folder"
+  rather than "this file needs fixing". `NotATheme` has the two cases and the
+  sheet says which.
+
+  Together those made the format's one hard requirement legible: **a theme is a
+  folder with a `settings.toml` in it that says `name`.** That is the whole
+  contract, and it is what `import` now checks and reports.
+
+  Two things the sheet got wrong on the way, both about distance. The sentence
+  saying what *Save* would take had a second line of small print under it, which
+  put it two lines from the field it was about; the small print is gone and the
+  sentence sits on the field. And the button that empties a theme wore the cross
+  that closes a panel, eight points from the row that applies the theme — it is
+  a bin now, faint until a pointer turns it red, which is the same hover the
+  cross has and the only part of it worth keeping.
+- **A saved code was as small as its input was short.** Reported from use: a
+  PNG saved from a five-character code came out 250 pixels across and 1.6 kB,
+  and looked like something had been compressed out of it. Nothing had —
+  PNG is lossless and the app does nothing to the raster on the way out. The
+  picture was simply that small.
+
+  `EXPORT_SCALE` was ten pixels per module, full stop, so the file's size was a
+  function of how much text was typed: twenty-one modules and a two-module
+  border is 250 pixels, which is 21mm printed at 300dpi. **The shortest input
+  is the commonest one**, so the fixed rate gave the usual case the worst file
+  and a 2,000-character code a 1,850-pixel one.
+
+  A thousand pixels was the first answer, and it was not enough — **the
+  complaint was about the logo, and a floor on the whole code is the wrong
+  place to answer that.** The inset is a seventh of the width, so a 1,000-pixel
+  code gave a 447-pixel logo 140 pixels to live in. Measured rather than
+  argued: cropped out of the render at 1:1, the mark is soft at 140 and clean
+  at 280, and the same crop against `sips` downscaling the source to 140 is
+  indistinguishable — so `resvg`'s filter is not the problem and neither is
+  `shrink_logo`, which does not fire at all on a 447-pixel picture under the
+  512 cap. The SVG export embeds the source byte for byte (5,355 in, 5,355
+  out) and was always the lossless answer.
+
+  So the picture sets the size. **Everything else in the document is flat
+  rectangles**, which come out clean at any scale worth having; the inset is
+  the only fine detail in it and the only part the app did not draw. A code
+  with one is made wide enough to hold `MAX_LOGO_SIDE` in that box — the
+  largest picture the app will take — and one without stays at 1,000. Still a
+  whole number of pixels per module, so the picture is at least the size asked
+  for rather than exactly it: rounding the scale up is free, rounding the size
+  down puts a seam through a module.
+
+  `MAX_EXPORT_PX` is 3,000 and is a real trade rather than a rounding. The
+  smallest inset on a wide quiet zone would ask for 5,600, which is a 380 MB
+  pixmap; 3,000 is 36 MB, and it gives the reported code a 420-pixel box for a
+  447-pixel logo — near enough its own resolution that the two do not tell
+  apart. 250 pixels and 1.6 kB became 3,000 and 63 kB.
+
+  **The clipboard rides the same rule**, which is one behaviour rather than
+  two but also 36 MB of RGBA handed to `arboard` on a button press. Not
+  measured as a stall; the first thing to split if it becomes one.
+
+  Worth keeping as a shape: the unit was right for the renderer and wrong for
+  the person, twice over. Pixels per module is what a rasterizer needs to be
+  told. Then pixels across the code was still wrong, because the thing being
+  judged was never the code.
 - **Packaging itself.** Unchanged and unhelped: `codesign --sign -` is still an
   ad-hoc signature, there is still no notarization, and the README still warns
   about the first launch.

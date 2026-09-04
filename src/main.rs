@@ -6,13 +6,13 @@
 //! cargo run --release                          # the window
 //! cargo run --release -- --fill "https://example.org"
 //! cargo run --release -- --fill "…" --inset logo.png
-//! cargo run --release -- --theme dark
+//! cargo run --release -- --appearance dark
 //! cargo run --release -- --fill "…" --width 1019 --height 762 --quit 10
 //! ```
 //!
-//! `--fill`, `--inset` and `--theme` seed states the app otherwise needs
+//! `--fill`, `--inset` and `--appearance` seed states the app otherwise needs
 //! somebody to type, click or work a file dialog to reach — they exist to make
-//! a window photographable and measurable. `--theme` does not write itself to
+//! a window photographable and measurable. `--appearance` does not write itself to
 //! `settings`.
 //!
 //! `--width`/`--height`/`--quit` are for memory measurement, not for users: a
@@ -23,10 +23,10 @@
 use std::sync::Arc;
 
 use dioxus_native::{LogicalSize, WindowAttributes};
-use qrnew::{i18n, settings, ui};
+use qrnew::{i18n, settings, themes, ui};
 
-/// The key the theme is filed under in `settings`.
-const THEME: &str = "theme";
+/// The key the appearance is filed under in `settings`.
+const APPEARANCE: &str = "appearance";
 
 fn main() {
     // Get the system's preferred languages, and apply the localizations.
@@ -49,9 +49,9 @@ fn main() {
     let fill = text("--fill").unwrap_or_default();
     // The flag beats the file and does not become the file: a screenshot is
     // not somebody changing their mind. Only the sheet writes.
-    let tone = text("--theme")
-        .and_then(|name| ui::Theme::named(&name))
-        .or_else(|| settings::read(THEME).and_then(|name| ui::Theme::named(&name)));
+    let tone = text("--appearance")
+        .and_then(|name| ui::Appearance::named(&name))
+        .or_else(|| settings::read(APPEARANCE).and_then(|name| ui::Appearance::named(&name)));
     let inset = text("--inset");
     let measured = flag("--width").or_else(|| flag("--height"));
 
@@ -67,8 +67,8 @@ fn main() {
     // width at which the two 356-pixel rails still leave the code a square
     // worth looking at.
     //
-    // No theme is asked for here: the window opens under whatever the desktop
-    // is set to, which is `Theme::System`. Picking Light or Dark has `ui.rs`
+    // No appearance is asked for here: the window opens under whatever the desktop
+    // is set to, which is `Appearance::System`. Picking Light or Dark has `ui.rs`
     // call `set_theme` on this same window.
     let attributes = WindowAttributes::default()
         .with_title(qrnew::fl!("app-title"))
@@ -90,16 +90,24 @@ fn main() {
             Box::new(ui::Inlay(path.clone())) as Box<dyn std::any::Any>
         }));
     }
-    if let Some(theme) = tone {
+    if let Some(appearance) = tone {
         contexts.push(Box::new(move || {
-            Box::new(ui::Tone(theme)) as Box<dyn std::any::Any>
+            Box::new(ui::Tone(appearance)) as Box<dyn std::any::Any>
+        }));
+    }
+    // Same reason, for the folder of saved looks: the tests save and delete
+    // themes, and a component that knew its own path would edit the themes of
+    // whoever ran them. No writable home means no button.
+    if let Some(dir) = themes::dir() {
+        contexts.push(Box::new(move || {
+            Box::new(ui::Themes(dir.clone())) as Box<dyn std::any::Any>
         }));
     }
     // Handed in rather than reached for, so the tests — which click through
     // the sheet — drive a window that cannot touch anybody's settings.
     contexts.push(Box::new(|| {
-        Box::new(ui::Remember(Arc::new(|theme: ui::Theme| {
-            settings::write(THEME, theme.slug());
+        Box::new(ui::Remember(Arc::new(|appearance: ui::Appearance| {
+            settings::write(APPEARANCE, appearance.slug());
         }))) as Box<dyn std::any::Any>
     }));
 

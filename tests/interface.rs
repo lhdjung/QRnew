@@ -24,7 +24,7 @@ use blitz_traits::events::{BlitzImeEvent, UiEvent};
 use blitz_traits::net::{Bytes, NetHandler, NetProvider, Request};
 use blitz_traits::shell::ColorScheme;
 use dioxus::prelude::VirtualDom;
-use qrnew::ui::{App, Fill, Inlay, Remember, Theme, Tone};
+use qrnew::ui::{App, Appearance, Fill, Inlay, Remember, Themes, Tone};
 
 /// Press a key that edits text, the way the platform delivers it.
 ///
@@ -253,7 +253,7 @@ impl NetProvider for DataUri {
 ///
 /// The code as a *document* is checked off the `data:` URL by [`preview`]. What
 /// needs this is the code as a *box on the stage*: an image that never loaded
-/// has no intrinsic size — see `the_theme_does_not_take_the_code_off_the_stage`.
+/// has no intrinsic size — see `the_appearance_does_not_take_the_code_off_the_stage`.
 fn app_drawn(text: &str, image: Option<&std::path::Path>) -> Harness<dioxus_native::DioxusDocument> {
     let mut vdom = VirtualDom::new(App).with_root_context(Fill(text.to_string()));
     if let Some(image) = image {
@@ -420,7 +420,7 @@ fn the_code_is_square_until_somebody_says_otherwise() {
 /// the focused node, so this also tests the `autofocus` on each Close button.
 #[test]
 fn escape_closes_a_sheet() {
-    for (open, panel) in [(".about-open", ".about"), (".theme-open", ".theme-sheet")] {
+    for (open, panel) in [(".about-open", ".about"), (".appearance-open", ".appearance-sheet")] {
         let mut harness = app();
         harness.click(open);
         harness.pump();
@@ -436,7 +436,7 @@ fn escape_closes_a_sheet() {
 ///
 /// Together these are why Escape is answered twice. A key event goes to the
 /// focused node and bubbles, so the keyboard has to be under `.app` — which
-/// `autofocus` on the Close button does. Clicking a theme then clears the focus
+/// `autofocus` on the Close button does. Clicking a appearance then clears the focus
 /// to `<html>` (see `clicking_a_chip_blurs_the_field`), which is *above* `.app`,
 /// and that case is caught by the winit handler no harness can reach.
 ///
@@ -445,19 +445,19 @@ fn escape_closes_a_sheet() {
 #[test]
 fn a_sheet_takes_the_keyboard_and_its_own_buttons_take_it_away() {
     let mut harness = app();
-    harness.click(".theme-open");
+    harness.click(".appearance-open");
     harness.pump();
     assert_eq!(
         harness.focused(),
-        harness.query(".theme-close"),
+        harness.query(".appearance-close"),
         "the sheet opens with the keyboard in it"
     );
 
-    harness.click("[data-theme=\"dark\"]");
+    harness.click("[data-appearance=\"dark\"]");
     harness.pump();
     assert_ne!(
         harness.focused(),
-        harness.query(".theme-close"),
+        harness.query(".appearance-close"),
         "and a click on one of its own chips takes it out again"
     );
 }
@@ -572,15 +572,15 @@ fn the_mat_is_outlined_whatever_colour_the_mat_is() {
         (value("background"), value("border-color"))
     };
 
-    // Both themes, because the page behind the mat is a different colour in
+    // Both appearances, because the page behind the mat is a different colour in
     // each and the line has to clear the mat in front of it either way.
-    for theme in ["light", "dark"] {
+    for appearance in ["light", "dark"] {
         let mut harness = app();
-        harness.click(".theme-open");
+        harness.click(".appearance-open");
         harness.pump();
-        harness.click(&format!("[data-theme=\"{theme}\"]"));
+        harness.click(&format!("[data-appearance=\"{appearance}\"]"));
         harness.pump();
-        harness.click(".theme-close");
+        harness.click(".appearance-close");
         harness.pump();
 
         harness.click(".field");
@@ -599,7 +599,7 @@ fn the_mat_is_outlined_whatever_colour_the_mat_is() {
             assert_eq!(mat, hex(swatch), "the mat took {swatch}");
             assert!(
                 (luma(mat) - luma(line)).abs() >= CLEARLY,
-                "on a {theme} window the outline is still visible on {swatch}: \
+                "on a {appearance} window the outline is still visible on {swatch}: \
                  mat {mat:?} against line {line:?}"
             );
         }
@@ -1490,14 +1490,16 @@ fn the_inset_row_draws_the_picture_at_the_size_it_asks_for() {
     );
 }
 
-/// A size the code has no room for is offered as held rather than as a lie.
+/// **A size is a preference, and a code with no room for it does not refuse
+/// it.** The choice is taken and remembered — so it reaches a saved theme —
+/// the picture is drawn at the size that fits, and the row says so.
 ///
 /// The ceiling is not a constant: a logo stays eight modules clear of every
 /// edge, a fixed *number of modules* and so a share that grows with the code. On
 /// a 21-module code a quarter of the width does not fit, and one line of text
-/// later it does.
+/// later it does — with nothing to click again.
 #[test]
-fn a_code_too_small_for_a_size_does_not_offer_it() {
+fn a_code_too_small_for_a_size_still_takes_the_ask() {
     let mut harness = app_with_inset("hi", "fold");
 
     assert_eq!(
@@ -1505,20 +1507,26 @@ fn a_code_too_small_for_a_size_does_not_offer_it() {
         21 + 2 * 2,
         "two characters and a picture is the smallest code there is"
     );
-    let large = harness
-        .attr("[data-inset-size=\"large\"]", "class")
-        .expect("the row is on screen");
-    assert!(large.contains("off"), "the largest size is held: {large:?}");
 
     harness.click("[data-inset-size=\"large\"]");
     harness.pump();
     assert_eq!(
         harness
-            .attr("[data-inset-size=\"medium\"]", "aria-pressed")
+            .attr("[data-inset-size=\"large\"]", "aria-pressed")
             .as_deref(),
         Some("true"),
-        "and clicking it changes nothing, which is what held means"
+        "the row points at the size that was asked for"
     );
+    let large = harness.attr("[data-inset-size=\"large\"]", "class").unwrap();
+    assert!(
+        large.contains("on") && large.contains("off"),
+        "and shows it as held, because it is not what was drawn: {large:?}"
+    );
+    assert!(
+        harness.query("[data-inset-capped]").is_some(),
+        "with a line saying why, since a dimmed chip explains itself to nobody"
+    );
+    let capped = inset_width(&harness);
 
     harness.click(".field");
     harness.type_text("https://example.org");
@@ -1527,6 +1535,14 @@ fn a_code_too_small_for_a_size_does_not_offer_it() {
     assert!(
         !large.contains("off"),
         "a longer address is a bigger code, and it has the room: {large:?}"
+    );
+    assert!(
+        harness.query("[data-inset-capped]").is_none(),
+        "nothing left to explain"
+    );
+    assert!(
+        inset_width(&harness) > capped,
+        "and the picture is finally drawn at the size it was asked for"
     );
 }
 
@@ -1665,7 +1681,7 @@ fn a_caution_is_never_the_thing_that_scrolls() {
 #[test]
 fn a_sheet_closes_from_its_own_corner() {
     for (open, sheet, close) in [
-        (".theme-open", ".theme-sheet", ".theme-close"),
+        (".appearance-open", ".appearance-sheet", ".appearance-close"),
         (".about-open", ".about", ".about-close"),
     ] {
         let mut harness = app_after(&[open]);
@@ -2541,7 +2557,7 @@ fn the_picture_on_the_stage_is_where_the_document_puts_it() {
     );
 }
 
-/// **The theme is the desktop's until somebody says otherwise.**
+/// **The appearance is the desktop's until somebody says otherwise.**
 ///
 /// Three answers, and two mechanisms that have to agree. The palette is a class
 /// on `.app`, because nothing a component can call moves `prefers-color-scheme`.
@@ -2549,10 +2565,10 @@ fn the_picture_on_the_stage_is_where_the_document_puts_it() {
 /// attribute on an SVG Blitz hands to `usvg` as its own document, so `glyph`
 /// draws each one twice and `ui.css` hides one.
 ///
-/// If those two disagree the window is half-themed and nothing fails until
+/// If those two disagree the window is half-painted and nothing fails until
 /// somebody looks, so each case checks both.
 #[test]
-fn the_theme_is_the_desktops_until_somebody_picks_one() {
+fn the_appearance_is_the_desktops_until_somebody_picks_one() {
     // How many of a class are actually laid out. A hidden icon keeps its node
     // and loses its box, which is exactly the distinction being tested.
     let shown = |harness: &Harness<dioxus_native::DioxusDocument>, class: &str| {
@@ -2588,17 +2604,17 @@ fn the_theme_is_the_desktops_until_somebody_picks_one() {
 
         let chosen = pick.unwrap_or("system");
         if let Some(pick) = pick {
-            harness.click(".theme-open");
+            harness.click(".appearance-open");
             harness.pump();
-            harness.click(&format!("[data-theme=\"{pick}\"]"));
+            harness.click(&format!("[data-appearance=\"{pick}\"]"));
             harness.pump();
-            harness.click(".theme-close");
+            harness.click(".appearance-close");
             harness.pump();
         }
 
         let case = format!("{desktop:?} desktop, {chosen} picked");
         assert!(
-            harness.query(&format!(".app.theme-{chosen}")).is_some(),
+            harness.query(&format!(".app.appearance-{chosen}")).is_some(),
             "{case}: the root wears the choice, not the outcome"
         );
 
@@ -2674,9 +2690,9 @@ fn the_code_on_the_stage_is_the_code_in_the_file() {
     );
 }
 
-/// **Changing the theme does not take the code off the stage.**
+/// **Changing the appearance does not take the code off the stage.**
 ///
-/// It did: picking a theme left the code — and the picture over it — 458 points
+/// It did: picking a appearance left the code — and the picture over it — 458 points
 /// wide and *nothing high*, so only the mat was left, which looks like the
 /// code's foreground being deleted and lasts until the next keystroke.
 ///
@@ -2685,8 +2701,8 @@ fn the_code_on_the_stage_is_the_code_in_the_file() {
 /// whole time, so [`preview`] says the app is fine. The picture needs a `data:`
 /// URL actually fetched, which is what [`app_drawn`] is for.
 #[test]
-fn the_theme_does_not_take_the_code_off_the_stage() {
-    let image = an_image("theme-stage");
+fn the_appearance_does_not_take_the_code_off_the_stage() {
+    let image = an_image("appearance-stage");
     let mut harness = app_drawn("https://example.org", Some(&image));
 
     let square = |harness: &Harness<dioxus_native::DioxusDocument>, selector: &str, when: &str| {
@@ -2704,10 +2720,10 @@ fn the_theme_does_not_take_the_code_off_the_stage() {
     let code = square(&harness, "[data-preview] svg", "before the sheet is opened");
     let inset = square(&harness, "[data-preview-inset]", "before the sheet is opened");
 
-    harness.click(".theme-open");
+    harness.click(".appearance-open");
     harness.pump();
     for pick in ["dark", "light", "system"] {
-        harness.click(&format!("[data-theme=\"{pick}\"]"));
+        harness.click(&format!("[data-appearance=\"{pick}\"]"));
         harness.pump();
         let when = format!("with {pick} picked");
         assert_eq!(square(&harness, "[data-preview] svg", &when), code);
@@ -2722,7 +2738,7 @@ fn the_theme_does_not_take_the_code_off_the_stage() {
 /// suite cannot edit the settings of whoever runs it.
 ///
 /// The negative half matters as much: opening the sheet is not a decision, and a
-/// window seeded by `--theme` or the saved value is not a change of mind.
+/// window seeded by `--appearance` or the saved value is not a change of mind.
 #[test]
 fn the_sheet_writes_a_choice_down_and_nothing_else() {
     let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2731,73 +2747,661 @@ fn the_sheet_writes_a_choice_down_and_nothing_else() {
 
     let vdom = VirtualDom::new(App)
         .with_root_context(Fill("https://example.org".into()))
-        // Seeded, the way a saved theme or `--theme` seeds it.
-        .with_root_context(Tone(Theme::Dark))
-        .with_root_context(Remember(std::sync::Arc::new(move |theme| {
-            sink.lock().unwrap().push(theme);
+        // Seeded, the way a saved appearance or `--appearance` seeds it.
+        .with_root_context(Tone(Appearance::Dark))
+        .with_root_context(Remember(std::sync::Arc::new(move |appearance| {
+            sink.lock().unwrap().push(appearance);
         })));
     let mut harness = Harness::from_vdom(vdom, HarnessOptions::default());
     harness.set_viewport_size(1280, 860);
     harness.pump();
-    assert!(harness.query(".app.theme-dark").is_some(), "the seed took");
+    assert!(harness.query(".app.appearance-dark").is_some(), "the seed took");
     assert_eq!(seen(), vec![], "a seeded window has not been asked anything");
 
-    harness.click(".theme-open");
+    harness.click(".appearance-open");
     harness.pump();
     assert_eq!(seen(), vec![], "and opening the sheet is not an answer");
 
-    harness.click("[data-theme=\"light\"]");
+    harness.click("[data-appearance=\"light\"]");
     harness.pump();
-    assert_eq!(seen(), vec![Theme::Light]);
+    assert_eq!(seen(), vec![Appearance::Light]);
 
-    harness.click("[data-theme=\"system\"]");
+    harness.click("[data-appearance=\"system\"]");
     harness.pump();
     assert_eq!(
         seen(),
-        vec![Theme::Light, Theme::System],
+        vec![Appearance::Light, Appearance::System],
         "going back to the desktop is a choice like any other"
     );
 
-    harness.click(".theme-close");
+    harness.click(".appearance-close");
     harness.pump();
     assert_eq!(seen().len(), 2, "and closing the sheet is not one");
 }
 
-/// **The sheet opens, chooses, and closes.** The theme is the one setting that
+/// **The sheet opens, chooses, and closes.** The appearance is the one setting that
 /// is not a control on the face of the window.
 #[test]
-fn the_theme_sheet_opens_chooses_and_closes() {
+fn the_appearance_sheet_opens_chooses_and_closes() {
     let mut harness = app();
-    assert!(harness.query("[data-theme]").is_none(), "it starts closed");
+    assert!(harness.query("[data-appearance]").is_none(), "it starts closed");
 
-    harness.click(".theme-open");
+    harness.click(".appearance-open");
     harness.pump();
     assert_eq!(
-        harness.attr("[data-theme=\"system\"]", "aria-pressed").as_deref(),
+        harness.attr("[data-appearance=\"system\"]", "aria-pressed").as_deref(),
         Some("true"),
         "the sheet opens on the answer in force"
     );
 
-    harness.click("[data-theme=\"dark\"]");
+    harness.click("[data-appearance=\"dark\"]");
     harness.pump();
     assert_eq!(
-        harness.attr("[data-theme=\"dark\"]", "aria-pressed").as_deref(),
+        harness.attr("[data-appearance=\"dark\"]", "aria-pressed").as_deref(),
         Some("true"),
     );
     assert_eq!(
-        harness.attr("[data-theme=\"system\"]", "aria-pressed").as_deref(),
+        harness.attr("[data-appearance=\"system\"]", "aria-pressed").as_deref(),
         Some("false"),
         "and only one of them at a time"
     );
-    // The sheet stays up: picking a theme is a thing somebody may want to do
+    // The sheet stays up: picking a appearance is a thing somebody may want to do
     // twice, and the window behind it is what they are judging.
-    assert!(harness.query("[data-theme]").is_some());
+    assert!(harness.query("[data-appearance]").is_some());
 
-    harness.click(".theme-close");
+    harness.click(".appearance-close");
+    harness.pump();
+    assert!(harness.query("[data-appearance]").is_none());
+    assert!(
+        harness.query(".app.appearance-dark").is_some(),
+        "and the choice outlives the sheet"
+    );
+}
+
+/// A themes folder of this test's own, emptied first. The app is handed one as
+/// a context for `Remember`'s reason: the suite must not touch the themes of
+/// whoever runs it.
+fn a_library(name: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!("qrnew-library-{name}"));
+    let _ = std::fs::remove_dir_all(&path);
+    path
+}
+
+fn app_with_library(
+    text: &str,
+    image: Option<&std::path::Path>,
+    dir: &std::path::Path,
+) -> Harness<dioxus_native::DioxusDocument> {
+    let mut vdom = VirtualDom::new(App)
+        .with_root_context(Fill(text.to_string()))
+        .with_root_context(Themes(dir.to_path_buf()));
+    if let Some(image) = image {
+        vdom = vdom.with_root_context(Inlay(image.to_string_lossy().into_owned()));
+    }
+    let mut harness = Harness::from_vdom(vdom, HarnessOptions::default());
+    harness.set_viewport_size(1280, 860);
+    harness.pump();
+    harness
+}
+
+/// **The whole point of a theme: the look comes back and the text does not
+/// move.**
+///
+/// Saved with a picture, a colour and a size; then all three are changed by
+/// hand; then two clicks put them back — the sheet, and the theme. What must
+/// *not* come back is the text, because that is the thing somebody is changing
+/// when they reach for a theme at all.
+#[test]
+fn a_theme_gives_back_the_look_and_leaves_the_text_alone() {
+    let dir = a_library("round-trip");
+    let picture = an_image("library-logo");
+    let mut harness = app_with_library("https://example.org", Some(&picture), &dir);
+
+    // A look worth saving: a red foreground and the large inset.
+    harness.click("[data-well=\"dark\"]");
+    harness.pump();
+    harness.click("[data-swatch=\"#8b1a1a\"]");
+    harness.pump();
+    harness.click("[data-inset-size=\"large\"]");
+    harness.pump();
+
+    harness.click(".themes-open");
+    harness.pump();
+    assert!(
+        harness.query("[data-theme]").is_none(),
+        "a fresh folder has nothing in it"
+    );
+    harness.click("[data-theme-name]");
+    harness.type_text("Uni Bern");
+    harness.pump();
+    harness.click("[data-theme-save]");
+    harness.pump();
+    assert!(
+        harness.query("[data-theme=\"Uni Bern\"]").is_some(),
+        "and then it does"
+    );
+    harness.click(".themes-close");
+    harness.pump();
+
+    // Now undo the look by hand: black again, no picture.
+    harness.click("[data-swatch=\"#000000\"]");
+    harness.pump();
+    harness.click("[data-inset-remove]");
+    harness.pump();
+    assert!(harness.query("[data-preview-inset]").is_none());
+    assert!(preview(&harness).unwrap().contains("#000000"));
+
+    // Two clicks.
+    harness.click(".themes-open");
+    harness.pump();
+    harness.click("[data-theme=\"Uni Bern\"]");
+    harness.pump();
+
+    assert!(
+        harness.query("[data-theme]").is_none(),
+        "applying a theme closes the sheet: that is the second of the two clicks"
+    );
+    assert!(
+        preview(&harness).unwrap().contains("#8b1a1a"),
+        "the colour is back"
+    );
+    assert_eq!(
+        harness
+            .attr("[data-inset-size=\"large\"]", "aria-pressed")
+            .as_deref(),
+        Some("true"),
+        "and so is the size"
+    );
+    assert!(
+        harness.query("[data-preview-inset]").is_some(),
+        "and the picture, which the theme carries rather than points at"
+    );
+    assert_eq!(
+        harness.attr(".field", "value").as_deref(),
+        Some("https://example.org"),
+        "and the text never moved"
+    );
+
+    // Removing it asks first — see `deleting_a_theme_is_asked_about_first`.
+    harness.click(".themes-open");
+    harness.pump();
+    harness.click("[data-theme-remove=\"Uni Bern\"]");
+    harness.pump();
+    harness.click("[data-theme-remove-yes=\"Uni Bern\"]");
     harness.pump();
     assert!(harness.query("[data-theme]").is_none());
     assert!(
-        harness.query(".app.theme-dark").is_some(),
-        "and the choice outlives the sheet"
+        qrnew::themes::list(&dir).is_empty(),
+        "off the disk as well"
+    );
+}
+
+/// A theme worth saving, straight to disk.
+fn a_saved_theme(dir: &std::path::Path, name: &str, image: Option<&str>) {
+    qrnew::themes::save(
+        dir,
+        &qrnew::themes::Theme {
+            name: name.to_string(),
+            foreground: Some(qrnew_core::Rgb::new(0xe4, 0x00, 0x46)),
+            background: Some(qrnew_core::Rgb::WHITE),
+            image_file: image.map(|file| (file.to_string(), b"not really a picture".to_vec())),
+            image_size: Some("large".to_string()),
+            error_correction: Some("medium".to_string()),
+            margin: Some(2),
+            shape: Some("square".to_string()),
+        },
+    );
+}
+
+/// **The cross asks; it does not delete.**
+///
+/// A theme is a picture somebody chose and a colour they matched by eye, and the
+/// cross that takes it away sits eight points from the row that applies it. So
+/// the row asks in its own place, and both ways out — keeping it, and closing
+/// the sheet on the question — leave the theme alone.
+#[test]
+fn deleting_a_theme_is_asked_about_first() {
+    let dir = a_library("confirm");
+    a_saved_theme(&dir, "Uni Bern", None);
+    let mut harness = app_with_library("https://example.org", None, &dir);
+    harness.click(".themes-open");
+    harness.pump();
+
+    harness.click("[data-theme-remove=\"Uni Bern\"]");
+    harness.pump();
+    assert!(
+        harness.query("[data-theme=\"Uni Bern\"]").is_none(),
+        "the row is the question while the question stands"
+    );
+    assert!(
+        harness
+            .query("[data-theme-remove-yes=\"Uni Bern\"]")
+            .is_some()
+    );
+    assert_eq!(qrnew::themes::list(&dir).len(), 1, "and nothing is gone yet");
+
+    // Keeping it puts the row back.
+    harness.click("[data-theme-remove-no=\"Uni Bern\"]");
+    harness.pump();
+    assert!(harness.query("[data-theme=\"Uni Bern\"]").is_some());
+    assert_eq!(qrnew::themes::list(&dir).len(), 1);
+
+    // And so does leaving the sheet with the question still up.
+    harness.click("[data-theme-remove=\"Uni Bern\"]");
+    harness.pump();
+    harness.click(".themes-close");
+    harness.pump();
+    harness.click(".themes-open");
+    harness.pump();
+    assert!(
+        harness.query("[data-theme=\"Uni Bern\"]").is_some(),
+        "a question walked away from is not an answer"
+    );
+    assert_eq!(qrnew::themes::list(&dir).len(), 1);
+
+    harness.click("[data-theme-remove=\"Uni Bern\"]");
+    harness.pump();
+    harness.click("[data-theme-remove-yes=\"Uni Bern\"]");
+    harness.pump();
+    assert!(qrnew::themes::list(&dir).is_empty());
+}
+
+/// **Nothing in a row is drawn outside the panel it is in.**
+///
+/// The cross was cut off by the list's own scrollbar. Measured rather than
+/// eyeballed, at the two window heights the rest of the suite uses and with a
+/// name long enough to push everything else to the right.
+#[test]
+fn every_part_of_a_theme_row_is_inside_the_sheet() {
+    const NAMES: [&str; 2] = ["Uni Bern", "A theme with a really quite long name on it"];
+    let dir = a_library("bounds");
+    for name in NAMES {
+        a_saved_theme(&dir, name, Some("a-fairly-long-logo-file-name.png"));
+    }
+
+    for height in [860, 820] {
+        let mut harness = app_with_library("https://example.org", None, &dir);
+        harness.set_viewport_size(1280, height);
+        harness.pump();
+        harness.click(".themes-open");
+        harness.pump();
+
+        let sheet = harness.layout_rect(".themes-sheet");
+        for name in NAMES {
+            let cross = harness.layout_rect(&format!("[data-theme-remove=\"{name}\"]"));
+            assert!(
+                cross.x >= sheet.x && cross.x + cross.width <= sheet.x + sheet.width,
+                "the cross for {name:?} is inside the panel at {height}: \
+                 {} to {} against {} to {}",
+                cross.x,
+                cross.x + cross.width,
+                sheet.x,
+                sheet.x + sheet.width
+            );
+            assert!(
+                harness
+                    .query(&format!("[data-theme-image=\"{name}\"]"))
+                    .is_some(),
+                "and the picture's file name is in the row"
+            );
+        }
+    }
+}
+
+/// **The empty field says what to put in it.**
+///
+/// Blitz has no `placeholder`, so the prompt is a sibling laid over the field —
+/// and what makes that safe rather than a trap is `pointer-events: none`, which
+/// is why this clicks the prompt itself and then types.
+#[test]
+fn the_name_field_has_a_prompt_that_does_not_eat_the_click() {
+    let dir = a_library("prompt");
+    let mut harness = app_with_library("https://example.org", None, &dir);
+    harness.click(".themes-open");
+    harness.pump();
+    assert!(
+        harness.query("[data-theme-prompt]").is_some(),
+        "an empty field is prompted"
+    );
+
+    harness.click("[data-theme-prompt]");
+    assert_eq!(
+        harness.focused(),
+        harness.query("[data-theme-name]"),
+        "the click goes through the prompt to the field under it"
+    );
+
+    harness.type_text("Uni Bern");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-theme-name]", "value").as_deref(),
+        Some("Uni Bern")
+    );
+    assert!(
+        harness.query("[data-theme-prompt]").is_none(),
+        "and the prompt gets out of the way once there is something to read"
+    );
+}
+
+/// **No folder, no button.** A machine with nowhere to write is an app with two
+/// buttons in its top bar rather than three, and nothing that half-works.
+#[test]
+fn without_somewhere_to_keep_them_there_are_no_themes() {
+    let harness = app();
+    assert!(harness.query(".themes-open").is_none());
+    assert!(harness.query(".appearance-open").is_some(), "the others stay");
+    assert!(harness.query(".about-open").is_some());
+}
+
+/// A theme has to be called something before it can be saved.
+#[test]
+fn an_unnamed_theme_cannot_be_saved() {
+    let dir = a_library("unnamed");
+    let mut harness = app_with_library("hello", None, &dir);
+    harness.click(".themes-open");
+    harness.pump();
+    assert_eq!(
+        harness
+            .attr("[data-theme-save]", "aria-disabled")
+            .as_deref(),
+        Some("true"),
+    );
+
+    harness.click("[data-theme-save]");
+    harness.pump();
+    assert!(harness.query("[data-theme]").is_none());
+    assert!(qrnew::themes::list(&dir).is_empty());
+
+    harness.click("[data-theme-name]");
+    harness.type_text("Plain");
+    harness.pump();
+    assert_eq!(
+        harness
+            .attr("[data-theme-save]", "aria-disabled")
+            .as_deref(),
+        Some("false"),
+        "a name lights the button"
+    );
+    harness.click("[data-theme-save]");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-theme-name]", "value").as_deref(),
+        Some("")
+    );
+    assert_eq!(qrnew::themes::list(&dir).len(), 1);
+}
+
+/// **A long list of themes does not push the sheet off the window.**
+///
+/// The one thing about this sheet that is not fixed: every other panel in the
+/// window has a height its markup decides, and this one grows by whatever
+/// somebody has saved. `.themes-list` scrolls at six rows, and this is the
+/// promise that number is enough — at 820 as well as 860, which is what a
+/// maximized window leaves on a laptop screen.
+#[test]
+fn a_full_themes_sheet_still_fits_the_window() {
+    let dir = a_library("full");
+    for number in 0..12 {
+        qrnew::themes::save(
+            &dir,
+            &qrnew::themes::Theme {
+                name: format!("Theme number {number}"),
+                foreground: Some(qrnew_core::Rgb::BLACK),
+                background: Some(qrnew_core::Rgb::WHITE),
+                image_file: None,
+                image_size: Some("medium".to_string()),
+                error_correction: Some("medium".to_string()),
+                margin: Some(2),
+                shape: Some("square".to_string()),
+            },
+        );
+    }
+
+    for height in [860, 820] {
+        let mut harness = app_with_library("https://example.org", None, &dir);
+        harness.set_viewport_size(1280, height);
+        harness.pump();
+        harness.click(".themes-open");
+        harness.pump();
+
+        let sheet = harness.layout_rect(".themes-sheet");
+        assert!(
+            sheet.y >= 0.0 && sheet.y + sheet.height <= height as f32,
+            "twelve themes still fit at {height}: {} to {}",
+            sheet.y,
+            sheet.y + sheet.height
+        );
+        assert_eq!(
+            harness.query_all("[data-theme]").len(),
+            12,
+            "and all of them are there to be scrolled to"
+        );
+    }
+}
+
+
+/// **A theme's image size is a preference, not an instruction.**
+///
+/// The largest size does not fit the smallest code — a picture has to clear the
+/// three finder patterns, which sit a fixed number of modules in from each edge,
+/// so a twenty-one-module code has barely a fifth of its width to give. A theme
+/// asking for it over four characters draws at the size that does fit, keeps the
+/// picture, and marks the row rather than saying nothing: the code on screen is
+/// not the size the theme names, and that is worth one dimmed chip.
+///
+/// The preference survives, which is the other half — put the text back and the
+/// large size comes back with it, without reapplying the theme.
+#[test]
+fn a_theme_asking_for_a_size_that_does_not_fit_draws_the_one_that_does() {
+    let dir = a_library("preference");
+    let picture = an_image("preference-logo");
+    qrnew::themes::save(
+        &dir,
+        &qrnew::themes::Theme {
+            name: "Uni Bern".to_string(),
+            foreground: Some(qrnew_core::Rgb::new(0xe4, 0x00, 0x46)),
+            background: Some(qrnew_core::Rgb::WHITE),
+            image_file: Some((
+                "logo.svg".to_string(),
+                std::fs::read(&picture).expect("the picture was just written"),
+            )),
+            image_size: Some("large".to_string()),
+            error_correction: Some("medium".to_string()),
+            margin: Some(2),
+            shape: Some("square".to_string()),
+        },
+    );
+
+    // Four characters: the smallest code there is.
+    let mut harness = app_with_library("hiya", None, &dir);
+    harness.click(".themes-open");
+    harness.pump();
+    harness.click("[data-theme=\"Uni Bern\"]");
+    harness.pump();
+
+    assert!(
+        preview(&harness).is_some(),
+        "the code is still drawn — giving up the size, not the picture"
+    );
+    assert!(
+        harness.query("[data-preview-inset]").is_some(),
+        "and the picture is still in it"
+    );
+    let large = harness
+        .attr("[data-inset-size=\"large\"]", "class")
+        .expect("the size row is on screen");
+    assert!(
+        large.contains("on") && large.contains("off"),
+        "the theme's size is still what is asked for, and it is held: {large:?}"
+    );
+
+    // A dimmed chip explains itself to nobody, so the card says why — and it
+    // says it inside the rail rather than under the fold.
+    let rail = harness.layout_rect(".rail-colors");
+    let caution = harness.layout_rect("[data-inset-capped]");
+    assert!(
+        caution.y >= rail.y && caution.y + caution.height <= rail.y + rail.height,
+        "the caution is on screen: {caution:?} in {rail:?}"
+    );
+
+    // More text, more modules, and the size the theme asked for fits.
+    harness.click(".field");
+    harness.type_text(" there, this is a longer piece of text entirely");
+    harness.pump();
+    let large = harness
+        .attr("[data-inset-size=\"large\"]", "class")
+        .expect("the size row is on screen");
+    assert!(
+        large.contains("on") && !large.contains("off"),
+        "the preference was kept and takes effect on its own: {large:?}"
+    );
+    assert!(
+        harness.query("[data-inset-capped]").is_none(),
+        "and nothing is being given up any more, so nothing says so"
+    );
+}
+
+/// A theme is the rest of the code's settings as well as its colours: the
+/// margin, the shape and the error-correction level go out to disk as the words
+/// the controls file them under, and come back as the controls.
+#[test]
+fn a_theme_carries_the_margin_the_shape_and_the_level() {
+    let dir = a_library("settings");
+    let mut harness = app_with_library("https://example.org", None, &dir);
+
+    harness.click("[data-margin-more]");
+    harness.click("[data-look=\"dots\"]");
+    harness.click("[data-ec=\"quartile\"]");
+    harness.pump();
+
+    harness.click(".themes-open");
+    harness.pump();
+    harness.click("[data-theme-name]");
+    harness.type_text("House");
+    harness.pump();
+    harness.click("[data-theme-save]");
+    harness.pump();
+    harness.click(".themes-close");
+    harness.pump();
+
+    // Words rather than numbers on disk, so the file stays something a person
+    // can read and edit.
+    let saved = qrnew::themes::list(&dir);
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].margin, Some(3));
+    assert_eq!(saved[0].shape.as_deref(), Some("dots"));
+    assert_eq!(saved[0].error_correction.as_deref(), Some("quartile"));
+
+    // Undo all three by hand, then two clicks put them back.
+    harness.click("[data-margin-less]");
+    harness.click("[data-look=\"square\"]");
+    harness.click("[data-ec=\"low\"]");
+    harness.pump();
+    harness.click(".themes-open");
+    harness.pump();
+    harness.click("[data-theme=\"House\"]");
+    harness.pump();
+
+    assert_eq!(
+        harness.attr("[data-margin]", "value").as_deref(),
+        Some("3"),
+        "the margin, in the field as well as in the code"
+    );
+    assert_eq!(modules_across(&preview(&harness).unwrap()), 25 + 2 * 3);
+    assert_eq!(
+        harness.attr("[data-look=\"dots\"]", "aria-pressed").as_deref(),
+        Some("true")
+    );
+    assert_eq!(
+        harness.attr("[data-ec=\"quartile\"]", "aria-pressed").as_deref(),
+        Some("true")
+    );
+}
+
+/// **A theme's error-correction level is a preference and nothing more.**
+///
+/// A picture in the middle of a code needs 30%, so a theme carrying both gets
+/// the picture's answer — and the card says so rather than quietly swapping the
+/// number. Taking the picture away gives the preference back, which is what
+/// makes it a preference rather than a rewrite.
+#[test]
+fn a_themes_level_gives_way_to_the_picture_and_says_so() {
+    let dir = a_library("preference-level");
+    let picture = an_image("preference-level-logo");
+    qrnew::themes::save(
+        &dir,
+        &qrnew::themes::Theme {
+            name: "Uni Bern".to_string(),
+            foreground: Some(qrnew_core::Rgb::BLACK),
+            background: Some(qrnew_core::Rgb::WHITE),
+            image_file: Some((
+                "logo.svg".to_string(),
+                std::fs::read(&picture).expect("the picture was just written"),
+            )),
+            image_size: Some("medium".to_string()),
+            error_correction: Some("low".to_string()),
+            margin: Some(2),
+            shape: Some("square".to_string()),
+        },
+    );
+
+    let mut harness = app_with_library("https://example.org", None, &dir);
+    harness.click(".themes-open");
+    harness.pump();
+    harness.click("[data-theme=\"Uni Bern\"]");
+    harness.pump();
+
+    assert_eq!(
+        harness.attr("[data-ec=\"high\"]", "aria-pressed").as_deref(),
+        Some("true"),
+        "the picture's answer, not the theme's"
+    );
+    assert_eq!(
+        harness.attr("[data-ec-note]", "data-ec-note").as_deref(),
+        Some("true"),
+        "and the card says the choice is being overruled"
+    );
+
+    harness.click("[data-inset-remove]");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-ec=\"low\"]", "aria-pressed").as_deref(),
+        Some("true"),
+        "the preference was kept, and comes back with the picture gone"
+    );
+    assert_eq!(
+        harness.attr("[data-ec-note]", "data-ec-note").as_deref(),
+        Some("false"),
+        "and nothing is being overruled any more"
+    );
+}
+
+/// The sheet says what saving will take, in the words of what is on screen: a
+/// picture in the middle of the code is the one part of a theme the sheet
+/// cannot show.
+///
+/// The import button is only asserted to be there. What it opens is a native
+/// folder dialog, which no test can touch; what it does with the folder is
+/// `themes::import`, which `themes.rs` covers on its own.
+#[test]
+fn the_themes_sheet_says_what_saving_will_take() {
+    let dir = a_library("subhead");
+    let picture = an_image("subhead-logo");
+
+    let mut plain = app_with_library("https://example.org", None, &dir);
+    plain.click(".themes-open");
+    plain.pump();
+    assert!(plain.query("[data-theme-import]").is_some());
+    let without = plain.text_content("[data-themes-subhead]");
+
+    let mut inset = app_with_library("https://example.org", Some(&picture), &dir);
+    inset.click(".themes-open");
+    inset.pump();
+    let with = inset.text_content("[data-themes-subhead]");
+
+    assert!(!without.is_empty() && !with.is_empty());
+    assert_ne!(
+        without, with,
+        "the sentence changes with the picture, rather than promising the same thing twice"
     );
 }
