@@ -11,11 +11,16 @@
   <provides>
     <id>dev.lhdjung.QRnew</id>
     <binaries>
-      <binary>QRnew</binary>
+      <binary>qrnew</binary>
     </binaries>
   </provides>
   <requires>
-    <display_length compare="ge">360</display_length>
+    <!-- The longest edge of the display, in logical pixels, and it is the
+         window's own minimum rather than a guess: `main.rs` asks winit for a
+         minimum surface of 1160x700, because three columns of controls do not
+         fit in less. 360 was here from the COSMIC template, and advertised
+         the app to software centres at a size it cannot open at. -->
+    <display_length compare="ge">1160</display_length>
   </requires>
   <supports>
     <control>keyboard</control>
@@ -23,11 +28,14 @@
     <control>touch</control>
   </supports>
   <categories>
-    <category>COSMIC</category>
+    <category>Utility</category>
+    <category>Graphics</category>
   </categories>
   <keywords>
-    <keyword>COSMIC</keyword>
     <keyword>QR</keyword>
+    <keyword>barcode</keyword>
+    <keyword>generator</keyword>
+    <keyword>offline</keyword>
   </keywords>
   <content_rating type="oars-1.1" />
 </component>

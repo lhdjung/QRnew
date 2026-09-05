@@ -1,8 +1,16 @@
+# The gate: does it compile and do the tests pass, on all three platforms.
+# What comes *out* of a push to `main` is in `release.yml`, which packages the
+# three assets and publishes them.
+
 name: Build
 
 on:
   push:
-    branches: [main]
+    # `dioxus-native` is here while the rewrite lives on it: Linux and Windows
+    # are the two platforms the migration has never been run on, and a branch
+    # that only builds after it merges answers the question too late.
+    branches: [main, dioxus-native]
+  pull_request:
 
 jobs:
   build:
@@ -36,6 +44,10 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      # `fontconfig` is what Parley finds fonts through, and it is linked
+      # rather than dlopened, so the build stops without its headers. GTK is
+      # not here any more: the file dialogs went from libcosmic to `rfd`, which
+      # asks the desktop portal over D-Bus and links nothing.
       - name: Install system dependencies
         if: runner.os == 'Linux'
         run: |
@@ -44,11 +56,20 @@ jobs:
             pkg-config \
             libwayland-dev \
             libxkbcommon-dev \
-            libgtk-3-dev
+            libfontconfig1-dev
 
-      - run: cargo build --release --locked
+      - run: cargo test --workspace --locked
 
-      - uses: actions/upload-artifact@v4
+      # Only on pull requests. A push to `main` builds release binaries in
+      # `release.yml`, packages them and publishes them where somebody can
+      # actually click on them, and doing it twice on the same commit is ten
+      # minutes of a runner spent on a file that expires. A pull request has
+      # nowhere to publish to, so this is where its build lives.
+      - if: github.event_name == 'pull_request'
+        run: cargo build --release --locked
+
+      - if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
         with:
           name: qrnew-${{ runner.os }}
           path: target/release/${{ matrix.binary }}

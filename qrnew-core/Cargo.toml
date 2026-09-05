@@ -1,0 +1,12 @@
+[package]
+name = "qrnew-core"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+description = "QR codes for QRnew: one styled SVG, rendered everywhere, and read back"
+repository = "https://github.com/lhdjung/QRnew"
+
+[dependencies]
+qrcode = { version = "0.13", default-features = false }
+resvg = { version = "0.48", default-features = false, features = ["raster-images"] }
+rqrr = { version = "0.10.1", default-features = false }

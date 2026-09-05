@@ -1,7 +1,11 @@
 .cargo/
 *.pdb
 QRnew.app/
+QRnew-macos.zip
 QRnew-windows/
+qrnew-linux/
+qrnew-linux.tar.gz
+.DS_Store
 **/*.rs.bk
 debug/
 target/

@@ -1,0 +1,1121 @@
+// SPDX-License-Identifier: MPL-2.0
+
+//! The QR pipeline behind QRnew.
+//!
+//! Everything a QR code looks like is decided in one place, [`Qr::new`], which
+//! emits an SVG. The preview displays that SVG and the exports rasterize it, so
+//! what the user sees and what they save cannot drift apart. Module shapes,
+//! custom finder patterns and logo insets live here for the same reason.
+//!
+//! No GUI toolkit is involved, which also means the rules can be tested without
+//! opening a window.
+
+mod draw;
+mod logo;
+mod raster;
+mod read;
+mod style;
+
+use std::fmt;
+
+use qrcode::QrCode;
+use resvg::tiny_skia;
+use resvg::usvg;
+
+pub use crate::logo::ImageFormat;
+pub use crate::read::{ReadError, read};
+pub use crate::style::{
+    Clearing, DEFAULT_QUIET_ZONE, ErrorCorrection, Finder, FinderShape, Logo, ModuleShape, QrStyle,
+    Rgb,
+};
+
+use crate::logo::Placement;
+
+/// The largest share of a code that a logo may cover, counting the blank padding
+/// around it.
+///
+/// `High` error correction is usually quoted as surviving 30% damage. Measured
+/// instead — rendering codes and reading them back with `rqrr` — decoding starts
+/// failing just past 19%, consistently across code sizes. This sits a good step
+/// below that: a code that only just decodes from a perfect rendering has
+/// nothing left for the printing, lighting and camera angle of a real scan.
+pub const MAX_LOGO_AREA: f32 = 0.15;
+
+/// The longest side a logo image is kept at, in pixels.
+///
+/// A logo is drawn at [`Logo::DEFAULT_SIZE`] — a sixth of the code — so even the
+/// largest code, exported at ten pixels per module, draws it about three hundred
+/// pixels across. Everything past that is detail no export can use, carried as
+/// base64 inside the SVG and decoded again on every redraw.
+///
+/// It is also a hard limit. A GPU renderer keeps its images in a texture atlas —
+/// `vello_hybrid`'s is 4096 pixels square — and an image that does not fit is
+/// not drawn small, it is refused, which in a renderer that unwraps the refusal
+/// means the window goes away. A photo straight off a camera is over that limit.
+pub const MAX_LOGO_SIDE: u32 = 512;
+
+/// How far a logo has to stay from the edge of the code, in modules.
+///
+/// The finder patterns are seven modules wide with a one-module separator
+/// around them. Damage there is not something error correction can undo: a
+/// scanner that cannot find those three squares never gets as far as reading
+/// the data.
+const FINDER_CLEARANCE: f32 = draw::FINDER_SIZE as f32 + 1.0;
+
+/// A raster image, as straight (non-premultiplied) RGBA bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Raster {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub enum QrError {
+    /// The data could not be encoded, usually because it is too long for the
+    /// chosen error correction level.
+    Encode(qrcode::types::QrError),
+    /// The code was generated but could not be turned into pixels.
+    Render(String),
+    /// The logo would leave the code unreadable, or is not an image at all.
+    Logo(LogoError),
+}
+
+/// Why a logo was turned down.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LogoError {
+    /// The bytes are not a PNG, JPEG, GIF, WebP or SVG image.
+    UnknownFormat,
+    /// [`Logo::size`] is not a fraction of the code's width above zero.
+    Size(f32),
+    /// [`Logo::padding`] is negative.
+    Padding(f32),
+    /// The logo covers more of the code than error correction can rebuild.
+    TooLarge { area: f32, max: f32 },
+    /// The logo reaches into a finder pattern, the part of a code that has to
+    /// stay intact for a scanner to recognize it at all.
+    CoversFinder,
+}
+
+impl fmt::Display for LogoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownFormat => {
+                write!(f, "the logo is not a PNG, JPEG, GIF, WebP or SVG image")
+            }
+            Self::Size(size) => write!(f, "the logo's size must be between 0 and 1, not {size}"),
+            Self::Padding(padding) => {
+                write!(f, "the logo's padding cannot be negative, and {padding} is")
+            }
+            Self::TooLarge { area, max } => write!(
+                f,
+                "the logo covers {:.0}% of the code, above the {:.0}% error correction can rebuild",
+                area * 100.0,
+                max * 100.0,
+            ),
+            Self::CoversFinder => write!(
+                f,
+                "the logo reaches into a corner marker; shrink it, or add data to make the code bigger"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LogoError {}
+
+impl fmt::Display for QrError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Encode(error) => write!(f, "cannot encode this input: {error}"),
+            Self::Render(reason) => write!(f, "cannot render the QR code: {reason}"),
+            Self::Logo(error) => write!(f, "cannot place the logo: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for QrError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Encode(error) => Some(error),
+            Self::Render(_) => None,
+            Self::Logo(error) => Some(error),
+        }
+    }
+}
+
+impl From<qrcode::types::QrError> for QrError {
+    fn from(error: qrcode::types::QrError) -> Self {
+        Self::Encode(error)
+    }
+}
+
+impl From<LogoError> for QrError {
+    fn from(error: LogoError) -> Self {
+        Self::Logo(error)
+    }
+}
+
+/// Where the inset's picture sits in a document, as fractions of its side.
+///
+/// The box is square and centred, so one offset describes both edges. Both
+/// numbers are fractions of the whole document — quiet zone included — because
+/// the document is what a caller has on screen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InsetBox {
+    /// Distance from the document's edge to the picture's, left and top alike.
+    pub offset: f32,
+    /// The picture's side.
+    pub side: f32,
+}
+
+/// A generated QR code, held as the SVG that every output format derives from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Qr {
+    svg: String,
+    size: u32,
+    ec: ErrorCorrection,
+    /// Where the inset's `<image>` begins in `svg`, and where the picture it
+    /// draws sits in the document. `None` when this code has no picture in it.
+    inset: Option<(usize, InsetBox)>,
+}
+
+impl Qr {
+    /// Encodes `data` and draws it in the given style.
+    ///
+    /// A logo brings three rules with it, because a code that does not scan is
+    /// not worth the picture in the middle of it:
+    ///
+    /// - Error correction is raised to [`ErrorCorrection::High`], whatever `ec`
+    ///   asks for. [`Qr::error_correction`] reports what was actually used.
+    /// - The logo and its padding may cover at most [`MAX_LOGO_AREA`] of the
+    ///   code.
+    /// - The logo has to stay clear of the three finder patterns in the
+    ///   corners, which no amount of error correction can replace.
+    ///
+    /// A logo that breaks one of the last two is refused rather than quietly
+    /// shrunk, since only the caller knows whether to give up the size or the
+    /// picture.
+    pub fn new(data: &str, ec: ErrorCorrection, style: &QrStyle) -> Result<Self, QrError> {
+        let ec = if style.logo.is_some() {
+            ErrorCorrection::High
+        } else {
+            ec
+        };
+
+        let code = QrCode::with_error_correction_level(data.as_bytes(), ec.into())?;
+        let modules = code.width() as u32;
+        let size = modules + 2 * style.quiet_zone;
+
+        if let Some(logo) = &style.logo {
+            check_logo(logo, modules)?;
+        }
+
+        let (svg, logo_at) = draw::draw(&code.into_colors(), modules, size, style);
+        let inset = logo_at.zip(style.logo.as_ref()).map(|(at, logo)| {
+            let (x, _, side) = Placement::new(logo, modules).image_box();
+            let document = size as f32;
+            (
+                at,
+                InsetBox {
+                    offset: (x + style.quiet_zone as f32) / document,
+                    side: side / document,
+                },
+            )
+        });
+
+        Ok(Self {
+            svg,
+            size,
+            ec,
+            inset,
+        })
+    }
+
+    /// The code as an SVG document.
+    pub fn svg(&self) -> &str {
+        &self.svg
+    }
+
+    /// The same document with the inset's picture left out, for a caller that is
+    /// going to draw the picture itself.
+    ///
+    /// **The code underneath is not a different code.** The modules the picture
+    /// covers are already left out when the code is drawn, so this is the same
+    /// document with a hole in it, and putting the picture back at
+    /// [`Qr::inset_box`] reproduces [`Qr::svg`] exactly.
+    ///
+    /// For a live preview, where the alternative is re-encoding the picture into
+    /// a fresh document on every keystroke — the base64 twice over each time, and
+    /// a picture the renderer has no way to recognize as one it already has. A
+    /// file should use [`Qr::svg`].
+    pub fn svg_without_inset(&self) -> String {
+        match self.inset {
+            Some((at, _)) => format!("{}</svg>", &self.svg[..at]),
+            None => self.svg.clone(),
+        }
+    }
+
+    /// Where [`Qr::svg`] draws the inset's picture, or `None` if it draws none.
+    pub fn inset_box(&self) -> Option<InsetBox> {
+        self.inset.map(|(_, box_)| box_)
+    }
+
+    /// Consumes the code, returning its SVG document.
+    pub fn into_svg(self) -> String {
+        self.svg
+    }
+
+    /// Width of the code in modules, quiet zone included.
+    pub fn size_in_modules(&self) -> u32 {
+        self.size
+    }
+
+    /// The error correction level the code was built at, which a logo raises
+    /// past what was asked for.
+    pub fn error_correction(&self) -> ErrorCorrection {
+        self.ec
+    }
+
+    /// Rasterizes the code to a PNG at `scale` pixels per module.
+    pub fn to_png(&self, scale: u32) -> Result<Vec<u8>, QrError> {
+        self.rasterize(scale)?
+            .encode_png()
+            .map_err(|error| QrError::Render(error.to_string()))
+    }
+
+    /// Rasterizes the code to RGBA bytes at `scale` pixels per module.
+    pub fn to_rgba(&self, scale: u32) -> Result<Raster, QrError> {
+        let pixmap = self.rasterize(scale)?;
+        let pixels = pixmap
+            .pixels()
+            .iter()
+            .flat_map(|pixel| {
+                let color = pixel.demultiply();
+                [color.red(), color.green(), color.blue(), color.alpha()]
+            })
+            .collect();
+
+        Ok(Raster {
+            width: pixmap.width(),
+            height: pixmap.height(),
+            pixels,
+        })
+    }
+
+    fn rasterize(&self, scale: u32) -> Result<tiny_skia::Pixmap, QrError> {
+        if scale == 0 {
+            return Err(QrError::Render("scale must be at least 1".to_owned()));
+        }
+
+        let tree = usvg::Tree::from_str(&self.svg, &usvg::Options::default())
+            .map_err(|error| QrError::Render(error.to_string()))?;
+        let side = self
+            .size
+            .checked_mul(scale)
+            .ok_or_else(|| QrError::Render(format!("scale {scale} is too large")))?;
+        let mut pixmap = tiny_skia::Pixmap::new(side, side)
+            .ok_or_else(|| QrError::Render(format!("cannot allocate a {side}×{side} image")))?;
+
+        let factor = side as f32 / tree.size().width();
+        resvg::render(
+            &tree,
+            tiny_skia::Transform::from_scale(factor, factor),
+            &mut pixmap.as_mut(),
+        );
+
+        Ok(pixmap)
+    }
+}
+
+/// The largest [`Logo::size`] a code `modules` across can carry, at `padding`
+/// modules of air around the picture.
+///
+/// The two rules [`Qr::new`] enforces each turn into a ceiling:
+///
+/// - the cleared box covers at most [`MAX_LOGO_AREA`] of the code, a fixed share
+///   and so a fixed side;
+/// - the cleared box stops [`FINDER_CLEARANCE`] modules short of every edge, a
+///   fixed *number of modules* and so a share that grows with the code.
+///
+/// The second is why this is worth exposing rather than assuming: a
+/// twenty-one-module code allows a shade over a fifth of the width, and a few
+/// characters further on it allows a third. An interface offering a choice of
+/// sizes cannot work that out from [`Logo`] alone.
+///
+/// Zero when nothing fits, which no code is small enough to reach.
+pub fn largest_logo_size(padding: f32, modules: u32) -> f32 {
+    let modules = modules as f32;
+    let by_area = MAX_LOGO_AREA.sqrt() - 2.0 * padding / modules;
+    let by_finder = 1.0 - 2.0 * (FINDER_CLEARANCE + padding) / modules;
+    by_area.min(by_finder).max(0.0)
+}
+
+/// Checks a logo against the rules documented on [`Qr::new`].
+fn check_logo(logo: &Logo, modules: u32) -> Result<(), LogoError> {
+    // Written as a positive test so that a NaN, which compares false against
+    // everything, falls into the error rather than out of it.
+    let size_is_a_fraction = logo.size > 0.0 && logo.size < 1.0;
+    if !size_is_a_fraction {
+        return Err(LogoError::Size(logo.size));
+    }
+
+    let padding_is_a_length = logo.padding >= 0.0;
+    if !padding_is_a_length {
+        return Err(LogoError::Padding(logo.padding));
+    }
+    if ImageFormat::detect(&logo.image).is_none() {
+        return Err(LogoError::UnknownFormat);
+    }
+
+    let placement = Placement::new(logo, modules);
+    let area = placement.area_fraction();
+    if area > MAX_LOGO_AREA {
+        return Err(LogoError::TooLarge {
+            area,
+            max: MAX_LOGO_AREA,
+        });
+    }
+    if placement.margin() < FINDER_CLEARANCE {
+        return Err(LogoError::CoversFinder);
+    }
+
+    Ok(())
+}
+
+/// Generates a styled QR code as an SVG document.
+pub fn render_svg(data: &str, ec: ErrorCorrection, style: &QrStyle) -> Result<String, QrError> {
+    Qr::new(data, ec, style).map(Qr::into_svg)
+}
+
+/// Generates a styled QR code as a PNG at `scale` pixels per module.
+pub fn render_png(
+    data: &str,
+    ec: ErrorCorrection,
+    style: &QrStyle,
+    scale: u32,
+) -> Result<Vec<u8>, QrError> {
+    Qr::new(data, ec, style)?.to_png(scale)
+}
+
+/// Scales an image down until neither of its sides is longer than
+/// [`MAX_LOGO_SIDE`], as a PNG.
+///
+/// `None` means keep the bytes you already have, and covers the three cases that
+/// need no work: the image fits, it is an SVG and so is already every size it
+/// will need, or it cannot be read — and a picture nothing here can read is one
+/// nothing downstream can draw.
+///
+/// A PNG whatever went in, because the work happens in pixels: writing a scaled
+/// JPEG back out would be a second generation of the same lossy encoding.
+pub fn shrink_logo(image: &[u8]) -> Option<Vec<u8>> {
+    let format = ImageFormat::detect(image)?;
+    if format == ImageFormat::Svg {
+        return None;
+    }
+
+    let href = raster::href(image, format);
+    let (width, height) = raster::natural_size(&href)?;
+    let longest = width.max(height);
+    if longest <= MAX_LOGO_SIDE as f32 {
+        return None;
+    }
+
+    let factor = MAX_LOGO_SIDE as f32 / longest;
+    let target = (
+        raster::whole(width * factor),
+        raster::whole(height * factor),
+    );
+    let natural = (raster::whole(width), raster::whole(height));
+
+    // Halving needs the picture at its own size first, which for a large
+    // enough image is a pixmap that cannot be allocated. Drawing it straight
+    // at the size wanted needs no such buffer: it is the worse picture, and it
+    // is the one that always works.
+    let scaled = in_halves(&href, natural, target).or_else(|| raster::draw(&href, target, None))?;
+
+    scaled.encode_png().ok()
+}
+
+/// The image at `natural`, halved until one more halving would take it under
+/// `target`, and then resampled the rest of the way.
+///
+/// Going down in halves rather than in one step is the difference between a
+/// scaled photograph and a noisy one: a single leap from four thousand pixels to
+/// five hundred samples one row in eight, so fine detail arrives as speckle.
+///
+/// The first draw is the expensive one — a ten-megapixel photograph is 43 MB as
+/// a pixmap — so it is made at half the natural size whenever the chain has a
+/// halving to spare, swapping the first box halving for `resvg`'s own 2:1
+/// filter. Measured on a zone plate, the two chains land 9.2 and 10.2 levels out
+/// of 255 from a true box average, while starting a quarter of the way down
+/// lands 22.9 and going straight to the target lands 53.3. One level of accuracy
+/// for three quarters of the largest allocation the crate makes.
+fn in_halves(href: &str, natural: (u32, u32), target: (u32, u32)) -> Option<tiny_skia::Pixmap> {
+    let room_to_spare = natural.0 >= target.0 * 4 && natural.1 >= target.1 * 4;
+    let first = if room_to_spare {
+        (natural.0 / 2, natural.1 / 2)
+    } else {
+        natural
+    };
+    let mut pixmap = raster::draw(href, first, None)?;
+
+    while pixmap.width() >= target.0 * 2 && pixmap.height() >= target.1 * 2 {
+        let half = (pixmap.width() / 2, pixmap.height() / 2);
+        pixmap = raster::resample(&pixmap, half)?;
+    }
+    if (pixmap.width(), pixmap.height()) != target {
+        pixmap = raster::resample(&pixmap, target)?;
+    }
+
+    Some(pixmap)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RED: Rgb = Rgb::new(255, 0, 0);
+    const GREEN: Rgb = Rgb::new(0, 255, 0);
+    const BLUE: Rgb = Rgb::new(0, 0, 255);
+
+    /// A version 1 code, 21 modules wide, is the smallest there is.
+    const SHORT: &str = "hello";
+    /// Long enough to need a code wide enough for a large logo to fit inside
+    /// the finder patterns.
+    const LONG: &str =
+        "https://example.org/a-path-long-enough-to-need-a-bigger-code-than-hello-does";
+
+    fn styled() -> QrStyle {
+        QrStyle {
+            dark: RED,
+            light: BLUE,
+            ..QrStyle::default()
+        }
+    }
+
+    /// A solid square of `color`, as a PNG, standing in for a real logo.
+    fn logo_image(color: Rgb) -> Vec<u8> {
+        let mut pixmap = tiny_skia::Pixmap::new(16, 16).unwrap();
+        pixmap.fill(tiny_skia::Color::from_rgba8(color.r, color.g, color.b, 255));
+        pixmap.encode_png().unwrap()
+    }
+
+    /// Color of the module at (`x`, `y`), sampled at its center. Coordinates
+    /// include the quiet zone, matching the SVG's own grid.
+    fn module_color(raster: &Raster, scale: u32, x: u32, y: u32) -> Rgb {
+        let px = x * scale + scale / 2;
+        let py = y * scale + scale / 2;
+        let offset = ((py * raster.width + px) * 4) as usize;
+        assert_eq!(
+            raster.pixels[offset + 3],
+            255,
+            "module ({x}, {y}) is opaque"
+        );
+        Rgb::new(
+            raster.pixels[offset],
+            raster.pixels[offset + 1],
+            raster.pixels[offset + 2],
+        )
+    }
+
+    #[test]
+    fn quiet_zone_is_part_of_the_document() {
+        // "hello" fits in a version 1 code, which is 21 modules wide.
+        let qr = Qr::new(SHORT, ErrorCorrection::Medium, &QrStyle::default()).unwrap();
+
+        assert_eq!(qr.size_in_modules(), 21 + 2 * DEFAULT_QUIET_ZONE);
+        assert!(qr.svg().contains(r#"viewBox="0 0 29 29""#), "{}", qr.svg());
+        assert!(qr.svg().contains(r#"width="232""#), "{}", qr.svg());
+    }
+
+    #[test]
+    fn style_colors_reach_the_document() {
+        let svg = render_svg(SHORT, ErrorCorrection::Medium, &styled()).unwrap();
+
+        assert!(svg.contains(r##"fill="#ff0000""##), "{svg}");
+        assert!(svg.contains(r##"fill="#0000ff""##), "{svg}");
+        assert!(!svg.contains("#000000"), "{svg}");
+    }
+
+    #[test]
+    fn raster_follows_the_requested_scale() {
+        let qr = Qr::new(SHORT, ErrorCorrection::Medium, &QrStyle::default()).unwrap();
+
+        for scale in [1, 4, 10] {
+            let raster = qr.to_rgba(scale).unwrap();
+            assert_eq!(raster.width, qr.size_in_modules() * scale);
+            assert_eq!(raster.height, raster.width);
+            assert_eq!(raster.pixels.len() as u32, raster.width * raster.height * 4);
+        }
+    }
+
+    /// The whole point of the crate: the SVG the preview shows and the pixels
+    /// the export writes describe the same modules, in the same places.
+    #[test]
+    fn modules_land_where_the_svg_puts_them() {
+        let scale = 6;
+        let style = styled();
+        let qr = Qr::new(SHORT, ErrorCorrection::Medium, &style).unwrap();
+        let raster = qr.to_rgba(scale).unwrap();
+        let quiet = style.quiet_zone;
+
+        // The margin is blank.
+        assert_eq!(module_color(&raster, scale, 0, 0), BLUE);
+        assert_eq!(module_color(&raster, scale, quiet - 1, quiet - 1), BLUE);
+
+        // The top left finder pattern: a 7×7 dark ring around a light ring
+        // around a 3×3 dark core.
+        assert_eq!(module_color(&raster, scale, quiet, quiet), RED);
+        assert_eq!(module_color(&raster, scale, quiet + 1, quiet + 1), BLUE);
+        assert_eq!(module_color(&raster, scale, quiet + 3, quiet + 3), RED);
+        assert_eq!(module_color(&raster, scale, quiet + 6, quiet), RED);
+
+        // The separator right of it, and the bottom right corner, which no
+        // finder pattern reaches.
+        assert_eq!(module_color(&raster, scale, quiet + 7, quiet), BLUE);
+        let last = qr.size_in_modules() - quiet - 1;
+        assert_eq!(module_color(&raster, scale, last, last), BLUE);
+    }
+
+    #[test]
+    fn png_output_is_a_png() {
+        let png = render_png(SHORT, ErrorCorrection::High, &QrStyle::default(), 10).unwrap();
+
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn oversized_input_is_reported_as_an_encoding_error() {
+        let too_long = "a".repeat(4000);
+        let error = Qr::new(&too_long, ErrorCorrection::High, &QrStyle::default()).unwrap_err();
+
+        assert!(matches!(error, QrError::Encode(_)), "{error}");
+    }
+
+    #[test]
+    fn scale_of_zero_is_rejected() {
+        let qr = Qr::new(SHORT, ErrorCorrection::Medium, &QrStyle::default()).unwrap();
+
+        assert!(matches!(qr.to_png(0), Err(QrError::Render(_))));
+    }
+
+    /// A scanner reads the color at the middle of a module, so a shape may look
+    /// however it likes as long as it covers its own cell's center and nothing
+    /// else's. This is the property that keeps a styled code readable, and it
+    /// is checked against the plain square rendering module by module.
+    #[test]
+    fn every_module_shape_keeps_the_matrix_it_was_given() {
+        let scale = 9;
+        let quiet = QrStyle::default().quiet_zone;
+        let square = Qr::new(LONG, ErrorCorrection::Medium, &QrStyle::default())
+            .unwrap()
+            .to_rgba(scale)
+            .unwrap();
+        let modules = square.width / scale - 2 * quiet;
+
+        for shape in [ModuleShape::Rounded, ModuleShape::Dot] {
+            let style = QrStyle {
+                module: shape,
+                ..QrStyle::default()
+            };
+            let styled = Qr::new(LONG, ErrorCorrection::Medium, &style)
+                .unwrap()
+                .to_rgba(scale)
+                .unwrap();
+
+            for y in 0..modules {
+                for x in 0..modules {
+                    let (sx, sy) = (x + quiet, y + quiet);
+                    assert_eq!(
+                        module_color(&styled, scale, sx, sy),
+                        module_color(&square, scale, sx, sy),
+                        "module ({x}, {y}) differs under {shape:?}",
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every finder shape has to leave a dark ring around a light ring around a
+    /// dark middle, since that ratio is what a scanner scans for.
+    #[test]
+    fn every_finder_shape_keeps_the_ring_a_scanner_looks_for() {
+        let scale = 9;
+        let quiet = QrStyle::default().quiet_zone;
+
+        for shape in [FinderShape::Square, FinderShape::Rounded] {
+            let style = QrStyle {
+                finder: Finder {
+                    shape,
+                    ..Finder::default()
+                },
+                ..QrStyle::default()
+            };
+            let qr = Qr::new(SHORT, ErrorCorrection::Medium, &style).unwrap();
+            let raster = qr.to_rgba(scale).unwrap();
+            let at = |x: u32, y: u32| module_color(&raster, scale, x + quiet, y + quiet);
+
+            for (fx, fy) in [(0, 0), (14, 0), (0, 14)] {
+                // Across the middle of the pattern: ring, gap, center, gap,
+                // ring.
+                assert_eq!(at(fx, fy + 3), Rgb::BLACK, "{shape:?} ring at {fx},{fy}");
+                assert_eq!(at(fx + 1, fy + 3), Rgb::WHITE, "{shape:?} gap at {fx},{fy}");
+                assert_eq!(
+                    at(fx + 3, fy + 3),
+                    Rgb::BLACK,
+                    "{shape:?} core at {fx},{fy}"
+                );
+                assert_eq!(at(fx + 5, fy + 3), Rgb::WHITE, "{shape:?} gap at {fx},{fy}");
+                assert_eq!(
+                    at(fx + 6, fy + 3),
+                    Rgb::BLACK,
+                    "{shape:?} ring at {fx},{fy}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn finder_patterns_can_carry_their_own_colors() {
+        let style = QrStyle {
+            finder: Finder {
+                shape: FinderShape::Rounded,
+                ring: Some(GREEN),
+                center: Some(BLUE),
+            },
+            ..QrStyle::default()
+        };
+        let scale = 9;
+        let qr = Qr::new(SHORT, ErrorCorrection::Medium, &style).unwrap();
+        let raster = qr.to_rgba(scale).unwrap();
+        let quiet = style.quiet_zone;
+
+        assert_eq!(module_color(&raster, scale, quiet, quiet + 3), GREEN);
+        assert_eq!(module_color(&raster, scale, quiet + 3, quiet + 3), BLUE);
+        // The rest of the matrix keeps the code's own dark color.
+        assert_eq!(
+            module_color(&raster, scale, quiet + 6, quiet + 8),
+            Rgb::BLACK
+        );
+    }
+
+    /// Straight edges want to snap to the pixel grid; curves want the opposite.
+    #[test]
+    fn crisp_edges_are_asked_for_only_when_everything_is_straight() {
+        let square = render_svg(SHORT, ErrorCorrection::Medium, &QrStyle::default()).unwrap();
+        assert!(square.contains("crispEdges"), "{square}");
+
+        for style in [
+            QrStyle {
+                module: ModuleShape::Dot,
+                ..QrStyle::default()
+            },
+            QrStyle {
+                finder: Finder {
+                    shape: FinderShape::Rounded,
+                    ..Finder::default()
+                },
+                ..QrStyle::default()
+            },
+        ] {
+            let svg = render_svg(SHORT, ErrorCorrection::Medium, &style).unwrap();
+            assert!(!svg.contains("crispEdges"), "{svg}");
+        }
+    }
+
+    fn with_logo(logo: Logo) -> QrStyle {
+        QrStyle {
+            logo: Some(logo),
+            ..QrStyle::default()
+        }
+    }
+
+    /// A solid rectangle, as a PNG, standing in for a photograph off a phone.
+    fn photo(width: u32, height: u32) -> Vec<u8> {
+        let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
+        pixmap.fill(tiny_skia::Color::from_rgba8(30, 90, 200, 255));
+        pixmap.encode_png().unwrap()
+    }
+
+    /// The size of an encoded image, read back the way the renderer reads it.
+    fn size_of(image: &[u8]) -> (u32, u32) {
+        let href = raster::href(image, ImageFormat::Png);
+        let (width, height) = raster::natural_size(&href).unwrap();
+        (width as u32, height as u32)
+    }
+
+    /// The case this exists for: a picture larger than a GPU texture atlas,
+    /// which is every photograph a phone takes.
+    #[test]
+    fn a_logo_larger_than_the_atlas_is_scaled_down_to_fit() {
+        let shrunk = shrink_logo(&photo(4167, 2573)).unwrap();
+        let (width, height) = size_of(&shrunk);
+
+        assert_eq!(width, MAX_LOGO_SIDE);
+        assert!(height <= MAX_LOGO_SIDE, "{height}");
+        // The shape is the picture's, not the box's: 4167:2573 is 1.62, and a
+        // logo squashed to fit a square would be the wrong picture entirely.
+        let before = 4167.0 / 2573.0;
+        let after = f64::from(width) / f64::from(height);
+        assert!((before - after).abs() < 0.01, "{before} became {after}");
+    }
+
+    /// Whichever side is the long one.
+    #[test]
+    fn a_tall_logo_is_scaled_by_its_height() {
+        let shrunk = shrink_logo(&photo(900, 3000)).unwrap();
+        assert_eq!(size_of(&shrunk), (154, MAX_LOGO_SIDE));
+    }
+
+    #[test]
+    fn a_logo_that_already_fits_is_left_alone() {
+        assert_eq!(shrink_logo(&photo(MAX_LOGO_SIDE, 200)), None);
+        assert_eq!(shrink_logo(&logo_image(GREEN)), None);
+    }
+
+    #[test]
+    fn a_vector_logo_is_left_alone() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="9000" height="9000"/>"#;
+        assert_eq!(shrink_logo(svg), None);
+    }
+
+    #[test]
+    fn bytes_that_are_not_an_image_are_left_alone() {
+        assert_eq!(shrink_logo(b"not an image at all"), None);
+    }
+
+    /// Magic bytes are a claim, not a picture. `usvg` believes the claim and
+    /// reads a size out of whatever follows them — here half a billion pixels
+    /// wide — so this is the case that has to be caught by decoding rather than
+    /// by measuring.
+    #[test]
+    fn bytes_that_only_claim_to_be_an_image_are_left_alone() {
+        let mut lying = b"\x89PNG\r\n\x1a\n".to_vec();
+        lying.extend_from_slice(b"and then nothing that belongs in one");
+
+        assert_eq!(shrink_logo(&lying), None);
+    }
+
+    /// A zone plate — rings that get finer towards the edge — is the standard
+    /// way to make a downscaler show what it throws away. Against a true box
+    /// average the chain lands about ten levels out of 255 and one leap lands
+    /// above fifty, so the bound below is not a tight fit to the current number:
+    /// it is the line between averaging and sampling.
+    #[test]
+    fn a_scaled_photograph_is_averaged_rather_than_sampled() {
+        let (width, height) = (2048, 1536);
+        let plate = zone_plate(width, height);
+        let shrunk = shrink_logo(&plate).unwrap();
+
+        let href = raster::href(&shrunk, ImageFormat::Png);
+        let target = raster::natural_size(&href).unwrap();
+        let target = (target.0 as u32, target.1 as u32);
+        let scaled = raster::draw(&href, target, None).unwrap();
+
+        let full = raster::draw(
+            &raster::href(&plate, ImageFormat::Png),
+            (width, height),
+            None,
+        );
+        let reference = box_average(&full.unwrap(), target);
+
+        let difference = mean_difference(&scaled, &reference);
+        assert!(
+            difference < 20.0,
+            "{difference} levels away from a box average"
+        );
+    }
+
+    /// Rings whose spacing falls off with the square of the distance from the
+    /// middle, drawn as a PNG.
+    fn zone_plate(width: u32, height: u32) -> Vec<u8> {
+        let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
+        let (cx, cy) = (f64::from(width) / 2.0, f64::from(height) / 2.0);
+        for y in 0..height {
+            for x in 0..width {
+                let (dx, dy) = (f64::from(x) - cx, f64::from(y) - cy);
+                let level = (((dx * dx + dy * dy) * 0.0009).sin() * 0.5 + 0.5) * 255.0;
+                let level = level as u8;
+                pixmap.pixels_mut()[(y * width + x) as usize] =
+                    tiny_skia::ColorU8::from_rgba(level, level, level, 255).premultiply();
+            }
+        }
+        pixmap.encode_png().unwrap()
+    }
+
+    /// Every source pixel averaged into the one it lands in, which is what a
+    /// downscale is supposed to approximate.
+    fn box_average(source: &tiny_skia::Pixmap, size: (u32, u32)) -> tiny_skia::Pixmap {
+        let mut out = tiny_skia::Pixmap::new(size.0, size.1).unwrap();
+        let across = f64::from(source.width()) / f64::from(size.0);
+        let down = f64::from(source.height()) / f64::from(size.1);
+        let width = source.width() as usize;
+        for y in 0..size.1 {
+            for x in 0..size.0 {
+                let x0 = (f64::from(x) * across) as usize;
+                let x1 = ((f64::from(x + 1) * across) as usize).max(x0 + 1);
+                let y0 = (f64::from(y) * down) as usize;
+                let y1 = ((f64::from(y + 1) * down) as usize).max(y0 + 1);
+                let (mut sum, mut count) = (0u64, 0u64);
+                for row in y0..y1 {
+                    for column in x0..x1 {
+                        sum += u64::from(source.pixels()[row * width + column].red());
+                        count += 1;
+                    }
+                }
+                let level = (sum / count) as u8;
+                out.pixels_mut()[(y * size.0 + x) as usize] =
+                    tiny_skia::ColorU8::from_rgba(level, level, level, 255).premultiply();
+            }
+        }
+        out
+    }
+
+    /// Mean absolute difference in levels out of 255, on the grey the two
+    /// pictures above are drawn in.
+    fn mean_difference(a: &tiny_skia::Pixmap, b: &tiny_skia::Pixmap) -> f64 {
+        assert_eq!((a.width(), a.height()), (b.width(), b.height()));
+        let total: u64 = a
+            .pixels()
+            .iter()
+            .zip(b.pixels())
+            .map(|(one, other)| {
+                u64::from((i32::from(one.red()) - i32::from(other.red())).unsigned_abs())
+            })
+            .sum();
+        total as f64 / f64::from(a.width() * a.height())
+    }
+
+    /// The scaled picture has to survive everything the original would have:
+    /// it is a PNG, it is what ends up in the document, and the code still
+    /// carries it.
+    #[test]
+    fn a_scaled_logo_is_still_a_logo() {
+        let shrunk = shrink_logo(&photo(5000, 5000)).unwrap();
+        assert_eq!(&shrunk[..8], b"\x89PNG\r\n\x1a\n");
+
+        let style = with_logo(Logo::new(shrunk));
+        let svg = render_svg(LONG, ErrorCorrection::High, &style).unwrap();
+        assert!(svg.contains("href=\"data:image/png;base64,iVBOR"), "{svg}");
+    }
+
+    #[test]
+    fn logo_is_embedded_as_a_data_url() {
+        let style = with_logo(Logo::new(logo_image(GREEN)));
+        let svg = render_svg(LONG, ErrorCorrection::Medium, &style).unwrap();
+
+        assert!(svg.contains(r#"<image "#), "{svg}");
+        assert!(svg.contains("href=\"data:image/png;base64,iVBOR"), "{svg}");
+    }
+
+    /// The logo has to survive the whole round trip: embedded as base64, parsed
+    /// back out by `usvg` and drawn by `resvg`, with the modules beneath it
+    /// left out rather than painted over.
+    #[test]
+    fn logo_replaces_the_modules_it_covers() {
+        let scale = 9;
+        let style = with_logo(Logo {
+            size: 0.3,
+            ..Logo::new(logo_image(GREEN))
+        });
+        let qr = Qr::new(LONG, ErrorCorrection::Medium, &style).unwrap();
+        let raster = qr.to_rgba(scale).unwrap();
+        let middle = qr.size_in_modules() / 2;
+
+        assert_eq!(module_color(&raster, scale, middle, middle), GREEN);
+
+        // Just outside the logo and its padding, the matrix carries on. Some
+        // module in that ring has to be dark, or nothing was drawn at all.
+        let edge = middle + (0.3 * (qr.size_in_modules() - 2 * style.quiet_zone) as f32) as u32;
+        assert!(
+            (0..qr.size_in_modules()).any(|y| module_color(&raster, scale, edge, y) == Rgb::BLACK),
+            "the column just past the logo is empty",
+        );
+    }
+
+    #[test]
+    fn a_logo_raises_error_correction_to_the_highest_level() {
+        let style = with_logo(Logo::new(logo_image(GREEN)));
+        let qr = Qr::new(LONG, ErrorCorrection::Low, &style).unwrap();
+
+        assert_eq!(qr.error_correction(), ErrorCorrection::High);
+
+        // Without one, the level asked for is the level used.
+        let plain = Qr::new(LONG, ErrorCorrection::Low, &QrStyle::default()).unwrap();
+        assert_eq!(plain.error_correction(), ErrorCorrection::Low);
+    }
+
+    /// The two-layer document is the one-layer document with a hole in it.
+    ///
+    /// A live preview draws the code and the picture separately so the picture
+    /// is one image the renderer can recognize. That is only safe while the two
+    /// halves add back up to the file that gets saved: the shortened document is
+    /// a prefix of the full one, and the box the caller is handed is the box the
+    /// full one draws the picture in.
+    #[test]
+    fn the_document_without_the_picture_is_the_document_with_it_taken_out() {
+        let style = with_logo(Logo::new(logo_image(GREEN)));
+        let qr = Qr::new(LONG, ErrorCorrection::Low, &style).unwrap();
+        let without = qr.svg_without_inset();
+
+        assert!(!without.contains("<image"), "{without}");
+        assert!(
+            qr.svg().starts_with(without.strip_suffix("</svg>").unwrap()),
+            "everything before the picture is untouched"
+        );
+        assert!(without.ends_with("</svg>"), "and the document is still closed");
+
+        // The box, against the numbers the full document writes into the
+        // `<image>` itself. Both are in the document's own units, so the one
+        // the caller gets is the other divided by the document's side.
+        let inset = qr.inset_box().expect("a code with a picture has a box");
+        let side = qr.size_in_modules() as f32;
+        let attr = |name: &str| -> f32 {
+            let after = qr.svg().split_once("<image ").unwrap().1;
+            let value = after.split_once(&format!("{name}=\"")).unwrap().1;
+            value.split_once('"').unwrap().0.parse().unwrap()
+        };
+        assert!((inset.offset * side - attr("x")).abs() < 0.001, "{inset:?}");
+        assert!((inset.offset * side - attr("y")).abs() < 0.001, "{inset:?}");
+        assert!((inset.side * side - attr("width")).abs() < 0.001, "{inset:?}");
+    }
+
+    #[test]
+    fn a_code_with_no_picture_has_nothing_to_take_out() {
+        let qr = Qr::new(LONG, ErrorCorrection::Low, &QrStyle::default()).unwrap();
+
+        assert_eq!(qr.inset_box(), None);
+        assert_eq!(qr.svg_without_inset(), qr.svg());
+    }
+
+    #[test]
+    fn the_default_logo_fits_even_the_smallest_code() {
+        let style = with_logo(Logo::new(logo_image(GREEN)));
+        let qr = Qr::new(SHORT, ErrorCorrection::High, &style).unwrap();
+
+        assert_eq!(qr.size_in_modules(), 21 + 2 * DEFAULT_QUIET_ZONE);
+    }
+
+    /// The ceiling `largest_logo_size` reports is the one `check_logo` keeps.
+    ///
+    /// Walked over every code version rather than asserted at one size, because
+    /// the point is that the answer *moves*: the area rule is a fixed share and
+    /// the finder rule a fixed number of modules, so which one binds changes as
+    /// the code grows.
+    #[test]
+    fn the_largest_size_that_fits_is_the_largest_size_that_is_accepted() {
+        for version in 1..=40u32 {
+            let modules = 17 + 4 * version;
+            let padding = Logo::DEFAULT_PADDING;
+            let largest = largest_logo_size(padding, modules);
+            let at = |size| {
+                check_logo(
+                    &Logo {
+                        size,
+                        padding,
+                        ..Logo::new(logo_image(GREEN))
+                    },
+                    modules,
+                )
+            };
+
+            assert!(largest > 0.0, "{modules} modules leave room for a logo");
+            assert!(
+                at(largest - 0.001).is_ok(),
+                "{modules} modules take a logo of {largest}",
+            );
+            assert!(
+                at(largest + 0.001).is_err(),
+                "{modules} modules refuse a logo past {largest}",
+            );
+        }
+    }
+
+    /// The smallest code takes the default size and not much more.
+    ///
+    /// The number is the interesting part: it says a size control cannot simply
+    /// offer a bigger logo, because a twenty-one-module code has barely a fifth
+    /// of the width to give.
+    #[test]
+    fn the_smallest_code_has_almost_no_room_above_the_default_logo() {
+        let largest = largest_logo_size(Logo::DEFAULT_PADDING, 21);
+
+        assert!(largest > Logo::DEFAULT_SIZE, "{largest}");
+        assert!(largest < 0.2, "{largest}");
+        assert!(
+            largest_logo_size(Logo::DEFAULT_PADDING, 25) > 0.25,
+            "one version further on there is room for a quarter",
+        );
+    }
+
+    #[test]
+    fn a_logo_covering_more_than_error_correction_can_rebuild_is_refused() {
+        // Wide enough that a logo this size still clears the finder patterns,
+        // so the area rule is what it runs into.
+        let style = with_logo(Logo {
+            size: 0.45,
+            padding: 0.0,
+            ..Logo::new(logo_image(GREEN))
+        });
+        let error = Qr::new(LONG, ErrorCorrection::High, &style).unwrap_err();
+
+        assert!(
+            matches!(error, QrError::Logo(LogoError::TooLarge { .. })),
+            "{error}",
+        );
+    }
+
+    #[test]
+    fn a_logo_reaching_into_a_finder_pattern_is_refused() {
+        // Small enough to clear the area rule, so the finder rule is what it
+        // runs into on a code this size.
+        let style = with_logo(Logo {
+            size: 0.3,
+            ..Logo::new(logo_image(GREEN))
+        });
+        let error = Qr::new(SHORT, ErrorCorrection::High, &style).unwrap_err();
+        assert!(
+            matches!(error, QrError::Logo(LogoError::CoversFinder)),
+            "{error}",
+        );
+
+        // The same logo on a code with room for it goes through.
+        assert!(Qr::new(LONG, ErrorCorrection::High, &style).is_ok());
+    }
+
+    #[test]
+    fn a_logo_that_is_not_an_image_is_refused() {
+        let style = with_logo(Logo::new(b"this is not an image".to_vec()));
+        let error = Qr::new(LONG, ErrorCorrection::High, &style).unwrap_err();
+
+        assert!(
+            matches!(error, QrError::Logo(LogoError::UnknownFormat)),
+            "{error}",
+        );
+    }
+
+    #[test]
+    fn nonsense_logo_geometry_is_refused() {
+        for size in [0.0, -0.5, 1.0, f32::NAN] {
+            let style = with_logo(Logo {
+                size,
+                ..Logo::new(logo_image(GREEN))
+            });
+            let error = Qr::new(LONG, ErrorCorrection::High, &style).unwrap_err();
+            assert!(
+                matches!(error, QrError::Logo(LogoError::Size(_))),
+                "{error}"
+            );
+        }
+
+        let style = with_logo(Logo {
+            padding: -1.0,
+            ..Logo::new(logo_image(GREEN))
+        });
+        let error = Qr::new(LONG, ErrorCorrection::High, &style).unwrap_err();
+        assert!(
+            matches!(error, QrError::Logo(LogoError::Padding(_))),
+            "{error}"
+        );
+    }
+}

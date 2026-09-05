@@ -1,15 +1,88 @@
 name: Release
 
+# **This is the only workflow that produces something a person can download and
+# run**, and it now runs on `main` as well as on a tag. Workflow artifacts —
+# what `build.yml` used to upload — are not that: they expire, they cannot be
+# fetched without a GitHub account, and GitHub re-zips them, so what comes down
+# is a `.zip` containing the `.app` bundle's insides rather than the bundle. A
+# release asset is a plain URL that anybody can click.
+#
+# Two kinds of release come out of here, from one set of packaging steps,
+# because the packaging is the part that is easy to get subtly wrong twice:
+#
+#   - a tag matching `v*` publishes a numbered release, which is the one the
+#     README's Installation link points at;
+#   - a push to `main` replaces a rolling `nightly` prerelease with a build of
+#     the commit that was just pushed.
+#
+# The rolling tag is deleted and recreated rather than moved, which is why the
+# release is opened by a job of its own: three matrix jobs racing to create the
+# same release is a coin flip, and one job creating it and three uploading into
+# it is not. `nightly` does not match `v*`, and a tag pushed with `GITHUB_TOKEN`
+# does not start a workflow anyway, so there is no loop here.
+
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+# A second push to `main` while the first is still packaging would delete the
+# release the first is uploading into. Tags are exempt from the cancelling:
+# a numbered release interrupted halfway is a release with two of its three
+# assets, and nothing says so afterwards.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
 jobs:
-  release:
+  open:
+    name: Open the release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.what.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide what this run publishes
+        id: what
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag=$GITHUB_REF_NAME
+            # Re-running a tag's workflow should top up the release that is
+            # already there rather than fail on the next line.
+            gh release view "$tag" >/dev/null 2>&1 ||
+              gh release create "$tag" --title "$tag" --generate-notes
+          else
+            tag=nightly
+            {
+              echo "Built from \`main\` at commit \`${GITHUB_SHA:0:7}\`, and replaced by the next push to it. A link to this page is not a link to a fixed version; the numbered releases are."
+              echo
+              echo "Neither the macOS app nor the Windows executable is signed by a certificate your operating system has heard of, so both are refused on first launch. The README says which gesture each one wants."
+            } > notes.md
+            # The release first, which takes the tag with it, and then the tag
+            # again in case a previous run left one without a release behind:
+            # a stale tag would be reused, and the assets would be a build of
+            # this commit hanging off a ref pointing at an older one.
+            gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" >/dev/null 2>&1 || true
+            gh release create "$tag" \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --title "Development build" \
+              --notes-file notes.md
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  package:
     name: ${{ matrix.name }}
+    needs: open
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -39,6 +112,10 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      # `fontconfig` is what Parley finds fonts through, and it is linked
+      # rather than dlopened, so the build stops without its headers. GTK is
+      # not here any more: the file dialogs went from libcosmic to `rfd`, which
+      # asks the desktop portal over D-Bus and links nothing.
       - name: Install system dependencies
         if: runner.os == 'Linux'
         run: |
@@ -47,7 +124,7 @@ jobs:
             pkg-config \
             libwayland-dev \
             libxkbcommon-dev \
-            libgtk-3-dev
+            libfontconfig1-dev
 
       - run: cargo build --release --locked
 
@@ -58,6 +135,11 @@ jobs:
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
+          # The bundle's version comes from `Cargo.toml`, which is the one copy
+          # of it `cargo` actually builds against. It used to be typed into the
+          # plist below and into the `justfile`, so a tag that bumped the crate
+          # shipped an app still calling itself whatever was written here last.
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           rm -rf QRnew.app
           mkdir -p QRnew.app/Contents/MacOS QRnew.app/Contents/Resources
           cp target/release/qrnew QRnew.app/Contents/MacOS/qrnew
@@ -71,16 +153,16 @@ jobs:
           done
           iconutil -c icns -o QRnew.app/Contents/Resources/AppIcon.icns "$iconset"
           rm -rf "$iconset"
-          cat > QRnew.app/Contents/Info.plist << 'PLIST'
+          cat > QRnew.app/Contents/Info.plist << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
           <key>CFBundleName</key><string>QRnew</string>
           <key>CFBundleDisplayName</key><string>QRnew</string>
-          <key>CFBundleIdentifier</key><string>dev.lhdjung.QrNew</string>
-          <key>CFBundleVersion</key><string>0.1.0</string>
-          <key>CFBundleShortVersionString</key><string>0.1.0</string>
+          <key>CFBundleIdentifier</key><string>dev.lhdjung.QRnew</string>
+          <key>CFBundleVersion</key><string>${version}</string>
+          <key>CFBundleShortVersionString</key><string>${version}</string>
           <key>CFBundleExecutable</key><string>qrnew</string>
           <key>CFBundleIconFile</key><string>AppIcon</string>
           <key>CFBundlePackageType</key><string>APPL</string>
@@ -97,8 +179,8 @@ jobs:
         run: |
           mkdir qrnew-linux
           cp target/release/qrnew                                   qrnew-linux/qrnew
-          cp resources/app.desktop                                   qrnew-linux/dev.lhdjung.QrNew.desktop
-          cp resources/icons/hicolor/scalable/apps/icon.svg          qrnew-linux/dev.lhdjung.QrNew.svg
+          cp resources/app.desktop                                   qrnew-linux/dev.lhdjung.QRnew.desktop
+          cp resources/icons/hicolor/scalable/apps/icon.svg          qrnew-linux/dev.lhdjung.QRnew.svg
           tar czf qrnew-linux.tar.gz qrnew-linux/
 
       - name: Package (Windows)
@@ -118,6 +200,11 @@ jobs:
           rm -rf "$tmpdir"
           7z a QRnew-windows.zip QRnew-windows/
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ matrix.asset }}
+      # `--clobber` rather than a plain upload, because a re-run of a tag's
+      # workflow lands on a release that already has the asset.
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "${{ needs.open.outputs.tag }}" "${{ matrix.asset }}" --clobber

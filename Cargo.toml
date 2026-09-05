@@ -6,30 +6,81 @@ license = "MPL-2.0"
 description = "Local-only QR code generator"
 repository = "https://github.com/lhdjung/QRnew"
 
+[workspace]
+members = ["qrnew-core"]
+
 [dependencies]
-arboard = "3"
+# The clipboard and the file dialogs, at the versions Blitz pins for its own
+# `clipboard` and `file-dialog` features, so the tree carries one of each.
+arboard = "3.4.1"
+rfd = "0.17.1"
+dioxus = { version = "0.7.3", default-features = false, features = [
+    "macro",
+    "signals",
+    "hooks",
+    "html",
+] }
 i18n-embed = { version = "0.16", features = [
     "fluent-system",
     "desktop-requester",
 ] }
 i18n-embed-fl = "0.10"
-image = { version = "0.24", default-features = false, features = ["png"] }
 open = "5.3.2"
-qrcode = { version = "0.13", features = ["svg"] }
-rfd = "0.15"
+qrnew-core = { path = "qrnew-core" }
 rust-embed = "8.8.0"
-tokio = { version = "1.48.0", features = ["full"] }
 
-[dependencies.libcosmic]
-git = "https://github.com/pop-os/libcosmic.git"
+# Dioxus rendered by Blitz: Stylo for style, Taffy for layout, Parley for text,
+# `vello_hybrid` onto the GPU. No webview and no JavaScript.
+#
+# A git dependency rather than crates.io because `blitz-test-harness`, which
+# drives the interface tests, is `publish = false`. Pinning the whole tree to
+# one revision keeps the harness and the app on the same `blitz-dom`.
+#
+# `net` is **off on purpose**: the default feature set pulls `blitz-net` →
+# `reqwest` → `native-tls`, and QRnew's privacy claim is that nothing in the
+# dependency list can talk to a network. `data-uri` replaces it, and a data URL
+# is the only resource this app ever loads.
+[dependencies.dioxus-native]
+git = "https://github.com/DioxusLabs/blitz"
+rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e"
 default-features = false
 features = [
-    "about",
-    "markdown",
-    "qr_code",
-    "wgpu",
-    "winit",
+    "accessibility",
+    "apple-font-embolden",
+    "autofocus",
+    "clipboard",
+    "data-uri",
+    "file-dialog",
+    "html",
+    "svg",
+    "system-fonts",
+    "vello-hybrid",
+    "woff",
 ]
+
+[dev-dependencies]
+# Upstream's headless harness: a document, laid out and hit-tested, with no
+# window, no GPU and no compositor. It is what makes `tests/interface.rs`
+# possible.
+blitz-test-harness = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "c6dec888aca71fa72c9e5395e8da330ed84e8d9e" }
+dioxus = { version = "0.7.3", default-features = false, features = [
+    "macro",
+    "signals",
+    "hooks",
+    "html",
+] }
+keyboard-types = "0.7"
+# The core again: an integration test links against the crate under test and
+# its dev-dependencies, not against its dependencies.
+qrnew-core = { path = "qrnew-core" }
+toml = { version = "1.1.5", default-features = false, features = ["parse"] }
+
+# Image work — rasterizing and decoding — is unusably slow in an unoptimized
+# build, and it is all in dependencies. Optimizing those keeps `cargo test`
+# quick without giving up debug info in our own code.
+[profile.dev.package."*"]
+opt-level = 2
 
 [profile.release]
 opt-level = "z"

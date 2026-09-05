@@ -1,0 +1,57 @@
+--- a/packages/blitz-dom/src/node/text.rs
++++ b/packages/blitz-dom/src/node/text.rs
+@@ -211,6 +211,54 @@
+         let is_multiline = self.is_multiline;
+         let editor = &mut self.editor;
+         let mut driver = editor.driver(font_ctx, layout_ctx);
++
++        // macOS sends these keys twice: as the standard key binding AppKit
++        // resolved (handled in `apply_apple_standard_keybinding`) and as the
++        // key event. Acting on both moves the caret twice. Cmd is exempt:
++        // `NSTextInputContext` does not interpret Command chords, so no
++        // binding is sent and these are the only handler for them.
++        #[cfg(target_os = "macos")]
++        if mods.contains(Modifiers::SUPER) {
++            match event.key {
++                Key::ArrowLeft => {
++                    if shift {
++                        driver.select_to_line_start()
++                    } else {
++                        driver.move_to_line_start()
++                    }
++                    return Some(GeneratedTextInputEvent::Select);
++                }
++                Key::ArrowRight => {
++                    if shift {
++                        driver.select_to_line_end()
++                    } else {
++                        driver.move_to_line_end()
++                    }
++                    return Some(GeneratedTextInputEvent::Select);
++                }
++                Key::Backspace => {
++                    if driver.editor.raw_selection().is_collapsed() {
++                        driver.select_to_line_start();
++                    }
++                    driver.delete_selection();
++                    return Some(GeneratedTextInputEvent::Input);
++                }
++                _ => {}
++            }
++        } else if matches!(
++            event.key,
++            Key::ArrowLeft
++                | Key::ArrowRight
++                | Key::ArrowUp
++                | Key::ArrowDown
++                | Key::Home
++                | Key::End
++                | Key::Delete
++                | Key::Enter
++        ) {
++            return None;
++        }
++
+         match event.key {
+             Key::Character(c) if action_mod && matches!(c.as_str(), "c" | "x" | "v") => {
+                 match c.to_lowercase().as_str() {
