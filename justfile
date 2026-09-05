@@ -37,6 +37,9 @@ icon-svg := appid + '.svg'
 appdata-src := 'resources' / 'app.metainfo.xml'
 desktop-src := 'resources' / 'app.desktop'
 icon-src := 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'icon.svg'
+# The Flatpak manifest, which is named for the app ID because flatpak-builder
+# takes the ID from the file name when one is not given.
+flatpak-manifest := 'packaging' / 'flatpak' / (appid + '.yml')
 
 # Install destinations. `share/metainfo` and not `share/appdata`: the latter is
 # the pre-0.9 AppStream location, deprecated for a decade and not scanned by
@@ -138,13 +141,19 @@ bundle-macos: build-release
 bundle-linux: build-release
     #!/usr/bin/env bash
     set -euo pipefail
-    install -Dm0755 {{cargo-target-dir}}/release/{{bin}} ~/.local/bin/{{bin}}
-    install -Dm0644 {{desktop-src}} \
-        ~/.local/share/applications/{{desktop}}
-    install -Dm0644 {{icon-src}} \
-        ~/.local/share/icons/hicolor/scalable/apps/{{icon-svg}}
-    update-desktop-database ~/.local/share/applications 2>/dev/null || true
-    gtk-update-icon-cache -f ~/.local/share/icons/hicolor 2>/dev/null || true
+    # `install` and not a second copy of its four lines: this recipe used to
+    # have them, minus the metainfo, so a local install was the one install
+    # without the file a software centre reads.
+    just prefix="$HOME/.local" install
+    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+
+# Removes what `bundle-linux` installed
+unbundle-linux:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just prefix="$HOME/.local" uninstall
+    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 
 # Creates a Windows package at QRnew-windows/ (run on Windows; requires magick)
 bundle-windows: build-release
@@ -162,6 +171,91 @@ bundle-windows: build-release
         "$tmpdir/icon_64.png" "$tmpdir/icon_128.png" "$tmpdir/icon_256.png" \
         QRnew-windows/QRnew.ico
     rm -rf "$tmpdir"
+
+# Both of these are read only by other programs, so a mistake in either is
+# invisible until a software centre quietly skips the app. `release.yml` runs
+# this before it packages anything.
+
+# Validates the desktop entry and the AppStream metainfo
+check-metadata:
+    desktop-file-validate {{desktop-src}}
+    appstreamcli validate --explain {{appdata-src}}
+
+# Builds the portable Linux tarball, which is what release.yml ships
+tarball-linux: build-release
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf {{bin}}-linux {{bin}}-linux.tar.gz
+    mkdir {{bin}}-linux
+    cp {{cargo-target-dir}}/release/{{bin}} {{bin}}-linux/{{bin}}
+    cp {{desktop-src}}                      {{bin}}-linux/{{desktop}}
+    cp {{appdata-src}}                      {{bin}}-linux/{{appdata}}
+    cp {{icon-src}}                         {{bin}}-linux/{{icon-svg}}
+    # The tarball used to be four files and no instructions, so unpacking it
+    # gave a person a folder and nothing that looked like an application.
+    cp packaging/install.sh   {{bin}}-linux/install.sh
+    cp packaging/uninstall.sh {{bin}}-linux/uninstall.sh
+    chmod +x {{bin}}-linux/install.sh {{bin}}-linux/uninstall.sh
+    tar czf {{bin}}-linux.tar.gz {{bin}}-linux/
+
+# Builds the .deb for Debian, Ubuntu and Pop!_OS
+deb: build-release
+    cargo deb --no-build --no-strip
+
+# Builds the Flatpak from this branch's *committed* state and installs it
+flatpak-build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v flatpak-builder >/dev/null; then
+        builder=(flatpak-builder)
+    else
+        builder=(flatpak run org.flatpak.Builder)
+    fi
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    echo "Building the committed state of '$branch'; uncommitted changes are not in it."
+    # Inside the project and passed absolute, both because org.flatpak.Builder
+    # is itself sandboxed: it cannot read /tmp, and its idea of the working
+    # directory is not this one.
+    local_manifest=.flatpak-local.yml
+    trap 'rm -f "$local_manifest"' EXIT
+    sed -e "s|url: https://github.com/lhdjung/QRnew.git|url: file://$PWD|" \
+        -e "s|branch: main|branch: $branch|" \
+        {{flatpak-manifest}} > "$local_manifest"
+    "${builder[@]}" --force-clean --user --install --install-deps-from=flathub \
+        --default-branch=stable --repo=.flatpak-repo .flatpak-build "$PWD/$local_manifest"
+    echo
+    echo "Installed. Run it with:  flatpak run {{appid}}"
+
+# Creates QRnew.flatpak, the single-file bundle that installs on double-click
+flatpak-bundle: flatpak-build
+    flatpak build-bundle .flatpak-repo {{name}}.flatpak {{appid}} stable \
+        --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+
+# Removes the locally installed Flatpak and everything the build left behind
+flatpak-clean:
+    -flatpak uninstall -y --user {{appid}}
+    rm -rf .flatpak-build .flatpak-repo .flatpak-builder .flatpak-local.yml {{name}}.flatpak
+
+# Losing this key means every existing install stops trusting its updates and
+# each user has to remove and re-add the remote, so keep a copy of it somewhere
+# that is not GitHub.
+
+# One-time: generates the GPG key that signs the self-hosted Flatpak repository
+flatpak-keygen:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    key_id="QRnew Flatpak Repository"
+    gpg --list-secret-keys "$key_id" >/dev/null 2>&1 ||
+        gpg --batch --passphrase '' --quick-generate-key "$key_id" rsa4096 sign never
+    fpr=$(gpg --list-secret-keys --with-colons "$key_id" | awk -F: '/^fpr:/ {print $10; exit}')
+    echo
+    echo "Add both of these as repository secrets, under"
+    echo "Settings -> Secrets and variables -> Actions:"
+    echo
+    echo "  FLATPAK_GPG_KEY_ID       $fpr"
+    echo "  FLATPAK_GPG_PRIVATE_KEY  the block below, in full"
+    echo
+    gpg --armor --export-secret-keys "$fpr"
 
 # Vendor dependencies locally
 vendor:

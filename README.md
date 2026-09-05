@@ -15,7 +15,19 @@ Also supported:
 
 ## Installation
 
-Go to [the latest release][releases] and download the asset for your system, then double-click to unpack.
+**Linux.** Easiest is the Flatpak, which installs in one click and then updates
+with everything else on the machine:
+
+[**Install QRnew**][flatpakref]
+
+If the browser saves the file instead of opening it, double-click the downloaded
+`qrnew.flatpakref`. On Debian, Ubuntu or Pop!_OS you can instead take the `.deb`
+from [the latest release][releases] and double-click that. Anywhere else, take
+`qrnew-linux.tar.gz`, unpack it, and run the `install.sh` inside — it installs
+into your home directory and asks for no password.
+
+Everything else: go to [the latest release][releases] and download the asset for
+your system, then double-click to unpack.
 
 **macOS.** Unpacking gives you `QRnew.app`. Drag it into your Applications folder — the Finder window that opens on your Downloads folder, `⌘⇧A` for Applications, drag across. It runs fine from wherever you leave it, so this is tidiness rather than a step you have to take.
 
@@ -47,6 +59,7 @@ While the code was written by Claude Opus 5.0, most design decisions were made b
 QRnew is built with [Dioxus] and [Blitz], a HTML and CSS renderer in pure Rust. It is based on the [qrcode] crate and was inspired by [qrrs], a CLI frontend for qrcode.
 
 [releases]: https://github.com/lhdjung/QRnew/releases/latest
+[flatpakref]: https://lhdjung.github.io/QRnew/qrnew.flatpakref
 [Rust]: https://rustup.rs
 [just]: https://github.com/casey/just
 [Dioxus]: https://dioxuslabs.com

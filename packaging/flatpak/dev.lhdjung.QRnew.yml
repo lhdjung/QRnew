@@ -1,0 +1,59 @@
+# Flatpak build for the self-hosted repository at https://lhdjung.github.io/QRnew.
+# Not a Flathub manifest: see packaging/flatpak/README.md for why, and for what
+# would have to change if it ever becomes one.
+id: dev.lhdjung.QRnew
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: qrnew
+
+# Four permissions, and the list is short because of what the app is made of.
+finish-args:
+  # A window. fallback-x11 needs share=ipc to reach the X server.
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # vello_hybrid draws on the GPU through wgpu.
+  - --device=dri
+  #
+  # Deliberately absent:
+  #   --filesystem  Saving a PNG or SVG, and opening a QR code to read, both go
+  #                 through rfd, which asks the desktop's file portal. The
+  #                 portal hands back a file the app may touch and nothing else,
+  #                 so the sandbox needs no path of its own.
+  #   --share=network  Nothing in the dependency tree can open a socket:
+  #                 dioxus-native is built without `net`, which is what keeps
+  #                 `reqwest` out of the tree. Withholding it here says the same
+  #                 thing the dependency list does.
+  #   The accessibility bus is not listed because flatpak exposes it to every
+  #   app already; accesskit needs no permission for it.
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/qrnew/cargo
+  build-args:
+    # Blitz is a git dependency pinned to a revision, and cargo fetches it here.
+    # Flathub forbids network in a build and wants a generated cargo-sources.json
+    # instead; a self-hosted repository has no such rule, and this is one fewer
+    # file to regenerate every time the pin moves.
+    - --share=network
+
+modules:
+  - name: qrnew
+    buildsystem: simple
+    build-commands:
+      - cargo build --release --locked
+      - install -Dm0755 target/release/qrnew /app/bin/qrnew
+      - install -Dm0644 resources/app.desktop
+        /app/share/applications/dev.lhdjung.QRnew.desktop
+      - install -Dm0644 resources/app.metainfo.xml
+        /app/share/metainfo/dev.lhdjung.QRnew.metainfo.xml
+      - install -Dm0644 resources/icons/hicolor/scalable/apps/icon.svg
+        /app/share/icons/hicolor/scalable/apps/dev.lhdjung.QRnew.svg
+    sources:
+      - type: git
+        url: https://github.com/lhdjung/QRnew.git
+        branch: main

@@ -36,6 +36,9 @@ on:
 
 permissions:
   contents: write
+  # The Flatpak repository is published to GitHub Pages, which wants both.
+  pages: write
+  id-token: write
 
 # A second push to `main` while the first is still packaging would delete the
 # release the first is uploading into. Tags are exempt from the cancelling:
@@ -69,12 +72,17 @@ jobs:
           else
             tag=nightly
             dl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$tag
+            # The .deb carries the crate version in its file name, so the link
+            # has to be built from the same place the package takes it from.
+            version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
             {
               echo "### Download"
               echo
               echo "- [macOS]($dl/QRnew-macos.zip) — Apple silicon"
               echo "- [Windows]($dl/QRnew-windows.zip)"
-              echo "- [Linux]($dl/qrnew-linux.tar.gz)"
+              echo "- [Linux — Debian/Ubuntu/Pop!_OS]($dl/qrnew_${version}-1_amd64.deb)"
+              echo "- [Linux — Flatpak](https://lhdjung.github.io/QRnew)"
+              echo "- [Linux — portable]($dl/qrnew-linux.tar.gz)"
               echo
               echo "Built from \`main\` at commit \`${GITHUB_SHA:0:7}\`, and replaced by the next push to it. A link to this page is not a link to a fixed version; the numbered releases are."
               echo
@@ -104,7 +112,7 @@ jobs:
         include:
           - name: Linux
             runner: ubuntu-latest
-            asset: qrnew-linux.tar.gz
+            asset: qrnew-linux.tar.gz target/debian/*.deb
           - name: macOS
             runner: macos-latest
             asset: QRnew-macos.zip
@@ -140,7 +148,24 @@ jobs:
             libxkbcommon-dev \
             libfontconfig1-dev
 
+      # The Linux packaging is three `just` recipes rather than a second copy
+      # of them here, because the copy is what drifted last time: the workflow
+      # shipped a desktop entry named `dev.lhdjung.QrNew` while the icon went in
+      # under `dev.lhdjung.QRnew`, and nothing failed, the icon just never
+      # appeared. macOS and Windows are still inline below.
+      - name: Install packaging tools (Linux)
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-deb
+
       - run: cargo build --release --locked
+
+      - name: Validate the desktop entry and metainfo (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y desktop-file-utils appstream
+          just check-metadata
 
       - name: Install ImageMagick (macOS)
         if: runner.os == 'macOS'
@@ -188,14 +213,13 @@ jobs:
           codesign --force --deep --sign - QRnew.app
           ditto -c -k --keepParent QRnew.app QRnew-macos.zip
 
+      # `--no-build` on the deb: the release binary is already built above, and
+      # cargo-deb would otherwise build it a second time without the profile.
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
-          mkdir qrnew-linux
-          cp target/release/qrnew                                   qrnew-linux/qrnew
-          cp resources/app.desktop                                   qrnew-linux/dev.lhdjung.QRnew.desktop
-          cp resources/icons/hicolor/scalable/apps/icon.svg          qrnew-linux/dev.lhdjung.QRnew.svg
-          tar czf qrnew-linux.tar.gz qrnew-linux/
+          just tarball-linux
+          just deb
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -221,4 +245,154 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release upload "${{ needs.open.outputs.tag }}" "${{ matrix.asset }}" --clobber
+        # Unquoted on purpose: Linux's entry is two paths, one of them a glob.
+        run: gh release upload "${{ needs.open.outputs.tag }}" ${{ matrix.asset }} --clobber
+
+  # The Flatpak is not on Flathub — their generative-AI policy, see
+  # packaging/flatpak/README.md — so the repository is ours and lives on GitHub
+  # Pages. One click installs it and `flatpak update` keeps it current, which is
+  # the part a downloadable bundle cannot do.
+  flatpak:
+    name: Flatpak
+    needs: open
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --if-not-exists --user \
+            flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Install the runtime and SDK
+        run: |
+          version=$(sed -n "s/^runtime-version: '\(.*\)'/\1/p" packaging/flatpak/dev.lhdjung.QRnew.yml)
+          flatpak install -y --user --noninteractive flathub \
+            "org.freedesktop.Platform//$version" \
+            "org.freedesktop.Sdk//$version" \
+            "org.freedesktop.Sdk.Extension.rust-stable//$version"
+
+      # The manifest tracks `main`; a tagged release has to build the tag, or
+      # the numbered release would contain whatever main happened to be at.
+      - name: Build the tag rather than main
+        if: github.ref_type == 'tag'
+        run: |
+          sed -i "s|branch: main|tag: ${GITHUB_REF_NAME}|" packaging/flatpak/dev.lhdjung.QRnew.yml
+
+      - name: Import the signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "::error::FLATPAK_GPG_PRIVATE_KEY is unset. Run 'just flatpak-keygen' and add the two secrets it prints."
+            exit 1
+          fi
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+
+      # --disable-rofiles-fuse: the runners have no FUSE for it to use.
+      - name: Build and sign
+        env:
+          GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
+        run: |
+          flatpak-builder \
+            --repo=repo \
+            --default-branch=stable \
+            --force-clean \
+            --disable-rofiles-fuse \
+            --gpg-sign="$GPG_KEY_ID" \
+            builddir packaging/flatpak/dev.lhdjung.QRnew.yml
+
+      - name: Export the single-file bundle
+        env:
+          GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
+        run: |
+          flatpak build-bundle repo QRnew.flatpak dev.lhdjung.QRnew stable \
+            --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            --gpg-sign="$GPG_KEY_ID"
+
+      # `.flatpakref` is the one-click install; `.flatpakrepo` adds the remote
+      # by hand. Both carry the public key inline, so neither needs a separate
+      # download and neither install has to pass --no-gpg-verify.
+      - name: Write the repository metadata and landing page
+        env:
+          GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
+          PAGES_URL: https://lhdjung.github.io/QRnew
+        run: |
+          gpg --export "$GPG_KEY_ID" > repo/qrnew.gpg
+          key=$(base64 -w0 repo/qrnew.gpg)
+          cp resources/icons/hicolor/scalable/apps/icon.svg repo/icon.svg
+
+          cat > repo/qrnew.flatpakrepo <<EOF
+          [Flatpak Repo]
+          Title=QRnew
+          Url=${PAGES_URL}
+          Homepage=https://github.com/lhdjung/QRnew
+          Comment=Local-only QR code generator
+          Description=Self-hosted Flatpak repository for QRnew
+          Icon=${PAGES_URL}/icon.svg
+          GPGKey=${key}
+          EOF
+
+          cat > repo/qrnew.flatpakref <<EOF
+          [Flatpak Ref]
+          Title=QRnew
+          Name=dev.lhdjung.QRnew
+          Branch=stable
+          Url=${PAGES_URL}
+          Homepage=https://github.com/lhdjung/QRnew
+          Comment=Local-only QR code generator
+          Icon=${PAGES_URL}/icon.svg
+          IsRuntime=false
+          RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
+          GPGKey=${key}
+          EOF
+
+          cat > repo/index.html <<EOF
+          <!doctype html>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>QRnew</title>
+          <style>
+            :root { color-scheme: light dark; }
+            body { font: 16px/1.6 system-ui, sans-serif; max-width: 40rem;
+                   margin: 4rem auto; padding: 0 1.5rem; }
+            pre { background: rgba(128,128,128,.15); padding: 1rem;
+                  border-radius: .5rem; overflow-x: auto; }
+            a.button { display: inline-block; padding: .7rem 1.4rem; background: #2b7de9;
+                       color: #fff; border-radius: .5rem; text-decoration: none;
+                       font-weight: 600; }
+          </style>
+          <h1>QRnew</h1>
+          <p>A local-only QR code generator. This page is its Flatpak repository.</p>
+          <p><a class="button" href="qrnew.flatpakref">Install QRnew</a></p>
+          <p>If your browser saves the file instead of opening it, double-click the
+             downloaded <code>qrnew.flatpakref</code>.</p>
+          <h2>Or from a terminal</h2>
+          <pre>flatpak remote-add --if-not-exists --user qrnew ${PAGES_URL}/qrnew.flatpakrepo
+          flatpak install --user qrnew dev.lhdjung.QRnew</pre>
+          <p>Either way, <code>flatpak update</code> keeps it current.</p>
+          <p><a href="https://github.com/lhdjung/QRnew">Source code</a></p>
+          EOF
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: repo
+
+      - name: Publish the bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "${{ needs.open.outputs.tag }}" QRnew.flatpak --clobber
+
+  pages:
+    name: Publish the Flatpak repository
+    needs: flatpak
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

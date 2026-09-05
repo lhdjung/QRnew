@@ -5,14 +5,43 @@
   <project_license>MPL-2.0</project_license>
   <name>QRnew</name>
   <summary>Local-only QR code generator</summary>
+
+  <developer id="dev.lhdjung">
+    <name>Lukas Jung</name>
+  </developer>
+
+  <description>
+    <p>
+      QRnew turns text into a QR code as you type, and runs entirely offline, so
+      nothing you enter leaves your computer.
+    </p>
+    <p>Save the result as a PNG or SVG file. You can also:</p>
+    <ul>
+      <li>Customize the colors and the shape of the modules</li>
+      <li>Place an image in the center</li>
+      <li>Save a theme — colors plus image — to reuse later</li>
+      <li>Read the text back out of an existing QR code</li>
+      <li>Work in a dark editor</li>
+    </ul>
+  </description>
   <icon type="stock">dev.lhdjung.QRnew</icon>
+  <url type="homepage">https://github.com/lhdjung/QRnew</url>
+  <url type="bugtracker">https://github.com/lhdjung/QRnew/issues</url>
   <url type="vcs-browser">https://github.com/lhdjung/QRnew</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/lhdjung/QRnew/main/resources/qrnew-demo.png</image>
+      <caption>Editing a QR code's colors and center image</caption>
+    </screenshot>
+  </screenshots>
   <launchable type="desktop-id">dev.lhdjung.QRnew.desktop</launchable>
+  <!-- No <id> here: naming the component's own ID makes it provide itself,
+       which validators read as a circular relation. And <binary> sits directly
+       under <provides>; the <binaries> wrapper the template used is not a type
+       AppStream knows. -->
   <provides>
-    <id>dev.lhdjung.QRnew</id>
-    <binaries>
-      <binary>qrnew</binary>
-    </binaries>
+    <binary>qrnew</binary>
   </provides>
   <requires>
     <!-- The longest edge of the display, in logical pixels, and it is the
@@ -37,5 +66,19 @@
     <keyword>generator</keyword>
     <keyword>offline</keyword>
   </keywords>
+  <!-- Software centres show the newest entry here as the app's version, so a
+       tagged release wants a line adding. `just tag` does not write it. -->
+  <releases>
+    <release version="0.1.0" date="2026-09-06">
+      <description>
+        <p>
+          Rewritten on Dioxus and Blitz. Adds module shapes, center images,
+          saved themes, QR reading and a dark editor.
+        </p>
+      </description>
+    </release>
+    <release version="0.0.1" date="2026-05-09"/>
+  </releases>
+
   <content_rating type="oars-1.1" />
 </component>

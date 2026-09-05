@@ -18,3 +18,9 @@ debian/*
 !debian/install
 !debian/rules
 !debian/source
+QRnew-windows.zip
+QRnew.flatpak
+.flatpak-build/
+.flatpak-builder/
+.flatpak-repo/
+.flatpak-local.yml
