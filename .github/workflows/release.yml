@@ -12,8 +12,15 @@ name: Release
 #
 #   - a tag matching `v*` publishes a numbered release, which is the one the
 #     README's Installation link points at;
-#   - a push to `main` replaces a rolling `nightly` prerelease with a build of
-#     the commit that was just pushed.
+#   - a push to `main` replaces a rolling `nightly` release with a build of the
+#     commit that was just pushed.
+#
+# Both are marked `--latest`, which is the only thing the repository's front
+# page reads: it shows the newest release that is neither a draft nor a
+# prerelease, so a `nightly` marked prerelease left a four-month-old `v0.0.1`
+# as the thing every visitor was sent to. Newest wins here, tag or `main`.
+# The notes also carry the three download links, because GitHub collapses the
+# assets list and a release whose body is prose looks like it has none.
 #
 # The rolling tag is deleted and recreated rather than moved, which is why the
 # release is opened by a job of its own: three matrix jobs racing to create the
@@ -58,10 +65,17 @@ jobs:
             # Re-running a tag's workflow should top up the release that is
             # already there rather than fail on the next line.
             gh release view "$tag" >/dev/null 2>&1 ||
-              gh release create "$tag" --title "$tag" --generate-notes
+              gh release create "$tag" --title "$tag" --latest --generate-notes
           else
             tag=nightly
+            dl=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$tag
             {
+              echo "### Download"
+              echo
+              echo "- [macOS]($dl/QRnew-macos.zip) — Apple silicon"
+              echo "- [Windows]($dl/QRnew-windows.zip)"
+              echo "- [Linux]($dl/qrnew-linux.tar.gz)"
+              echo
               echo "Built from \`main\` at commit \`${GITHUB_SHA:0:7}\`, and replaced by the next push to it. A link to this page is not a link to a fixed version; the numbered releases are."
               echo
               echo "Neither the macOS app nor the Windows executable is signed by a certificate your operating system has heard of, so both are refused on first launch. The README says which gesture each one wants."
@@ -74,7 +88,7 @@ jobs:
             gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" >/dev/null 2>&1 || true
             gh release create "$tag" \
               --target "$GITHUB_SHA" \
-              --prerelease \
+              --latest \
               --title "Development build" \
               --notes-file notes.md
           fi

@@ -15,11 +15,15 @@ Also supported:
 
 ## Installation
 
-Go to [Releases][releases] and download the most recent asset for your system, then double-click to unpack.
+Go to [the latest release][releases] and download the asset for your system, then double-click to unpack.
 
-> **macOS first launch:** macOS will block the app because it is not notarized. After the warning appears, open *System Settings → Privacy & Security*, scroll down to the *Security* section, and click *Open Anyway*.
+**macOS.** Unpacking gives you `QRnew.app`. Drag it into your Applications folder — the Finder window that opens on your Downloads folder, `⌘⇧A` for Applications, drag across. It runs fine from wherever you leave it, so this is tidiness rather than a step you have to take.
 
-> **Windows first launch:** SmartScreen will block the app. Click *More info* on the warning, then *Run anyway*.
+> **First launch:** macOS blocks the app because it is not notarized. After the warning appears, open *System Settings → Privacy & Security*, scroll down to the *Security* section, and click *Open Anyway*.
+
+**Windows.** Unpacking gives you a `QRnew` folder with `QRnew.exe` in it. Windows has no Applications folder, so keep the folder where you like it and right-click the executable → *Pin to Start* if you want it in the Start menu.
+
+> **First launch:** SmartScreen blocks the app. Click *More info* on the warning, then *Run anyway*.
 
 ## Dev build
 
@@ -42,7 +46,7 @@ While the code was written by Claude Opus 5.0, most design decisions were made b
 
 QRnew is built with [Dioxus] and [Blitz], a HTML and CSS renderer in pure Rust. It is based on the [qrcode] crate and was inspired by [qrrs], a CLI frontend for qrcode.
 
-[releases]: https://github.com/lhdjung/QRnew/releases
+[releases]: https://github.com/lhdjung/QRnew/releases/latest
 [Rust]: https://rustup.rs
 [just]: https://github.com/casey/just
 [Dioxus]: https://dioxuslabs.com
