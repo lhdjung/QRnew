@@ -12,7 +12,11 @@ members = ["qrnew-core"]
 [dependencies]
 # The clipboard and the file dialogs, at the versions Blitz pins for its own
 # `clipboard` and `file-dialog` features, so the tree carries one of each.
-arboard = "3.4.1"
+# `wayland-data-control` turns on arboard's native Wayland backend (wl-clipboard-rs).
+# Without it arboard is X11-only, so on a Wayland session the clipboard has to go
+# through XWayland — which is why paste failed under cosmic-comp. Cargo unifies this
+# feature onto Blitz's own arboard, so it fixes paste in the text inputs too.
+arboard = { version = "3.4.1", features = ["wayland-data-control"] }
 rfd = "0.17.1"
 dioxus = { version = "0.7.3", default-features = false, features = [
     "macro",
