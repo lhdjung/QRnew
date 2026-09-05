@@ -2953,6 +2953,38 @@ fn a_saved_theme(dir: &std::path::Path, name: &str, image: Option<&str>) {
     );
 }
 
+/// The row is a name, a picture's file name, *Export theme* and a bin — and the
+/// name is whatever somebody typed. **What gives way is the name**, never the
+/// two buttons: a control pushed past the edge of the panel is a control that
+/// is not there. The same promise `no_control_is_below_the_fold` makes about
+/// the rails, on the one row in the window that holds text it did not choose.
+#[test]
+fn a_long_theme_name_does_not_push_the_buttons_out() {
+    let dir = a_library("row-width");
+    a_saved_theme(
+        &dir,
+        "A theme named at considerable and frankly unreasonable length",
+        Some("a-logo-file-under-a-name-of-its-own-considerable-length.png"),
+    );
+    let mut harness = app_with_library("https://example.org", None, &dir);
+    harness.click(".themes-open");
+    harness.pump();
+
+    let list = harness.layout_rect(".themes-list");
+    for control in ["[data-theme-export]", "[data-theme-remove]"] {
+        let box_ = harness.layout_rect(control);
+        assert!(box_.width > 0.0, "{control} is drawn");
+        assert!(
+            box_.x >= list.x && box_.x + box_.width <= list.x + list.width,
+            "{control} stays inside the list: {} to {} against {} to {}",
+            box_.x,
+            box_.x + box_.width,
+            list.x,
+            list.x + list.width
+        );
+    }
+}
+
 /// **The cross asks; it does not delete.**
 ///
 /// A theme is a picture somebody chose and a colour they matched by eye, and the
@@ -2967,11 +2999,24 @@ fn deleting_a_theme_is_asked_about_first() {
     harness.click(".themes-open");
     harness.pump();
 
+    // The row carries the two things that can be done to a theme without
+    // applying it: hand it over, and take it away. **The button that hands it
+    // over is on the row and not beside *Import theme…*** — there is no
+    // selected theme in this sheet, so the row is which theme.
+    assert!(
+        harness.query("[data-theme-export=\"Uni Bern\"]").is_some(),
+        "every row can be exported"
+    );
+
     harness.click("[data-theme-remove=\"Uni Bern\"]");
     harness.pump();
     assert!(
         harness.query("[data-theme=\"Uni Bern\"]").is_none(),
         "the row is the question while the question stands"
+    );
+    assert!(
+        harness.query("[data-theme-export=\"Uni Bern\"]").is_none(),
+        "and the question is the only thing on it: nothing to press by mistake"
     );
     assert!(
         harness

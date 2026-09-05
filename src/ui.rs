@@ -2078,6 +2078,27 @@ pub fn App() -> Element {
                                                 }
                                             }
                                             button {
+                                                class: "btn theme-export",
+                                                "data-theme-export": "{theme.name}",
+                                                onclick: {
+                                                    let chosen = theme.clone();
+                                                    move |_| {
+                                                        let chosen = chosen.clone();
+                                                        spawn(async move {
+                                                            let Some(handle) = rfd::AsyncFileDialog::new()
+                                                                .pick_folder()
+                                                                .await
+                                                            else {
+                                                                return;
+                                                            };
+                                                            themes::save(handle.path(), &chosen);
+                                                        });
+                                                    }
+                                                },
+                                                {glyph(Glyph::Upload, Ink::Plain, "glyph")}
+                                                span { {fl!("themes-export")} }
+                                            }
+                                            button {
                                                 class: "sheet-close theme-remove",
                                                 "data-theme-remove": "{theme.name}",
                                                 aria_label: fl!("themes-remove"),
@@ -2096,7 +2117,7 @@ pub fn App() -> Element {
                         // adds a row to the list above rather than changing
                         // anything in the window, so it belongs to the list.
                         button {
-                            class: "btn wide",
+                            class: "btn themes-import",
                             "data-theme-import": "true",
                             onclick: import_theme,
                             {glyph(Glyph::Download, Ink::Plain, "glyph")}
@@ -2647,6 +2668,11 @@ enum Glyph {
     Drop,
     Undo,
     Download,
+    /// The same arrow the other way: a theme leaving the app, beside the bin
+    /// that takes one away. Deliberately [`Download`](Glyph::Download) reversed
+    /// — the two are the two halves of the same sheet, and reading as a pair is
+    /// the point.
+    Upload,
     Copy,
     /// The copy that has already happened.
     Check,
@@ -2721,6 +2747,11 @@ impl Glyph {
             Glyph::Download => &[
                 "M12 3.6 V15.4",
                 "M7.4 10.9 L12 15.5 L16.6 10.9",
+                "M4.6 19.6 H19.4",
+            ],
+            Glyph::Upload => &[
+                "M12 16.4 V4.6",
+                "M7.4 9.2 L12 4.6 L16.6 9.2",
                 "M4.6 19.6 H19.4",
             ],
             Glyph::Copy => &["M9 8.6 H19.4 V19.4 H9 Z", "M15.4 8.6 V4.6 H4.6 V15.4 H9"],

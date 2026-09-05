@@ -964,6 +964,10 @@ black under both themes.
   reaches is the button — it opens a native folder dialog — so the module's own
   round trip is what holds it.
 
+  **Export theme.** Handing a theme over is a button on each row, and it is
+  `save` into a folder somebody picked — the exact mirror of import,
+  which is that same `save` after a `load`.
+
   **The file went on a diet and both names changed.** Three things were wrong
   with the format as first written, and they are one thing: it did not treat
   the file as something a person would read.

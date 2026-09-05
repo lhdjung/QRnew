@@ -1339,6 +1339,23 @@ body {
   border-radius: 15px;
 }
 
+/* Handing the theme over, on the row that names it. It says the word rather
+ * than trusting an arrow: the only other button on the row is a bin, and two
+ * pictures side by side is a thing to work out. Smaller than a `.btn` in a
+ * panel, because it sits beside a list row rather than under one. */
+.theme-export {
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 8px 11px;
+  font-size: 13px;
+}
+
+/* A folder picker rather than the widest control in the panel: it takes its
+ * own width, at the end of the list it adds to. */
+.themes-import {
+  align-self: flex-start;
+}
+
 /* What the row under it does, said once and in the sheet's own voice: heavier
  * than a hint and quieter than the panel's title, because it introduces one
  * control rather than the panel. */

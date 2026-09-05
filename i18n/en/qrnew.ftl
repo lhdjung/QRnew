@@ -13,6 +13,7 @@ themes-import-error-no-name = That folder has a settings.toml, but no theme in i
 themes-name = New theme's name
 themes-name-prompt = Enter new theme's name…
 themes-save = Save
+themes-export = Export theme
 themes-remove = Remove theme
 themes-remove-ask = Delete "{$name}"?
 themes-remove-yes = Delete
