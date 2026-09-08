@@ -850,9 +850,8 @@ pub fn App() -> Element {
     //
     // Written from `Picker`'s pointer handlers rather than from an effect
     // watching the colours: an effect here would run on every colour change,
-    // and `reset_puts_black_and_white_back` says why that is not free — the
-    // picker follows an outside colour through an effect of its own, and a
-    // second effect writing a signal `App` renders from starves it for a frame.
+    // and this is a signal `App` renders from, so every drag of the square
+    // would cost a second pass over the whole window.
     let mut held_caution = use_signal(|| None::<bool>);
     let take_the_caution = move |holding: bool| {
         held_caution.set(holding.then(|| contrast(dark(), light()) < SAFE_CONTRAST));
@@ -1838,18 +1837,28 @@ pub fn App() -> Element {
                                 span { {fl!("color-warning")} }
                             }
                         }
-                        // Two branches rather than one call with a signal
-                        // chosen inside it, because switching wells has to
-                        // *rebuild* the picker: its draft hex and its hue are
-                        // its own state, and a picker handed a different
-                        // colour would carry the first one's over. A `key`
-                        // does not do it — Dioxus diffs a lone child by
-                        // position — but two arms of an `if` are two different
-                        // nodes, and swapping them mounts a fresh one.
-                        if editing() == Well::Dark {
-                            Picker { color: dark, onhold: take_the_caution, onswap: swap }
-                        } else {
-                            Picker { color: light, onhold: take_the_caution, onswap: swap }
+                        // One picker, handed whichever well is being edited.
+                        //
+                        // **This used to be two arms of an `if`**, on the
+                        // argument that swapping them mounts a fresh picker
+                        // and so cannot carry the first well's hue into the
+                        // second. It does not, measured with a `use_hook` that
+                        // prints: the picker mounts once and is still the same
+                        // scope after a switch. Two arms each holding one
+                        // component node compile to templates with the same
+                        // roots and paths, and `Template`'s `PartialEq` finds
+                        // them equal — by pointer where the linker has merged
+                        // the two statics, by value where it has not — so
+                        // `diff_node` reuses the scope, every `use_signal` in
+                        // it included.
+                        //
+                        // Nothing in the picker is its own state now: the hue
+                        // and the hex field are both read off `color`, so
+                        // pointing it at the other well is all this has to do.
+                        Picker {
+                            color: if editing() == Well::Dark { dark } else { light },
+                            onhold: take_the_caution,
+                            onswap: swap,
                         }
                         button {
                             class: "btn wide",
@@ -2363,16 +2372,37 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
     // field like the other two and blinks like them; it is only in a different
     // component because the colour picker is.
     let mut caret = use_context::<Caret>();
-    // The hex field keeps its own text, because half-typed hex is not a colour
-    // and a field rewritten from `color` on every keystroke cannot be typed in.
-    let mut draft = use_signal(|| color().to_hex());
-    let mut valid = use_signal(|| true);
+    // What is in the hex field while it is being typed in, and nothing when it
+    // is not: half-typed hex is not a colour, and a field written from `color`
+    // on every keystroke cannot be typed in. `None` means "whatever the colour
+    // is", which is how an outside change reaches the field for free.
+    let mut typed = use_signal(|| None::<String>);
+    let showing = typed.read().clone().unwrap_or_else(|| color().to_hex());
+    let valid = parse_hex(&showing).is_some();
 
-    // Hue, saturation and value are held here rather than derived from the
-    // colour on every render, because the conversion back is lossy where a
-    // picker is used: black and grey have no hue, so a square dragged into its
-    // bottom edge would snap the strip to red and strand whoever was dragging.
-    let mut hsv = use_signal(|| to_hsv(color()));
+    // **Where the square and the strip point, which is not simply read off the
+    // colour.** The round trip through HSV is lossy exactly where a picker is
+    // used — a grey has no hue, black has neither hue nor saturation — so a
+    // square dragged into its own bottom edge would snap the strip to red and
+    // strand whoever was dragging it.
+    //
+    // So the picker remembers the hue it last wrote, and that stands wherever
+    // the colour cannot say. **It is a fallback, not the source**: the colour
+    // is read afresh whenever the remembered hue stops producing it, which is
+    // what tells a colour arriving from anywhere else — the other well, a
+    // reset, a theme — from one of the picker's own.
+    //
+    // Holding it in a signal and correcting it from a `use_effect` did not
+    // work, and `the_picker_does_not_carry_a_hue_between_wells` is the report:
+    // the effect subscribes to whichever `color` it read on its last run, so
+    // pointing the picker at the other well never fires it.
+    let picked = color();
+    let mut kept = use_signal(|| to_hsv(picked));
+    let hsv = if from_hsv(*kept.peek()) == picked {
+        *kept.peek()
+    } else {
+        to_hsv(picked)
+    };
     let mut dragging = use_signal(|| false);
     // Taking hold and letting go are the same two words to the square, to the
     // strip, and to the caution a rail-width above them.
@@ -2381,55 +2411,26 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
         onhold.call(holding);
     };
 
-    // The last colour this picker wrote, so a colour arriving from anywhere
-    // else can be told apart from one of its own — "Reset to black & white" is
-    // the one place another comes from.
-    //
-    // A round trip through HSV cannot stand in for this comparison: it is lossy
-    // for exactly the colours a picker is used on, so a half-typed hex would be
-    // mistaken for an outside change and overwritten mid-keystroke.
-    let mut written = use_signal(|| *color.peek());
-
     let mut apply = move |next: Hsv| {
-        hsv.set(next);
-        let rgb = from_hsv(next);
-        color.set(rgb);
-        written.set(rgb);
-        draft.set(rgb.to_hex());
-        valid.set(true);
+        kept.set(next);
+        typed.set(None);
+        color.set(from_hsv(next));
     };
-
-    use_effect(move || {
-        let outside = color();
-        // `peek` rather than a read: this effect must not subscribe to what it
-        // writes, or setting `written` below would schedule it to run again.
-        if outside != *written.peek() {
-            written.set(outside);
-            hsv.set(to_hsv(outside));
-            draft.set(outside.to_hex());
-            valid.set(true);
-        }
-    });
 
     let mut pick_in_square = move |event: Event<PointerData>| {
         let (x, y) = event.element_coordinates().to_tuple();
-        let Hsv { hue, .. } = hsv();
         apply(Hsv {
-            hue,
             saturation: (x / SQUARE_W).clamp(0.0, 1.0) as f32,
             value: 1.0 - (y / SQUARE_H).clamp(0.0, 1.0) as f32,
+            ..hsv
         });
     };
 
     let mut pick_in_strip = move |event: Event<PointerData>| {
         let (x, _) = event.element_coordinates().to_tuple();
-        let Hsv {
-            saturation, value, ..
-        } = hsv();
         apply(Hsv {
             hue: (x / SQUARE_W).clamp(0.0, 1.0) as f32 * 360.0,
-            saturation,
-            value,
+            ..hsv
         });
     };
 
@@ -2437,14 +2438,13 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
         hue,
         saturation,
         value,
-    } = hsv();
+    } = hsv;
     let pure = from_hsv(Hsv {
         hue,
         saturation: 1.0,
         value: 1.0,
     })
     .to_hex();
-    let picked = color();
     let square_mark = marker(
         f64::from(saturation) * SQUARE_W,
         f64::from(1.0 - value) * SQUARE_H,
@@ -2523,31 +2523,22 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
             }
             div { class: "hexrow",
                 input {
-                    class: if valid() { "hex" } else { "hex bad" },
+                    class: if valid { "hex" } else { "hex bad" },
                     r#type: "text",
                     "data-hex": "true",
-                    value: "{draft}",
+                    value: "{showing}",
                     oninput: move |event| {
                         let text = event.value();
-                        match parse_hex(&text) {
-                            Some(parsed) => {
-                                valid.set(true);
-                                hsv.set(to_hsv(parsed));
-                                color.set(parsed);
-                                written.set(parsed);
-                            }
-                            None => valid.set(false),
+                        if let Some(parsed) = parse_hex(&text) {
+                            color.set(parsed);
                         }
-                        draft.set(text);
+                        typed.set(Some(text));
                     },
                     // The same rule the margin field follows: half-typed text
                     // may sit in a field while it is being typed, but it cannot
                     // outlive the keyboard. The code is still drawn in the last
                     // colour that parsed.
-                    onblur: move |_| {
-                        draft.set(color().to_hex());
-                        valid.set(true);
-                    },
+                    onblur: move |_| typed.set(None),
                     onkeydown: move |event| {
                         caret.struck();
                         appkit_has_this_key(&event);

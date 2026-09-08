@@ -905,9 +905,9 @@ fn reset_puts_black_and_white_back() {
 
 /// **And it follows a reset that takes the colour caution down with it.**
 ///
-/// The one state with two things to redraw at once, which is where a caution
-/// written as a second effect starves the first. It is why the held caution is
-/// written from the picker's pointer handlers instead.
+/// The one state with two things to redraw at once: the colours and the banner
+/// above them. It is why the held caution is written from the picker's pointer
+/// handlers rather than from an effect watching the colours.
 #[test]
 fn the_picker_follows_a_reset_that_takes_the_caution_down() {
     let mut harness = app();
@@ -1913,6 +1913,67 @@ fn the_wells_choose_what_the_picker_edits() {
     harness.pump();
     assert!(harness.query("[data-square]").is_some());
     assert_eq!(harness.attr("[data-hex]", "value").as_deref(), Some("#ffffff"));
+}
+
+/// **And it does not carry the last well's hue into the next one.**
+///
+/// The square and the strip need a hue the colour cannot always give — a grey
+/// has none to read back — so the picker remembers one. Remembering it in a
+/// signal, and correcting it from an effect, left it wherever the *other* well
+/// put it: the two wells share one `Picker`, and the effect subscribed to
+/// whichever colour it read on its first run, so switching wells never fired
+/// it. The marker stayed put and the next touch of the square jumped the
+/// colour to a hue nobody had chosen.
+///
+/// It is a fallback now: read off the colour on every render, and the
+/// remembered hue stands only while it still produces that colour.
+///
+/// **This test only bit in a release build**, which is how the bug reached use
+/// past a green suite. The picker's scope is reused after a switch in either
+/// build — the two arms of the `if` this used to be never remounted anything —
+/// but the `use_effect` that corrected the hue ran on every switch when
+/// unoptimised and never when optimised. Why debug re-runs it is not chased
+/// here; that it does is why `build.yml` now runs the tests twice.
+///
+/// The top-right corner of the square is the hue at full strength, so it is the
+/// one press that says which hue the picker is on.
+#[test]
+fn the_picker_does_not_carry_a_hue_between_wells() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("hello");
+    harness.pump();
+
+    // The foreground is taken to cyan: the pure hue out of the square, then
+    // halfway along the strip.
+    let square = harness.layout_rect("[data-square]");
+    harness.click_at(square.x + square.width - 2.0, square.y + 2.0);
+    harness.pump();
+    let strip = harness.layout_rect("[data-strip]");
+    harness.click_at(strip.x + strip.width / 2.0, strip.y + strip.height / 2.0);
+    harness.pump();
+    let shown = harness.attr("[data-hex]", "value").expect("the picker says so");
+    let (r, g, b) = hex(&shown);
+    assert!(
+        g > 200 && b > 200 && r < 60,
+        "halfway along the strip is cyan, not ({r}, {g}, {b})"
+    );
+
+    // The background is white, whose hue is red's. The same press has to give
+    // red, not the cyan the foreground was left on.
+    harness.click("[data-well=\"light\"]");
+    harness.pump();
+    // Measured again: cyan on white earned the colour caution, and that banner
+    // sits above the square.
+    let square = harness.layout_rect("[data-square]");
+    harness.click_at(square.x + square.width - 2.0, square.y + 2.0);
+    harness.pump();
+    let shown = harness.attr("[data-hex]", "value").expect("the picker says so");
+    let (r, g, b) = hex(&shown);
+    assert!(
+        r > 200 && g < 60 && b < 60,
+        "this well's own hue, not the one the other well was left on: ({r}, {g}, {b})"
+    );
 }
 
 /// **A stepper button says when it has nowhere to go.**

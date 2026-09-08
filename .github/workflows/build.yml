@@ -60,6 +60,15 @@ jobs:
 
       - run: cargo test --workspace --locked
 
+      # **And again optimised, because the two builds do not agree.** Dioxus
+      # compares templates by pointer when the linker has merged identical
+      # statics and by value when it has not, so two `rsx!` arms that are the
+      # same shape are one node in a release build and two in a debug one.
+      # `the_picker_does_not_carry_a_hue_between_wells` is the bug that reached
+      # somebody through that gap with a green suite behind it; it passes in
+      # debug whether the app is right or not, and only bites here.
+      - run: cargo test --workspace --locked --release
+
       # Only on pull requests. A push to `main` builds release binaries in
       # `release.yml`, packages them and publishes them where somebody can
       # actually click on them, and doing it twice on the same commit is ten

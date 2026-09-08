@@ -1055,6 +1055,39 @@ black under both themes.
   the person, twice over. Pixels per module is what a rasterizer needs to be
   told. Then pixels across the code was still wrong, because the thing being
   judged was never the code.
+- **The picker pointed at the wrong colour, and the test suite could not see
+  it.** Reported from use: switch the well between foreground and background
+  and the square's marker stays where the other well left it, so the next touch
+  of the square jumps the colour to a hue nobody chose.
+
+  The picker has to remember a hue, because the round trip through HSV cannot —
+  a grey has none to read back. It held that in a signal and corrected it from
+  a `use_effect`, and an effect subscribes to whichever `color` signal it read
+  on its last run: pointing the picker at the other well never fired it. The
+  answer, ported from HyloPDF's `ColorField`, is to make the memory a
+  *fallback* — read the colour on every render and keep the remembered hue only
+  while it still produces that colour. The hex field went the same way, `None`
+  meaning "whatever the colour is". `written`, the effect and the two-arm `if`
+  at the call site are all gone; it is a net deletion.
+
+  **The part worth keeping is why it passed.** The call site was two arms of an
+  `if`, on the argument that swapping them mounts a fresh picker. It does not:
+  a `use_hook` that prints says the picker mounts once and is the same scope
+  after a switch, in both builds — two arms each holding one component node
+  compile to templates with the same roots and paths, and `Template`'s
+  `PartialEq` finds them equal either way, by pointer where the linker has
+  merged the statics and by value where it has not.
+
+  So the two builds agreed about the tree and disagreed about the *effect*:
+  printing from inside it, it ran on every well switch unoptimised and never
+  optimised. Debug's extra run was the whole of what made the suite green, and
+  I did not chase where it comes from. **The bug was in every release binary
+  and in none of the tests.**
+
+  `build.yml` runs `cargo test` twice now, once optimised. It is the only guard
+  that would have caught this: a debug suite cannot be trusted to schedule
+  effects the way the shipped binary does.
+
 - **Packaging itself.** Unchanged and unhelped: `codesign --sign -` is still an
   ad-hoc signature, there is still no notarization, and the README still warns
   about the first launch.
