@@ -223,7 +223,7 @@ fn dot_modules(path: &mut String, grid: &Grid<'_>, quiet: f32) {
         for x in 0..grid.modules {
             if grid.drawn(x as i64, y as i64) {
                 let center = 0.5 + quiet;
-                circle(path, x as f32 + center, y as f32 + center, 0.5, true);
+                circle(path, x as f32 + center, y as f32 + center, 0.5);
             }
         }
     }
@@ -246,7 +246,7 @@ fn finder_paths(svg: &mut String, modules: u32, quiet: f32, style: &QrStyle) {
             FinderShape::Rounded => {
                 rounded_rect(&mut rings, x, y, 7.0, [FINDER_RADIUS; 4]);
                 rounded_rect_reversed(&mut rings, x + 1.0, y + 1.0, 5.0, FINDER_RADIUS);
-                circle(&mut centers, x + 3.5, y + 3.5, 1.5, true);
+                circle(&mut centers, x + 3.5, y + 3.5, 1.5);
             }
         }
     }
@@ -302,29 +302,18 @@ fn rounded_rect(path: &mut String, x: f32, y: f32, side: f32, corners: [f32; 4])
     let (right, bottom) = (x + side, y + side);
 
     write!(path, "M{} {y}", x + top_left).expect("writing to a String cannot fail");
-    edge(path, 'H', right - top_right, top_right, top_right);
+    edge(path, 'H', right - top_right, top_right, top_right, 1);
     edge(
         path,
         'V',
         bottom - bottom_right,
         -bottom_right,
         bottom_right,
+        1,
     );
-    edge(path, 'H', x + bottom_left, -bottom_left, -bottom_left);
-    edge(path, 'V', y + top_left, top_left, -top_left);
+    edge(path, 'H', x + bottom_left, -bottom_left, -bottom_left, 1);
+    edge(path, 'V', y + top_left, top_left, -top_left, 1);
     path.push('z');
-
-    /// One straight edge and the arc turning off it, given as the offset from
-    /// the end of the edge to the end of the arc.
-    fn edge(path: &mut String, axis: char, to: f32, dx: f32, dy: f32) {
-        write!(path, "{axis}{to}").expect("writing to a String cannot fail");
-
-        let radius = dx.abs().max(dy.abs());
-        if radius > 0.0 {
-            write!(path, "a{radius} {radius} 0 0 1 {dx} {dy}")
-                .expect("writing to a String cannot fail");
-        }
-    }
 }
 
 /// Appends a square with uniformly rounded corners, wound counter-clockwise so
@@ -333,31 +322,36 @@ fn rounded_rect_reversed(path: &mut String, x: f32, y: f32, side: f32, radius: f
     let (right, bottom) = (x + side, y + side);
 
     write!(path, "M{x} {}", y + radius).expect("writing to a String cannot fail");
-    edge(path, 'V', bottom - radius, radius, radius);
-    edge(path, 'H', right - radius, radius, -radius);
-    edge(path, 'V', y + radius, -radius, -radius);
-    edge(path, 'H', x + radius, -radius, radius);
+    edge(path, 'V', bottom - radius, radius, radius, 0);
+    edge(path, 'H', right - radius, radius, -radius, 0);
+    edge(path, 'V', y + radius, -radius, -radius, 0);
+    edge(path, 'H', x + radius, -radius, radius, 0);
     path.push('z');
+}
 
-    fn edge(path: &mut String, axis: char, to: f32, dx: f32, dy: f32) {
-        write!(path, "{axis}{to}").expect("writing to a String cannot fail");
+/// One straight edge and the arc turning off it, given as the offset from the
+/// end of the edge to the end of the arc.
+///
+/// `sweep` is the arc's own flag, and so the winding: 1 turns clockwise, 0 the
+/// other way.
+fn edge(path: &mut String, axis: char, to: f32, dx: f32, dy: f32, sweep: u8) {
+    write!(path, "{axis}{to}").expect("writing to a String cannot fail");
 
-        let radius = dx.abs().max(dy.abs());
-        if radius > 0.0 {
-            write!(path, "a{radius} {radius} 0 0 0 {dx} {dy}")
-                .expect("writing to a String cannot fail");
-        }
+    let radius = dx.abs().max(dy.abs());
+    if radius > 0.0 {
+        write!(path, "a{radius} {radius} 0 0 {sweep} {dx} {dy}")
+            .expect("writing to a String cannot fail");
     }
 }
 
-/// Appends a circle, as two half-circle arcs.
-fn circle(path: &mut String, cx: f32, cy: f32, radius: f32, clockwise: bool) {
-    let sweep = u8::from(clockwise);
+/// Appends a circle, as two half-circle arcs, wound clockwise like
+/// [`rounded_rect`].
+fn circle(path: &mut String, cx: f32, cy: f32, radius: f32) {
     let diameter = radius * 2.0;
 
     write!(
         path,
-        "M{} {cy}a{radius} {radius} 0 1 {sweep} {diameter} 0a{radius} {radius} 0 1 {sweep} -{diameter} 0z",
+        "M{} {cy}a{radius} {radius} 0 1 1 {diameter} 0a{radius} {radius} 0 1 1 -{diameter} 0z",
         cx - radius,
     )
     .expect("writing to a String cannot fail");
