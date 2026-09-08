@@ -3580,6 +3580,7 @@ name = "qrnew"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "base64",
  "blitz-test-harness",
  "blitz-traits",
  "dioxus",
@@ -3598,6 +3599,7 @@ dependencies = [
 name = "qrnew-core"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "qrcode",
  "resvg",
  "rqrr",

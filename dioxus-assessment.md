@@ -5,6 +5,10 @@ This one answers `tauri-assessment.md`, which asked a different question and
 got the answer "no, and here is why the memory instinct was aimed at the wrong
 layer." The instinct was right. **Dioxus Native is the layer it was aimed at.**
 
+> `tauri-assessment.md` and `macOS-compat.md` are cited throughout and are no
+> longer in the tree: the first argued against a road not taken, the second
+> described the libcosmic build this one replaced. Both are in git history.
+
 The proposal is Dioxus rendered by **Blitz**: HTML and CSS parsed by Stylo,
 laid out by Taffy, text shaped by Parley, painted by Vello onto the GPU. No
 webview, no JavaScript, no second toolchain. Not Dioxus Desktop, which is a
@@ -402,7 +406,6 @@ wrong; see the note on RSS in `tauri-assessment.md`.
 
 ## Sources
 
-- `tauri-assessment.md` and `macOS-compat.md` in this repository
 - `~/rust_projects/HyloPDF/experiments/dioxus-assessment.md` — the plan
 - `~/rust_projects/HyloPDF/experiments/PROGRESS.md` — the measurements, and the
   source of the ablation table and every upstream fault named above

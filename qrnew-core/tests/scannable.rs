@@ -9,7 +9,7 @@
 //! implementation that knows nothing about how the code was drawn.
 
 use qrnew_core::{
-    Clearing, ErrorCorrection, Finder, FinderShape, Logo, MAX_LOGO_AREA, ModuleShape, Qr, QrStyle,
+    ErrorCorrection, Finder, FinderShape, Logo, MAX_LOGO_AREA, ModuleShape, Qr, QrStyle,
     ReadError, Rgb, read,
 };
 
@@ -104,31 +104,31 @@ fn a_narrow_margin_still_scans() {
 #[test]
 fn every_combination_of_shapes_scans_with_a_logo_in_the_way() {
     for (module, finder) in shapes() {
-        for clearing in [Clearing::Square, Clearing::Rounded, Clearing::Circle] {
-            let style = QrStyle {
-                module,
-                finder: Finder {
-                    shape: finder,
-                    ring: Some(Rgb::new(27, 110, 243)),
-                    ..Finder::default()
-                },
-                logo: Some(Logo {
-                    size: 0.26,
-                    padding: 0.75,
-                    clearing,
-                    ..Logo::new(logo())
-                }),
-                ..QrStyle::default()
-            };
-            let qr = Qr::new(DATA, ErrorCorrection::Low, &style).unwrap();
+        let style = QrStyle {
+            module,
+            // The ring in its own color: a rounded finder drawn in the same
+            // color as the square modules beside it is one a decoder cannot
+            // separate from them, and this test is what says so.
+            finder: Finder {
+                shape: finder,
+                ring: Some(Rgb::new(27, 110, 243)),
+                ..Finder::default()
+            },
+            logo: Some(Logo {
+                size: 0.26,
+                padding: 0.75,
+                ..Logo::new(logo())
+            }),
+            ..QrStyle::default()
+        };
+        let qr = Qr::new(DATA, ErrorCorrection::Low, &style).unwrap();
 
-            for scale in SCALES {
-                assert_eq!(
-                    scan(&qr, scale).as_deref(),
-                    Ok(DATA),
-                    "{module:?} + {finder:?} + {clearing:?} at {scale} px per module",
-                );
-            }
+        for scale in SCALES {
+            assert_eq!(
+                scan(&qr, scale).as_deref(),
+                Ok(DATA),
+                "{module:?} + {finder:?} at {scale} px per module",
+            );
         }
     }
 }

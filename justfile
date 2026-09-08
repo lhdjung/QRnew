@@ -57,13 +57,6 @@ default: build-release
 clean:
     cargo clean
 
-# Removes vendored dependencies
-clean-vendor:
-    rm -rf .cargo vendor vendor.tar
-
-# `cargo clean` and removes vendored dependencies
-clean-dist: clean clean-vendor
-
 # Compiles with debug profile
 build-debug *args:
     cargo build --locked {{args}}
@@ -71,15 +64,9 @@ build-debug *args:
 # Compiles with release profile
 build-release *args: (build-debug '--release' args)
 
-# Compiles release profile with vendored dependencies
-build-vendored *args: vendor-extract (build-release '--frozen --offline' args)
-
 # Runs a clippy check
 check *args:
     cargo clippy --all-features --locked {{args}} -- -W clippy::pedantic
-
-# Runs a clippy check with JSON message format
-check-json: (check '--message-format=json')
 
 # Run the application for testing purposes
 run *args:
@@ -162,19 +149,6 @@ bundle-windows: build-release
         "$tmpdir/icon_64.png" "$tmpdir/icon_128.png" "$tmpdir/icon_256.png" \
         QRnew-windows/QRnew.ico
     rm -rf "$tmpdir"
-
-# Vendor dependencies locally
-vendor:
-    mkdir -p .cargo
-    cargo vendor | head -n -1 > .cargo/config.toml
-    echo 'directory = "vendor"' >> .cargo/config.toml
-    tar pcf vendor.tar vendor
-    rm -rf vendor
-
-# Extracts vendored dependencies
-vendor-extract:
-    rm -rf vendor
-    tar pxf vendor.tar
 
 # The `v` is the tag's and nothing else's: `release.yml` publishes a numbered
 # release for `tags: ['v*']`, and the one tag in the repository is `v0.0.1`, so

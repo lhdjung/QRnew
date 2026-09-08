@@ -6,10 +6,7 @@ name: Build
 
 on:
   push:
-    # `dioxus-native` is here while the rewrite lives on it: Linux and Windows
-    # are the two platforms the migration has never been run on, and a branch
-    # that only builds after it merges answers the question too late.
-    branches: [main, dioxus-native]
+    branches: [main]
   pull_request:
 
 jobs:

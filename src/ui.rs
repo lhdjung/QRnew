@@ -47,6 +47,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use dioxus::prelude::*;
 use dioxus_native::winit::event::{ElementState, WindowEvent};
 use dioxus_native::winit::keyboard::{Key as WinitKey, NamedKey};
@@ -1094,9 +1095,8 @@ pub fn App() -> Element {
             quiet_zone: margin(),
             module: look().module(),
             finder: look().finder(),
-            // Padding and clearing stay at the core's defaults — half a module
-            // of air and a square cut-out. The size is the one of the three
-            // worth a control.
+            // Padding stays at the core's default, half a module of air. The
+            // size is the one of the two worth a control.
             logo: picture.clone().map(|bytes| Logo {
                 size: asked,
                 ..Logo::new(bytes)
@@ -3070,29 +3070,7 @@ pub(crate) fn parse_hex(text: &str) -> Option<Rgb> {
 /// third more, escaping everything costs three times more, and this is rebuilt
 /// on every keystroke.
 fn data_url(mime: &str, bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    let mut out = String::with_capacity(mime.len() + 13 + bytes.len().div_ceil(3) * 4);
-    out.push_str("data:");
-    out.push_str(mime);
-    out.push_str(";base64,");
-
-    for chunk in bytes.chunks(3) {
-        let block = (u32::from(chunk[0]) << 16)
-            | (chunk.get(1).map_or(0, |&byte| u32::from(byte)) << 8)
-            | chunk.get(2).map_or(0, |&byte| u32::from(byte));
-
-        for slot in 0..4 {
-            if slot <= chunk.len() {
-                let index = (block >> (18 - 6 * slot)) & 0x3f;
-                out.push(ALPHABET[index as usize] as char);
-            } else {
-                out.push('=');
-            }
-        }
-    }
-
-    out
+    format!("data:{mime};base64,{}", BASE64_STANDARD.encode(bytes))
 }
 
 /// A beat every `period`, for as long as the window is open.

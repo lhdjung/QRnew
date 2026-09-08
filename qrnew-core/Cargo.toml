@@ -7,6 +7,9 @@ description = "QR codes for QRnew: one styled SVG, rendered everywhere, and read
 repository = "https://github.com/lhdjung/QRnew"
 
 [dependencies]
+# Already in the tree behind `resvg`, so a direct line here adds no crate: it
+# replaces the alphabet and the bit-shifting that used to live in `logo.rs`.
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 qrcode = { version = "0.13", default-features = false }
 resvg = { version = "0.48", default-features = false, features = ["raster-images"] }
 rqrr = { version = "0.10.1", default-features = false }

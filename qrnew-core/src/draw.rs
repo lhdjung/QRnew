@@ -9,9 +9,10 @@
 
 use std::fmt::Write as _;
 
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use qrcode::Color;
 
-use crate::logo::{self, ImageFormat, Placement};
+use crate::logo::{ImageFormat, Placement};
 use crate::style::{FinderShape, Logo, ModuleShape, QrStyle, Rgb};
 
 /// Nominal size of one module in the `width`/`height` attributes of a
@@ -275,7 +276,7 @@ fn logo_image(svg: &mut String, logo: &Logo, grid: &Grid<'_>, quiet: f32) {
         y = y + quiet,
         side = side,
         mime = format.mime(),
-        data = logo::base64(&logo.image),
+        data = BASE64_STANDARD.encode(&logo.image),
     )
     .expect("writing to a String cannot fail");
 }

@@ -25,8 +25,7 @@ use resvg::usvg;
 pub use crate::logo::ImageFormat;
 pub use crate::read::{ReadError, read};
 pub use crate::style::{
-    Clearing, DEFAULT_QUIET_ZONE, ErrorCorrection, Finder, FinderShape, Logo, ModuleShape, QrStyle,
-    Rgb,
+    DEFAULT_QUIET_ZONE, ErrorCorrection, Finder, FinderShape, Logo, ModuleShape, QrStyle, Rgb,
 };
 
 use crate::logo::Placement;
@@ -325,29 +324,6 @@ impl Qr {
 
         Ok(pixmap)
     }
-}
-
-/// The largest [`Logo::size`] a code `modules` across can carry, at `padding`
-/// modules of air around the picture.
-///
-/// The two rules [`Qr::new`] enforces each turn into a ceiling:
-///
-/// - the cleared box covers at most [`MAX_LOGO_AREA`] of the code, a fixed share
-///   and so a fixed side;
-/// - the cleared box stops [`FINDER_CLEARANCE`] modules short of every edge, a
-///   fixed *number of modules* and so a share that grows with the code.
-///
-/// The second is why this is worth exposing rather than assuming: a
-/// twenty-one-module code allows a shade over a fifth of the width, and a few
-/// characters further on it allows a third. An interface offering a choice of
-/// sizes cannot work that out from [`Logo`] alone.
-///
-/// Zero when nothing fits, which no code is small enough to reach.
-pub fn largest_logo_size(padding: f32, modules: u32) -> f32 {
-    let modules = modules as f32;
-    let by_area = MAX_LOGO_AREA.sqrt() - 2.0 * padding / modules;
-    let by_finder = 1.0 - 2.0 * (FINDER_CLEARANCE + padding) / modules;
-    by_area.min(by_finder).max(0.0)
 }
 
 /// Checks a logo against the rules documented on [`Qr::new`].
@@ -994,58 +970,6 @@ mod tests {
         let qr = Qr::new(SHORT, ErrorCorrection::High, &style).unwrap();
 
         assert_eq!(qr.size_in_modules(), 21 + 2 * DEFAULT_QUIET_ZONE);
-    }
-
-    /// The ceiling `largest_logo_size` reports is the one `check_logo` keeps.
-    ///
-    /// Walked over every code version rather than asserted at one size, because
-    /// the point is that the answer *moves*: the area rule is a fixed share and
-    /// the finder rule a fixed number of modules, so which one binds changes as
-    /// the code grows.
-    #[test]
-    fn the_largest_size_that_fits_is_the_largest_size_that_is_accepted() {
-        for version in 1..=40u32 {
-            let modules = 17 + 4 * version;
-            let padding = Logo::DEFAULT_PADDING;
-            let largest = largest_logo_size(padding, modules);
-            let at = |size| {
-                check_logo(
-                    &Logo {
-                        size,
-                        padding,
-                        ..Logo::new(logo_image(GREEN))
-                    },
-                    modules,
-                )
-            };
-
-            assert!(largest > 0.0, "{modules} modules leave room for a logo");
-            assert!(
-                at(largest - 0.001).is_ok(),
-                "{modules} modules take a logo of {largest}",
-            );
-            assert!(
-                at(largest + 0.001).is_err(),
-                "{modules} modules refuse a logo past {largest}",
-            );
-        }
-    }
-
-    /// The smallest code takes the default size and not much more.
-    ///
-    /// The number is the interesting part: it says a size control cannot simply
-    /// offer a bigger logo, because a twenty-one-module code has barely a fifth
-    /// of the width to give.
-    #[test]
-    fn the_smallest_code_has_almost_no_room_above_the_default_logo() {
-        let largest = largest_logo_size(Logo::DEFAULT_PADDING, 21);
-
-        assert!(largest > Logo::DEFAULT_SIZE, "{largest}");
-        assert!(largest < 0.2, "{largest}");
-        assert!(
-            largest_logo_size(Logo::DEFAULT_PADDING, 25) > 0.25,
-            "one version further on there is room for a quarter",
-        );
     }
 
     #[test]

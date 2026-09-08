@@ -27,6 +27,11 @@ name: Release
 # same release is a coin flip, and one job creating it and three uploading into
 # it is not. `nightly` does not match `v*`, and a tag pushed with `GITHUB_TOKEN`
 # does not start a workflow anyway, so there is no loop here.
+#
+# The macOS and Windows packages are built by `just bundle-macos` and
+# `just bundle-windows`, which is where those steps used to be written out a
+# second time. One copy: what a release ships is what `just` builds on a
+# laptop.
 
 on:
   push:
@@ -117,6 +122,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: extractions/setup-just@v3
+
       - uses: actions/cache@v4
         with:
           path: |
@@ -146,47 +153,12 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install imagemagick
 
+      # The bundle recipes are the justfile's, so a release ships what `just`
+      # builds on a laptop. They take the version from `Cargo.toml`, which is
+      # the one copy `cargo` builds against.
       - name: Package (macOS)
         if: runner.os == 'macOS'
-        run: |
-          # The bundle's version comes from `Cargo.toml`, which is the one copy
-          # of it `cargo` actually builds against. It used to be typed into the
-          # plist below and into the `justfile`, so a tag that bumped the crate
-          # shipped an app still calling itself whatever was written here last.
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          rm -rf QRnew.app
-          mkdir -p QRnew.app/Contents/MacOS QRnew.app/Contents/Resources
-          cp target/release/qrnew QRnew.app/Contents/MacOS/qrnew
-          icon=resources/icons/hicolor/scalable/apps/icon.svg
-          iconset=/tmp/QRnew_$$.iconset
-          mkdir "$iconset"
-          for size in 16 32 128 256 512; do
-            magick "$icon" -background none -resize "${size}x${size}"     "$iconset/icon_${size}x${size}.png"
-            double=$((size * 2))
-            magick "$icon" -background none -resize "${double}x${double}" "$iconset/icon_${size}x${size}@2x.png"
-          done
-          iconutil -c icns -o QRnew.app/Contents/Resources/AppIcon.icns "$iconset"
-          rm -rf "$iconset"
-          cat > QRnew.app/Contents/Info.plist << PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-          <key>CFBundleName</key><string>QRnew</string>
-          <key>CFBundleDisplayName</key><string>QRnew</string>
-          <key>CFBundleIdentifier</key><string>dev.lhdjung.QRnew</string>
-          <key>CFBundleVersion</key><string>${version}</string>
-          <key>CFBundleShortVersionString</key><string>${version}</string>
-          <key>CFBundleExecutable</key><string>qrnew</string>
-          <key>CFBundleIconFile</key><string>AppIcon</string>
-          <key>CFBundlePackageType</key><string>APPL</string>
-          <key>LSMinimumSystemVersion</key><string>11.0</string>
-          <key>NSHighResolutionCapable</key><true/>
-          </dict>
-          </plist>
-          PLIST
-          codesign --force --deep --sign - QRnew.app
-          ditto -c -k --keepParent QRnew.app QRnew-macos.zip
+        run: just bundle-macos
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
@@ -201,17 +173,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          mkdir -p QRnew-windows
-          cp target/release/qrnew.exe QRnew-windows/QRnew.exe
-          icon=resources/icons/hicolor/scalable/apps/icon.svg
-          tmpdir=$(mktemp -d)
-          for size in 16 32 48 64 128 256; do
-            magick "$icon" -background none -resize "${size}x${size}" "$tmpdir/icon_${size}.png"
-          done
-          magick "$tmpdir/icon_16.png" "$tmpdir/icon_32.png" "$tmpdir/icon_48.png" \
-            "$tmpdir/icon_64.png" "$tmpdir/icon_128.png" "$tmpdir/icon_256.png" \
-            QRnew-windows/QRnew.ico
-          rm -rf "$tmpdir"
+          just bundle-windows
           7z a QRnew-windows.zip QRnew-windows/
 
       # `--clobber` rather than a plain upload, because a re-run of a tag's

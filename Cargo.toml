@@ -13,6 +13,9 @@ members = ["qrnew-core"]
 # The clipboard and the file dialogs, at the versions Blitz pins for its own
 # `clipboard` and `file-dialog` features, so the tree carries one of each.
 arboard = "3.4.1"
+# Already in the tree behind `resvg`, so this adds no crate: it replaces the
+# alphabet and the bit-shifting `data_url` used to carry.
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 rfd = "0.17.1"
 dioxus = { version = "0.7.3", default-features = false, features = [
     "macro",
@@ -59,6 +62,7 @@ features = [
 ]
 
 [dev-dependencies]
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 # Upstream's headless harness: a document, laid out and hit-tested, with no
 # window, no GPU and no compositor. It is what makes `tests/interface.rs`
 # possible.

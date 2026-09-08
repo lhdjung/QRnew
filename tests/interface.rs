@@ -113,33 +113,8 @@ fn curved(path: &str) -> bool {
 }
 
 fn decode_base64(text: &str) -> Vec<u8> {
-    let value = |byte: u8| -> u32 {
-        match byte {
-            b'A'..=b'Z' => u32::from(byte - b'A'),
-            b'a'..=b'z' => u32::from(byte - b'a') + 26,
-            b'0'..=b'9' => u32::from(byte - b'0') + 52,
-            b'+' => 62,
-            b'/' => 63,
-            other => panic!("{} is not base64", other as char),
-        }
-    };
-
-    let mut out = Vec::with_capacity(text.len() / 4 * 3);
-    for chunk in text.as_bytes().chunks(4) {
-        let kept = chunk.iter().filter(|&&byte| byte != b'=').count();
-        let mut block = 0u32;
-        for slot in 0..4 {
-            let digit = chunk
-                .get(slot)
-                .filter(|&&byte| byte != b'=')
-                .map_or(0, |&byte| value(byte));
-            block |= digit << (18 - 6 * slot);
-        }
-        for byte in 0..kept - 1 {
-            out.push(((block >> (16 - 8 * byte)) & 0xff) as u8);
-        }
-    }
-    out
+    use base64::prelude::{BASE64_STANDARD, Engine as _};
+    BASE64_STANDARD.decode(text).expect("the app writes base64")
 }
 
 /// A harness with the app in it, ready for the first event.
