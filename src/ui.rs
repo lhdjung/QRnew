@@ -724,7 +724,9 @@ impl Appearance {
     ///
     /// The same three words the sheet's buttons carry as `data-appearance`.
     pub fn named(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|appearance| appearance.slug() == name)
+        Self::ALL
+            .into_iter()
+            .find(|appearance| appearance.slug() == name)
     }
 
     /// What winit is asked to make the title bar.
@@ -926,10 +928,14 @@ pub fn App() -> Element {
         // to overrule: a picture in the middle needs 30%, so the row shows High
         // and says why. The preference is kept rather than rewritten, so taking
         // the picture away gives it back.
-        ec.set(level_named(theme.error_correction.as_deref().unwrap_or_default()));
+        ec.set(level_named(
+            theme.error_correction.as_deref().unwrap_or_default(),
+        ));
         // A *preferred* size: the largest does not fit a short code, and the
         // memo below draws the largest that does — see `Drawn::capped`.
-        inset_size.set(InsetSize::named(theme.image_size.as_deref().unwrap_or_default()));
+        inset_size.set(InsetSize::named(
+            theme.image_size.as_deref().unwrap_or_default(),
+        ));
         inset.set(
             theme
                 .image_file
@@ -968,17 +974,11 @@ pub fn App() -> Element {
                         .read()
                         .as_ref()
                         .map(|chosen| (chosen.name.clone(), chosen.bytes.clone())),
-                    image_size: changed(
-                        inset_size() != InsetSize::default(),
-                        inset_size().slug(),
-                    ),
+                    image_size: changed(inset_size() != InsetSize::default(), inset_size().slug()),
                     // The preference, not what the code was drawn at: a theme
                     // saved while an inset held the row at 30% would otherwise
                     // come back as a theme that asks for 30% forever.
-                    error_correction: changed(
-                        ec() != ErrorCorrection::Medium,
-                        level_slug(ec()),
-                    ),
+                    error_correction: changed(ec() != ErrorCorrection::Medium, level_slug(ec())),
                     shape: changed(look() != Look::default(), look().slug()),
                     margin: (margin() != DEFAULT_MARGIN).then_some(margin()),
                 },
@@ -1003,7 +1003,9 @@ pub fn App() -> Element {
                 };
                 // Before anything on screen changes: see `SETTLE`.
                 after(SETTLE).await;
-                let Some(dir) = library.as_deref() else { return };
+                let Some(dir) = library.as_deref() else {
+                    return;
+                };
                 match themes::import(dir, handle.path()) {
                     Ok(()) => {
                         import_error.set(None);
@@ -1202,7 +1204,9 @@ pub fn App() -> Element {
     };
 
     let save_png = move |_| {
-        let Some(Drawn { qr, .. }) = code() else { return };
+        let Some(Drawn { qr, .. }) = code() else {
+            return;
+        };
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
                 .add_filter("PNG Image", &["png"])
@@ -1219,7 +1223,9 @@ pub fn App() -> Element {
     };
 
     let save_svg = move |_| {
-        let Some(Drawn { qr, .. }) = code() else { return };
+        let Some(Drawn { qr, .. }) = code() else {
+            return;
+        };
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
                 .add_filter("SVG Image", &["svg"])
@@ -1234,7 +1240,9 @@ pub fn App() -> Element {
     };
 
     let copy = move |_| {
-        let Some(Drawn { qr, .. }) = code() else { return };
+        let Some(Drawn { qr, .. }) = code() else {
+            return;
+        };
         let Ok(raster) = qr.to_rgba(export_scale(&qr)) else {
             return;
         };
@@ -1275,7 +1283,11 @@ pub fn App() -> Element {
 
     // Whether an inset is in place — asked three times below, so read once here.
     let has_inset = inset.read().is_some();
-    let shown_ec = if has_inset { ErrorCorrection::High } else { ec() };
+    let shown_ec = if has_inset {
+        ErrorCorrection::High
+    } else {
+        ec()
+    };
     // Whether the level the code is drawn at is not the level that was asked
     // for. Only ever one way round: an inset raises the row to 30% and nothing
     // lowers it, so this is true exactly when a picture is in the way of a
@@ -2457,7 +2469,11 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
         STRIP_H / 2.0,
         SQUARE_W,
         STRIP_H,
-        from_hsv(Hsv { hue, saturation: 1.0, value: 1.0 }),
+        from_hsv(Hsv {
+            hue,
+            saturation: 1.0,
+            value: 1.0,
+        }),
     );
 
     rsx! {
@@ -2734,7 +2750,10 @@ impl Glyph {
                 "M12 3.4 C12 3.4 5.6 9.9 5.6 14.1 A6.4 6.4 0 0 0 18.4 14.1 C18.4 9.9 12 3.4 12 3.4 Z",
                 "M9.3 14.7 A2.7 2.7 0 0 0 12 17.4",
             ],
-            Glyph::Undo => &["M3.5 12 A8.5 8.5 0 1 0 6.4 5.7 L3.5 8.7", "M3.5 3.7 V8.7 H8.5"],
+            Glyph::Undo => &[
+                "M3.5 12 A8.5 8.5 0 1 0 6.4 5.7 L3.5 8.7",
+                "M3.5 3.7 V8.7 H8.5",
+            ],
             Glyph::Download => &[
                 "M12 3.6 V15.4",
                 "M7.4 10.9 L12 15.5 L16.6 10.9",
@@ -3252,7 +3271,10 @@ mod tests {
             "a {} pixel picture was given {box_px} pixels",
             qrnew_core::MAX_LOGO_SIDE
         );
-        assert!(across <= MAX_EXPORT_PX, "{across} pixels is past the ceiling");
+        assert!(
+            across <= MAX_EXPORT_PX,
+            "{across} pixels is past the ceiling"
+        );
     }
 
     /// **An icon's ink and the stylesheet's have to be the same colour.**
@@ -3337,7 +3359,11 @@ mod tests {
 
         let chosen = block(".appearance-dark {");
         assert!(chosen.len() > 20, "the palette is most of the window");
-        assert_eq!(chosen, block(".appearance-system {"), "the two copies have drifted");
+        assert_eq!(
+            chosen,
+            block(".appearance-system {"),
+            "the two copies have drifted"
+        );
     }
 
     #[test]

@@ -936,10 +936,14 @@ mod tests {
 
         assert!(!without.contains("<image"), "{without}");
         assert!(
-            qr.svg().starts_with(without.strip_suffix("</svg>").unwrap()),
+            qr.svg()
+                .starts_with(without.strip_suffix("</svg>").unwrap()),
             "everything before the picture is untouched"
         );
-        assert!(without.ends_with("</svg>"), "and the document is still closed");
+        assert!(
+            without.ends_with("</svg>"),
+            "and the document is still closed"
+        );
 
         // The box, against the numbers the full document writes into the
         // `<image>` itself. Both are in the document's own units, so the one
@@ -953,7 +957,10 @@ mod tests {
         };
         assert!((inset.offset * side - attr("x")).abs() < 0.001, "{inset:?}");
         assert!((inset.offset * side - attr("y")).abs() < 0.001, "{inset:?}");
-        assert!((inset.side * side - attr("width")).abs() < 0.001, "{inset:?}");
+        assert!(
+            (inset.side * side - attr("width")).abs() < 0.001,
+            "{inset:?}"
+        );
     }
 
     #[test]

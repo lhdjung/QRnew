@@ -9,8 +9,8 @@
 //! implementation that knows nothing about how the code was drawn.
 
 use qrnew_core::{
-    ErrorCorrection, Finder, FinderShape, Logo, MAX_LOGO_AREA, ModuleShape, Qr, QrStyle,
-    ReadError, Rgb, read,
+    ErrorCorrection, Finder, FinderShape, Logo, MAX_LOGO_AREA, ModuleShape, Qr, QrStyle, ReadError,
+    Rgb, read,
 };
 
 const DATA: &str = "https://github.com/lhdjung/QRnew";

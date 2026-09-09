@@ -146,7 +146,10 @@ mod tests {
     /// read as the value it appended.
     #[test]
     fn the_last_line_wins() {
-        assert_eq!(value_of("appearance = light\nappearance = dark\n", "appearance"), Some("dark"));
+        assert_eq!(
+            value_of("appearance = light\nappearance = dark\n", "appearance"),
+            Some("dark")
+        );
     }
 
     #[test]
@@ -168,6 +171,9 @@ mod tests {
         };
         assert!(path.is_absolute(), "{path:?}");
         assert_eq!(path.file_name().and_then(|name| name.to_str()), Some(FILE));
-        assert!(path.parent().is_some_and(|it| it.parent().is_some()), "{path:?}");
+        assert!(
+            path.parent().is_some_and(|it| it.parent().is_some()),
+            "{path:?}"
+        );
     }
 }

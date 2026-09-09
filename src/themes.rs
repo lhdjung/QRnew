@@ -466,7 +466,12 @@ mod tests {
             },
         );
 
-        let folder = std::fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
+        let folder = std::fs::read_dir(&dir)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
         let written = std::fs::read_to_string(folder.join(FILE)).unwrap();
         let parsed = toml::de::DeTable::parse(&written).expect("what we write is TOML");
         let field = |key: &str| {
@@ -529,7 +534,10 @@ mod tests {
         save(&elsewhere, &uni_bern());
 
         let dir = scratch("import");
-        assert_eq!(import(&dir, &elsewhere.join("qrnew-theme-uni-bern")), Ok(()));
+        assert_eq!(
+            import(&dir, &elsewhere.join("qrnew-theme-uni-bern")),
+            Ok(())
+        );
         assert_eq!(list(&dir), vec![uni_bern()]);
         assert!(dir.join("qrnew-theme-uni-bern/logo.png").exists());
 

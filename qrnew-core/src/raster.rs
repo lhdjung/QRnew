@@ -21,7 +21,11 @@ use crate::logo::ImageFormat;
 /// Worth encoding once and passing around: an image is measured before it is
 /// drawn, and base64 of a photograph is not a string to build twice.
 pub fn href(image: &[u8], format: ImageFormat) -> String {
-    format!("data:{};base64,{}", format.mime(), BASE64_STANDARD.encode(image))
+    format!(
+        "data:{};base64,{}",
+        format.mime(),
+        BASE64_STANDARD.encode(image)
+    )
 }
 
 /// The size the image declares, which is its own rather than whatever document
