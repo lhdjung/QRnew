@@ -376,9 +376,19 @@ impl Inset {
         // it unwraps the refusal and **the window closes**. So it happens here,
         // at the one moment a picture arrives, rather than in the memo that
         // redraws on every keystroke.
-        let (format, bytes) = match qrnew_core::shrink_logo(&bytes) {
-            Some(scaled) => (ImageFormat::Png, scaled),
-            None => (format, bytes),
+        //
+        // A scaled picture is a PNG whatever went in, and the name follows the
+        // bytes: it is what the card shows and what a theme folder saves the
+        // file under, and `photo.jpg` holding a PNG is a file that lies.
+        let (name, format, bytes) = match qrnew_core::shrink_logo(&bytes) {
+            Some(scaled) => {
+                let renamed = std::path::Path::new(&name)
+                    .with_extension("png")
+                    .to_string_lossy()
+                    .into_owned();
+                (renamed, ImageFormat::Png, scaled)
+            }
+            None => (name, format, bytes),
         };
 
         Some(Self {
@@ -1154,7 +1164,10 @@ pub fn App() -> Element {
     let read_file = move |_| {
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
-                .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "svg"])
+                .add_filter(
+                    fl!("filter-images"),
+                    &["png", "jpg", "jpeg", "gif", "webp", "svg"],
+                )
                 .pick_file()
                 .await
             else {
@@ -1185,7 +1198,10 @@ pub fn App() -> Element {
     let choose_inset = move |_| {
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
-                .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "svg"])
+                .add_filter(
+                    fl!("filter-images"),
+                    &["png", "jpg", "jpeg", "gif", "webp", "svg"],
+                )
                 .pick_file()
                 .await
             else {
@@ -1209,7 +1225,7 @@ pub fn App() -> Element {
         };
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
-                .add_filter("PNG Image", &["png"])
+                .add_filter(fl!("filter-png"), &["png"])
                 .set_file_name("qrcode.png")
                 .save_file()
                 .await
@@ -1228,7 +1244,7 @@ pub fn App() -> Element {
         };
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
-                .add_filter("SVG Image", &["svg"])
+                .add_filter(fl!("filter-svg"), &["svg"])
                 .set_file_name("qrcode.svg")
                 .save_file()
                 .await

@@ -8,3 +8,4 @@ qrnew-linux.tar.gz
 **/*.rs.bk
 debug/
 target/
+.claude/settings.local.json

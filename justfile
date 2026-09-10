@@ -157,12 +157,14 @@ bundle-windows: build-release
 # `Cargo.toml` on the line above.
 
 # Bump cargo version, create git commit, and tag it `v<version>`
+#
+# `perl` rather than `sed -i`: the two `sed`s disagree about `-i` and about the
+# `0,/re/` address, so the GNU spelling this used to have failed on a Mac,
+# which is where the app is developed.
 tag version:
-    find -type f -name Cargo.toml -exec sed -i '0,/^version/s/^version.*/version = "{{version}}"/' '{}' \; -exec git add '{}' \;
+    perl -0pi -e 's/^version = "[^"]*"/version = "{{version}}"/m' Cargo.toml qrnew-core/Cargo.toml
     cargo check
-    cargo clean
-    git add Cargo.lock
+    git add Cargo.toml qrnew-core/Cargo.toml Cargo.lock
     git commit -m 'release: {{version}}'
-    git commit --amend
     git tag -a v{{version}} -m ''
 

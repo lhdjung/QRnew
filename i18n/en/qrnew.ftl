@@ -74,3 +74,7 @@ color-warning = These colors might be too similar for a scanner to tell apart.
 color-swap = Swap colors
 color-reset = Reset to black & white
 close = Close
+# Names the file dialogs give their filters.
+filter-images = Images
+filter-png = PNG image
+filter-svg = SVG image
