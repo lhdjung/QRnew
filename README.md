@@ -21,9 +21,11 @@ Go to [the latest release][releases] and download the asset for your system, the
 
 > **First launch:** macOS blocks the app because it is not notarized. After the warning appears, open *System Settings → Privacy & Security*, scroll down to the *Security* section, and click *Open Anyway*.
 
-**Windows.** Unpacking gives you a `QRnew` folder with `QRnew.exe` in it. Windows has no Applications folder, so keep the folder where you like it and right-click the executable → *Pin to Start* if you want it in the Start menu.
+**Windows.** Unpacking gives you a `QRnew-windows` folder with `QRnew.exe` in it. Windows has no Applications folder, so keep the folder where you like it and right-click the executable → *Pin to Start* if you want it in the Start menu.
 
 > **First launch:** SmartScreen blocks the app. Click *More info* on the warning, then *Run anyway*.
+
+**Linux.** Unpack with `tar xzf qrnew-linux.tar.gz` and run `qrnew-linux/qrnew`. For a menu entry, put `qrnew` somewhere on your `PATH` (e.g. `~/.local/bin`), `dev.lhdjung.QRnew.desktop` in `~/.local/share/applications`, and `dev.lhdjung.QRnew.svg` in `~/.local/share/icons/hicolor/scalable/apps`. From a source checkout, `just build-release && sudo just install` installs system-wide instead.
 
 ## Dev build
 

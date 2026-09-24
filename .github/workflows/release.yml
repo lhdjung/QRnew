@@ -130,8 +130,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: release-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: release-${{ runner.os }}-cargo-
 
       # `fontconfig` is what Parley finds fonts through, and it is linked
       # rather than dlopened, so the build stops without its headers. GTK is
@@ -146,6 +146,10 @@ jobs:
             libwayland-dev \
             libxkbcommon-dev \
             libfontconfig1-dev
+
+      # Nothing ships that the suite has not passed: this workflow does not
+      # wait for `build.yml`, and `nightly` is what the README links to.
+      - run: cargo test --workspace --locked --release
 
       - run: cargo build --release --locked
 

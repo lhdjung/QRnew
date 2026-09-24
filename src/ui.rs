@@ -854,6 +854,9 @@ pub fn App() -> Element {
             .and_then(|Inlay(path)| Inset::read(std::path::Path::new(&path)))
     });
     let mut inset_error = use_signal(|| false);
+    // The last save or copy of the code failed: the disk or the clipboard said
+    // no. Without it the button looks like it worked.
+    let mut export_error = use_signal(|| false);
     let mut inset_size = use_signal(InsetSize::default);
     let mut editing = use_signal(|| Well::Dark);
     // **What the colour caution said when a pointer took hold of the picker**,
@@ -906,6 +909,8 @@ pub fn App() -> Element {
     // things to do about it: a folder with no settings file in it is the wrong
     // folder, and a settings file with no name in it is a file to fix.
     let mut import_error = use_signal(|| None::<themes::NotATheme>);
+    // A theme that could not be written, by Save or by Export.
+    let mut theme_error = use_signal(|| false);
     // Neither a question nor a complaint outlives the sheet it was made in. One
     // effect rather than a line in each of the five ways out — the cross, the
     // scrim, Escape twice over, and the button in the top bar.
@@ -913,6 +918,7 @@ pub fn App() -> Element {
         if !themes_sheet() {
             condemned.set(None);
             import_error.set(None);
+            theme_error.set(false);
         }
     });
 
@@ -961,9 +967,9 @@ pub fn App() -> Element {
     // The list is re-read off disk rather than pushed onto, so what the sheet
     // shows is what a later run will find — including the case where the write
     // silently failed.
-    let save_theme = {
+    let mut save_theme = {
         let dir = library.clone();
-        move |_| {
+        move || {
             let name = theme_name().trim().to_string();
             let Some(dir) = dir.as_deref() else { return };
             if name.is_empty() {
@@ -974,7 +980,7 @@ pub fn App() -> Element {
             // means that value, and every line written is a line somebody
             // reading the theme by hand has to take in.
             let changed = |changed: bool, word: &str| changed.then(|| word.to_string());
-            themes::save(
+            let written = themes::save(
                 dir,
                 &themes::Theme {
                     name,
@@ -994,8 +1000,12 @@ pub fn App() -> Element {
                 },
             );
             saved.set(themes::list(dir));
-            theme_name.set(String::new());
             condemned.set(None);
+            // The name stays when the write failed, so trying again is one click.
+            theme_error.set(written.is_err());
+            if written.is_ok() {
+                theme_name.set(String::new());
+            }
         }
     };
 
@@ -1232,9 +1242,11 @@ pub fn App() -> Element {
             else {
                 return;
             };
-            if let Ok(png) = qr.to_png(export_scale(&qr)) {
-                let _ = std::fs::write(handle.path(), png);
-            }
+            let written = qr
+                .to_png(export_scale(&qr))
+                .ok()
+                .is_some_and(|png| std::fs::write(handle.path(), png).is_ok());
+            export_error.set(!written);
         });
     };
 
@@ -1251,7 +1263,7 @@ pub fn App() -> Element {
             else {
                 return;
             };
-            let _ = std::fs::write(handle.path(), qr.into_svg());
+            export_error.set(std::fs::write(handle.path(), qr.into_svg()).is_err());
         });
     };
 
@@ -1259,18 +1271,20 @@ pub fn App() -> Element {
         let Some(Drawn { qr, .. }) = code() else {
             return;
         };
-        let Ok(raster) = qr.to_rgba(export_scale(&qr)) else {
-            return;
-        };
-        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-            let copy = clipboard.set_image(arboard::ImageData {
-                width: raster.width as usize,
-                height: raster.height as usize,
-                bytes: raster.pixels.into(),
-            });
-            if copy.is_ok() {
-                copied_image.raise();
-            }
+        let copied = qr.to_rgba(export_scale(&qr)).ok().is_some_and(|raster| {
+            arboard::Clipboard::new().is_ok_and(|mut clipboard| {
+                clipboard
+                    .set_image(arboard::ImageData {
+                        width: raster.width as usize,
+                        height: raster.height as usize,
+                        bytes: raster.pixels.into(),
+                    })
+                    .is_ok()
+            })
+        });
+        export_error.set(!copied);
+        if copied {
+            copied_image.raise();
         }
     };
 
@@ -1291,6 +1305,7 @@ pub fn App() -> Element {
         // not subscribe to the flag it clears — subscribing would make it run
         // on the write that raises it and put it straight back down.
         copied_image.lower();
+        export_error.set(false);
     });
 
     // Whether there is anything to save, copy or look at. It decides both the
@@ -1814,6 +1829,9 @@ pub fn App() -> Element {
                             }
                         }
                     }
+                    if export_error() {
+                        p { class: "error", "data-export-error": "true", {fl!("export-error")} }
+                    }
                 }
 
                 section { class: "rail rail-colors",
@@ -1909,7 +1927,7 @@ pub fn App() -> Element {
                             span { {fl!("section-inset")} }
                         }
                         if let Some(name) = inset_name {
-                            div { class: "inset",
+                            div { class: "inset-row",
                                 img {
                                     class: "inset-thumb",
                                     "data-inset-thumb": "true",
@@ -2023,6 +2041,7 @@ pub fn App() -> Element {
                 div { class: "scrim", onclick: move |_| themes_sheet.set(false),
                     div {
                         class: "sheet themes-sheet",
+                        role: "dialog",
                         onclick: move |event| event.stop_propagation(),
                         div { class: "sheet-head",
                             h2 {
@@ -2128,7 +2147,7 @@ pub fn App() -> Element {
                                                             else {
                                                                 return;
                                                             };
-                                                            themes::save(handle.path(), &chosen);
+                                                            theme_error.set(themes::save(handle.path(), &chosen).is_err());
                                                         });
                                                     }
                                                 },
@@ -2166,6 +2185,7 @@ pub fn App() -> Element {
                                     match why {
                                         themes::NotATheme::NoFile => fl!("themes-import-error-no-file"),
                                         themes::NotATheme::NoName => fl!("themes-import-error-no-name"),
+                                        themes::NotATheme::Unwritable => fl!("themes-save-error"),
                                     }
                                 }
                             }
@@ -2202,9 +2222,22 @@ pub fn App() -> Element {
                                     aria_label: fl!("themes-name"),
                                     value: "{theme_name}",
                                     oninput: move |event| theme_name.set(event.value()),
-                                    onkeydown: move |event| {
-                                        caret.struck();
-                                        appkit_has_this_key(&event);
+                                    onkeydown: {
+                                        let mut save_theme = save_theme.clone();
+                                        move |event: Event<KeyboardData>| {
+                                            caret.struck();
+                                            appkit_has_this_key(&event);
+                                            if event.key() == Key::Enter {
+                                                save_theme();
+                                            }
+                                            // The only field in the sheet, and
+                                            // buttons take no focus in Blitz:
+                                            // Tab would land on a field behind
+                                            // the scrim and type into it unseen.
+                                            if event.key() == Key::Tab {
+                                                event.prevent_default();
+                                            }
+                                        }
                                     },
                                     onfocusin: move |_| caret.arrived(),
                                     onfocusout: move |_| caret.left(),
@@ -2219,10 +2252,13 @@ pub fn App() -> Element {
                                 class: if can_save { "btn" } else { "btn off" },
                                 "data-theme-save": "true",
                                 aria_disabled: if can_save { "false" } else { "true" },
-                                onclick: save_theme,
+                                onclick: move |_| save_theme(),
                                 {glyph(Glyph::Bookmark, step_ink(can_save), "glyph")}
                                 span { {fl!("themes-save")} }
                             }
+                        }
+                        if theme_error() {
+                            p { class: "error", {fl!("themes-save-error")} }
                         }
                     }
                 }
@@ -2232,6 +2268,7 @@ pub fn App() -> Element {
                 div { class: "scrim", onclick: move |_| appearance_sheet.set(false),
                     div {
                         class: "sheet appearance-sheet",
+                        role: "dialog",
                         // The scrim closes on a click; the panel is not the
                         // scrim.
                         onclick: move |event| event.stop_propagation(),
@@ -2297,6 +2334,7 @@ pub fn App() -> Element {
                 div { class: "scrim", onclick: move |_| about.set(false),
                     div {
                         class: "sheet about",
+                        role: "dialog",
                         // The scrim closes on a click; the panel is not the
                         // scrim.
                         onclick: move |event| event.stop_propagation(),
@@ -2650,7 +2688,7 @@ impl Ink {
     /// The five on a bright window.
     const fn light(self) -> &'static str {
         match self {
-            Ink::Accent => "#0F9D63",
+            Ink::Accent => "#0A8452",
             Ink::Plain => "#2B313A",
             Ink::Faint => "#838B95",
             Ink::Warn => "#8A5B06",

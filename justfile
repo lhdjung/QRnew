@@ -155,12 +155,12 @@ bundle-windows: build-release
 # a tag written without it is a release nothing ever builds. The argument is
 # the bare number — `just tag 0.1.1` — because that is what goes into
 # `Cargo.toml` on the line above.
-
-# Bump cargo version, create git commit, and tag it `v<version>`
 #
 # `perl` rather than `sed -i`: the two `sed`s disagree about `-i` and about the
 # `0,/re/` address, so the GNU spelling this used to have failed on a Mac,
 # which is where the app is developed.
+
+# Bump cargo version, create git commit, and tag it `v<version>`
 tag version:
     perl -0pi -e 's/^version = "[^"]*"/version = "{{version}}"/m' Cargo.toml qrnew-core/Cargo.toml
     cargo check

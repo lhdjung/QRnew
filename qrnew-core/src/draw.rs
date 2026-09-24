@@ -38,12 +38,13 @@ const MODULE_RADIUS: f32 = 0.5;
 /// why the round-trip tests sweep both. At 1.25 modules a code fails to decode
 /// however large it is drawn. At 1.0 it decodes from ten pixels per module up
 /// and is unreliable below — a trap, since it looks fine at whatever single size
-/// you happen to test. At 0.8 and below that fragility is gone. The crate claims
-/// ten either way, and the margin is what absorbs the printing and camera angle
-/// the tests do not model, so this sits at 0.75.
+/// you happen to test. It also depends on the code's size: 0.75 read a short
+/// URL and failed from about sixty characters, 0.5 from about 170, 0.35 at
+/// 600. At 0.25 every size `every_combination_of_shapes_scans` sweeps reads
+/// at both scales, so this sits there.
 ///
 /// The hole and the center are unconstrained; the center is a full circle.
-const FINDER_RADIUS: f32 = 0.75;
+const FINDER_RADIUS: f32 = 0.25;
 
 /// Writes the matrix as an SVG document.
 ///

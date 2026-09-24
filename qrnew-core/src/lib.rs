@@ -201,7 +201,7 @@ impl Qr {
             ec
         };
 
-        let code = QrCode::with_error_correction_level(data.as_bytes(), ec.into())?;
+        let code = encode(data, ec.into())?;
         let modules = code.width() as u32;
         let size = modules + 2 * style.quiet_zone;
 
@@ -446,9 +446,52 @@ fn in_halves(href: &str, natural: (u32, u32), target: (u32, u32)) -> Option<tiny
     Some(pixmap)
 }
 
+/// The code for `data`, as UTF-8 bytes a phone reads back as the same text.
+///
+/// `qrcode`'s own choice of encoding looks for Shift-JIS Kanji in the raw bytes,
+/// and some UTF-8 byte pairs — Japanese and Chinese text, mostly — look like
+/// Kanji. A scanner then decodes those stretches as Shift-JIS and shows
+/// garbage. ASCII has no byte that could start a Kanji, so it keeps the compact
+/// numeric and alphanumeric modes; anything else is byte mode throughout.
+fn encode(data: &str, ec: qrcode::EcLevel) -> Result<QrCode, qrcode::types::QrError> {
+    if data.is_ascii() {
+        return QrCode::with_error_correction_level(data, ec);
+    }
+    for version in 1..=40 {
+        let mut bits = qrcode::bits::Bits::new(qrcode::Version::Normal(version));
+        if bits.push_byte_data(data.as_bytes()).is_ok() && bits.push_terminator(ec).is_ok() {
+            return QrCode::with_bits(bits, ec);
+        }
+    }
+    Err(qrcode::types::QrError::DataTooLong)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// This text has UTF-8 byte pairs `qrcode`'s own choice would encode as
+    /// Kanji, which a phone would then show as Shift-JIS garbage.
+    #[test]
+    fn non_ascii_text_is_not_mistaken_for_kanji() {
+        let text = "こんにちは、世界！こんにちは";
+        let ec = qrcode::EcLevel::M;
+        let ours = encode(text, ec).unwrap().to_colors();
+        let auto = QrCode::with_error_correction_level(text, ec)
+            .unwrap()
+            .to_colors();
+        assert_ne!(ours, auto, "the auto encoding is the broken one");
+        assert_eq!(
+            read(
+                &Qr::new(text, ErrorCorrection::Medium, &QrStyle::default())
+                    .unwrap()
+                    .to_png(10)
+                    .unwrap()
+            )
+            .as_deref(),
+            Ok(text)
+        );
+    }
 
     const RED: Rgb = Rgb::new(255, 0, 0);
     const GREEN: Rgb = Rgb::new(0, 255, 0);

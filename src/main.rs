@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
+// A GUI app: without this, Windows opens a console window beside it.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 //! QRnew, run.
 //!
 //! ```text
@@ -78,6 +81,13 @@ fn main() {
             flag("--height").unwrap_or(860.0),
         ))
         .with_maximized(measured.is_none());
+    // Wayland matches a window to its desktop entry by app ID, and winit sets
+    // none unless asked: without it the dock shows a generic icon.
+    #[cfg(target_os = "linux")]
+    let attributes = attributes.with_platform_attributes(Box::new(
+        dioxus_native::winit::platform::wayland::WindowAttributesWayland::default()
+            .with_name("dev.lhdjung.QRnew", ""),
+    ));
 
     // A context per seed. `App` asks with `try_consume_context`, so a context
     // that is not there is the same as no picture.

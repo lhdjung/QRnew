@@ -62,8 +62,18 @@ pub fn write(key: &str, value: &str) {
     if let Some(directory) = path.parent()
         && std::fs::create_dir_all(directory).is_ok()
     {
-        let _ = std::fs::write(&path, lines.join("\n") + "\n");
+        let _ = replace(&path, &(lines.join("\n") + "\n"));
     }
+}
+
+/// Writes `contents` to `path` whole or not at all: into a file beside it, then
+/// renamed over it. A plain write truncates first, so a crash or a full disk
+/// halfway through would leave an empty file where a good one was.
+pub(crate) fn replace(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    let mut draft = path.as_os_str().to_owned();
+    draft.push(".tmp");
+    std::fs::write(&draft, contents)?;
+    std::fs::rename(&draft, path)
 }
 
 /// The key a line sets, if it sets one.

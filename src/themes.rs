@@ -136,16 +136,19 @@ impl Theme {
     }
 }
 
-/// Why a folder somebody picked is not a theme.
+/// Why a folder somebody picked did not become a theme here.
 ///
-/// Two rather than one, because they are two different things to do about it:
-/// the first is the wrong folder, the second is a file to fix.
+/// Separate answers because they are different things to do about it: the
+/// first is the wrong folder, the second is a file to fix, the third is this
+/// machine's disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotATheme {
     /// Nothing in the folder called [`FILE`], or nothing readable.
     NoFile,
     /// A settings file that never says what the theme is called.
     NoName,
+    /// A theme, but it could not be written in beside the others.
+    Unwritable,
 }
 
 /// Where themes live, or `None` on a machine with nowhere to put them.
@@ -168,20 +171,12 @@ pub fn list(dir: &Path) -> Vec<Theme> {
 }
 
 /// Writes `theme` into `dir`, replacing any theme of the same name.
-pub fn save(dir: &Path, theme: &Theme) {
+///
+/// The one write here that reports failing: it is always somebody pressing a
+/// button, and a theme that silently is not there is worse than a message.
+pub fn save(dir: &Path, theme: &Theme) -> std::io::Result<()> {
     let folder = dir.join(folder_for(&theme.name));
-    if std::fs::create_dir_all(&folder).is_err() {
-        return;
-    }
-    // A replaced theme must not keep the old picture beside the new one:
-    // nothing would point at it, and it would sit there forever.
-    if let Ok(entries) = std::fs::read_dir(&folder) {
-        for entry in entries.flatten() {
-            if entry.file_name() != FILE {
-                let _ = std::fs::remove_file(entry.path());
-            }
-        }
-    }
+    std::fs::create_dir_all(&folder)?;
 
     let mut file = String::new();
     // The value arrives rendered, because one of the eight is not a string.
@@ -200,12 +195,14 @@ pub fn save(dir: &Path, theme: &Theme) {
     if let Some(colour) = theme.background {
         put("background", &quote(&colour.to_hex()));
     }
-    // Named only once the file is actually there, so a theme never points at a
-    // picture that failed to write.
-    if let Some((name, bytes)) = &theme.image_file
-        && bare(name)
-        && std::fs::write(folder.join(name), bytes).is_ok()
-    {
+    // The picture goes down before the file that names it, so a theme never
+    // points at a picture that failed to write.
+    let picture = theme
+        .image_file
+        .as_ref()
+        .filter(|(name, _)| bare(name) && name != FILE);
+    if let Some((name, bytes)) = picture {
+        std::fs::write(folder.join(name), bytes)?;
         put("image_file", &quote(name));
     }
     if let Some(size) = &theme.image_size {
@@ -221,16 +218,35 @@ pub fn save(dir: &Path, theme: &Theme) {
         put("shape", &quote(shape));
     }
 
-    let _ = std::fs::write(folder.join(FILE), file);
+    settings::replace(&folder.join(FILE), &file)?;
+
+    // Only now, with the new theme safely down, does a replaced theme lose
+    // its old picture: nothing points at it any more, and it would sit there
+    // forever.
+    for entry in std::fs::read_dir(&folder)?.flatten() {
+        let name = entry.file_name();
+        if name != FILE && picture.is_none_or(|(kept, _)| name != kept.as_str()) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    Ok(())
 }
 
 /// Takes the theme called `name` away, picture and all.
 pub fn remove(dir: &Path, name: &str) {
-    // The only recursive delete in the app, and what makes it safe is that the
-    // path is built rather than accepted: it starts with [`FOLDER`] and [`slug`]
-    // cannot return a separator or a dot, so this can only ever name a folder
-    // directly inside `dir`.
-    let _ = std::fs::remove_dir_all(dir.join(folder_for(name)));
+    // By what each folder says it is, not by the folder [`save`] would pick:
+    // a folder dropped in or renamed by hand is listed under the name inside
+    // it, and has to be deletable under that name too. Every path comes out
+    // of `read_dir(dir)`, so this can only ever name a folder directly inside
+    // `dir`, and `remove_dir_all` removes a symlink rather than following it.
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if load(&entry.path()).is_ok_and(|theme| theme.name == name) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 /// Takes a theme folder somebody else made and files it with the rest.
@@ -239,8 +255,7 @@ pub fn remove(dir: &Path, name: &str) {
 /// importing is reading one and writing it back where the app keeps its own.
 pub fn import(dir: &Path, folder: &Path) -> Result<(), NotATheme> {
     let theme = load(folder)?;
-    save(dir, &theme);
-    Ok(())
+    save(dir, &theme).map_err(|_| NotATheme::Unwritable)
 }
 
 /// The theme in one folder, or why there is not one.
@@ -411,12 +426,25 @@ mod tests {
         let dir = scratch("round-trip");
         assert_eq!(list(&dir), vec![], "nothing saved, nothing listed");
 
-        save(&dir, &uni_bern());
+        save(&dir, &uni_bern()).unwrap();
         assert_eq!(list(&dir), vec![uni_bern()]);
 
         // The picture is a file of its own, under the name it arrived with,
         // in a folder named so it says what it is wherever it ends up.
         assert!(dir.join("qrnew-theme-uni-bern/logo.png").exists());
+
+        remove(&dir, "Uni Bern");
+        assert_eq!(list(&dir), vec![]);
+    }
+
+    /// A folder somebody renamed by hand is listed under the name inside it,
+    /// so it has to be removable under that name too.
+    #[test]
+    fn a_renamed_folder_can_still_be_removed() {
+        let dir = scratch("renamed");
+        save(&dir, &uni_bern()).unwrap();
+        std::fs::rename(dir.join("qrnew-theme-uni-bern"), dir.join("mine")).unwrap();
+        assert_eq!(list(&dir), vec![uni_bern()]);
 
         remove(&dir, "Uni Bern");
         assert_eq!(list(&dir), vec![]);
@@ -439,7 +467,7 @@ mod tests {
             shape: None,
             margin: None,
         };
-        save(&dir, &bare);
+        save(&dir, &bare).unwrap();
 
         assert_eq!(
             std::fs::read_to_string(dir.join("qrnew-theme-bare").join(FILE)).unwrap(),
@@ -464,7 +492,8 @@ mod tests {
                 name: awkward.to_string(),
                 ..uni_bern()
             },
-        );
+        )
+        .unwrap();
 
         let folder = std::fs::read_dir(&dir)
             .unwrap()
@@ -508,14 +537,15 @@ mod tests {
     #[test]
     fn saving_the_same_name_twice_leaves_one_theme() {
         let dir = scratch("replace");
-        save(&dir, &uni_bern());
+        save(&dir, &uni_bern()).unwrap();
         save(
             &dir,
             &Theme {
                 image_file: Some(("mark.svg".to_string(), b"<svg/>".to_vec())),
                 ..uni_bern()
             },
-        );
+        )
+        .unwrap();
 
         let saved = list(&dir);
         assert_eq!(saved.len(), 1);
@@ -531,7 +561,7 @@ mod tests {
     #[test]
     fn a_theme_can_be_imported_from_a_folder() {
         let elsewhere = scratch("import-source");
-        save(&elsewhere, &uni_bern());
+        save(&elsewhere, &uni_bern()).unwrap();
 
         let dir = scratch("import");
         assert_eq!(
@@ -554,7 +584,7 @@ mod tests {
     #[test]
     fn an_image_cannot_point_outside_its_folder() {
         let dir = scratch("escape");
-        save(&dir, &uni_bern());
+        save(&dir, &uni_bern()).unwrap();
         std::fs::write(
             dir.join("qrnew-theme-uni-bern").join(FILE),
             "name = \"Uni Bern\"\nforeground = \"#e40046\"\nbackground = \"#ffffff\"\n\

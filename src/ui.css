@@ -68,7 +68,7 @@
   /* Ink. Three steps is all the interface needs. */
   --ink: #16181d;
   --ink-2: #4d545e;
-  --ink-3: #838b95;
+  --ink-3: #6b727c;
 
   /* Lines. `--line-3` is a border under the pointer. */
   --line: #e4e7eb;
@@ -80,14 +80,14 @@
    * button in this appearance is a dark colour carrying light text. The green is a
    * deeper leaf than the dark appearance's for the same reason: one colour cannot
    * carry text on white and stay the same colour on graphite. */
-  --accent: #0f9d63;
+  --accent: #0a8452;
   --accent-ink: #ffffff;
-  --accent-dim: rgba(15, 157, 99, 0.1);
-  --accent-line: rgba(15, 157, 99, 0.38);
+  --accent-dim: rgba(10, 132, 82, 0.1);
+  --accent-line: rgba(10, 132, 82, 0.38);
   /* The ring a focused text field wears: the accent at an alpha that reads as a
    * glow rather than a second border. `box-shadow` is painted outside the border
    * box and takes no layout, so the loudest thing in the window moves nothing. */
-  --accent-ring: rgba(15, 157, 99, 0.24);
+  --accent-ring: rgba(10, 132, 82, 0.24);
 
   --danger: #c0392b;
   --danger-ring: rgba(192, 57, 43, 0.22);
@@ -134,7 +134,7 @@
 
   --ink: #edeff2;
   --ink-2: #aab2bc;
-  --ink-3: #7b838e;
+  --ink-3: #868e99;
 
   --line: #2b2f36;
   --line-2: #3a4049;
@@ -178,7 +178,7 @@
 
     --ink: #edeff2;
     --ink-2: #aab2bc;
-    --ink-3: #7b838e;
+    --ink-3: #868e99;
 
     --line: #2b2f36;
     --line-2: #3a4049;
@@ -459,7 +459,7 @@ body {
 }
 
 .field:hover {
-  border-color: var(--raised-hi);
+  border-color: var(--line-3);
 }
 
 /* **What a field looks like when it has the keyboard**, and all three text
@@ -688,7 +688,9 @@ body {
   color: var(--ink-2);
 }
 
-.error {
+/* `.sheet .error` because `.sheet p` would otherwise grey it into a hint. */
+.error,
+.sheet .error {
   margin: 0;
   color: var(--danger);
   font-size: 14.5px;
@@ -812,7 +814,7 @@ body {
 }
 
 .count:hover {
-  border-color: var(--raised-hi);
+  border-color: var(--line-3);
 }
 
 /* The caution that appears when the margin goes under two: an icon, a tinted
@@ -852,7 +854,7 @@ body {
  * The thumbnail is painted on the code's own background colour, because that is
  * what the picture will be sitting on: a dark logo with a transparent ground
  * would look right here and vanish in the code. */
-.inset {
+.inset-row {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1312,6 +1314,8 @@ body {
 .theme-name {
   flex: 0 1 auto;
   overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* The picture's file name, after the theme's own. Quieter and smaller, because
@@ -1322,6 +1326,8 @@ body {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--ink-3);
   font-size: 13px;
   font-weight: 400;
@@ -1359,7 +1365,7 @@ body {
 /* What the row under it does, said once and in the sheet's own voice: heavier
  * than a hint and quieter than the panel's title, because it introduces one
  * control rather than the panel. */
-.sheet-sub {
+.sheet .sheet-sub {
   margin: 0;
   font-size: 15px;
   font-weight: 500;

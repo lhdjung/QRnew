@@ -52,8 +52,11 @@ fn shapes() -> impl Iterator<Item = (ModuleShape, FinderShape)> {
         })
 }
 
+/// Across code sizes too: a rounded finder that read fine on a short URL once
+/// failed from version 12 up, which is a URL of about 170 characters.
 #[test]
 fn every_combination_of_shapes_scans() {
+    let lengths = [DATA.len(), 60, 100, 170, 300, 600];
     for (module, finder) in shapes() {
         let style = QrStyle {
             module,
@@ -63,14 +66,17 @@ fn every_combination_of_shapes_scans() {
             },
             ..QrStyle::default()
         };
-        let qr = Qr::new(DATA, ErrorCorrection::Medium, &style).unwrap();
+        for length in lengths {
+            let data: String = DATA.chars().cycle().take(length).collect();
+            let qr = Qr::new(&data, ErrorCorrection::Medium, &style).unwrap();
 
-        for scale in SCALES {
-            assert_eq!(
-                scan(&qr, scale).as_deref(),
-                Ok(DATA),
-                "{module:?} + {finder:?} at {scale} px per module",
-            );
+            for scale in SCALES {
+                assert_eq!(
+                    scan(&qr, scale).as_deref(),
+                    Ok(data.as_str()),
+                    "{module:?} + {finder:?}, {length} characters, at {scale} px per module",
+                );
+            }
         }
     }
 }

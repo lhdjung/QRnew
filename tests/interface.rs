@@ -2976,6 +2976,29 @@ fn app_with_library(
     harness
 }
 
+/// Enter in the name field saves, like the button beside it; Tab stays in the
+/// field rather than walking to the colour code behind the scrim.
+#[test]
+fn enter_saves_a_theme_and_tab_stays_in_the_sheet() {
+    let dir = a_library("enter");
+    let mut harness = app_with_library("https://example.org", None, &dir);
+    harness.click(".themes-open");
+    harness.pump();
+    harness.click("[data-theme-name]");
+    harness.type_text("Mine");
+    harness.press(keyboard_types::Key::Tab);
+    harness.type_text("!");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-theme-name]", "value").as_deref(),
+        Some("Mine!"),
+        "Tab left the name field"
+    );
+    harness.press(keyboard_types::Key::Enter);
+    harness.pump();
+    assert!(harness.query("[data-theme=\"Mine!\"]").is_some());
+}
+
 /// **The whole point of a theme: the look comes back and the text does not
 /// move.**
 ///
@@ -3079,7 +3102,8 @@ fn a_saved_theme(dir: &std::path::Path, name: &str, image: Option<&str>) {
             margin: Some(2),
             shape: Some("square".to_string()),
         },
-    );
+    )
+    .unwrap();
 }
 
 /// The row is a name, a picture's file name, *Export theme* and a bin — and the
@@ -3335,7 +3359,8 @@ fn a_full_themes_sheet_still_fits_the_window() {
                 margin: Some(2),
                 shape: Some("square".to_string()),
             },
-        );
+        )
+        .unwrap();
     }
 
     for height in [860, 820] {
@@ -3390,7 +3415,8 @@ fn a_theme_asking_for_a_size_that_does_not_fit_draws_the_one_that_does() {
             margin: Some(2),
             shape: Some("square".to_string()),
         },
-    );
+    )
+    .unwrap();
 
     // Four characters: the smallest code there is.
     let mut harness = app_with_library("hiya", None, &dir);
@@ -3527,7 +3553,8 @@ fn a_themes_level_gives_way_to_the_picture_and_says_so() {
             margin: Some(2),
             shape: Some("square".to_string()),
         },
-    );
+    )
+    .unwrap();
 
     let mut harness = app_with_library("https://example.org", None, &dir);
     harness.click(".themes-open");
