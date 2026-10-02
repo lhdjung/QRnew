@@ -25,8 +25,7 @@ use resvg::usvg;
 pub use crate::logo::ImageFormat;
 pub use crate::read::{ReadError, read};
 pub use crate::style::{
-    Clearing, DEFAULT_QUIET_ZONE, ErrorCorrection, Finder, FinderShape, Logo, ModuleShape, QrStyle,
-    Rgb,
+    DEFAULT_QUIET_ZONE, ErrorCorrection, Finder, FinderShape, Logo, ModuleShape, QrStyle, Rgb,
 };
 
 use crate::logo::Placement;
@@ -202,7 +201,7 @@ impl Qr {
             ec
         };
 
-        let code = QrCode::with_error_correction_level(data.as_bytes(), ec.into())?;
+        let code = encode(data, ec.into())?;
         let modules = code.width() as u32;
         let size = modules + 2 * style.quiet_zone;
 
@@ -327,29 +326,6 @@ impl Qr {
     }
 }
 
-/// The largest [`Logo::size`] a code `modules` across can carry, at `padding`
-/// modules of air around the picture.
-///
-/// The two rules [`Qr::new`] enforces each turn into a ceiling:
-///
-/// - the cleared box covers at most [`MAX_LOGO_AREA`] of the code, a fixed share
-///   and so a fixed side;
-/// - the cleared box stops [`FINDER_CLEARANCE`] modules short of every edge, a
-///   fixed *number of modules* and so a share that grows with the code.
-///
-/// The second is why this is worth exposing rather than assuming: a
-/// twenty-one-module code allows a shade over a fifth of the width, and a few
-/// characters further on it allows a third. An interface offering a choice of
-/// sizes cannot work that out from [`Logo`] alone.
-///
-/// Zero when nothing fits, which no code is small enough to reach.
-pub fn largest_logo_size(padding: f32, modules: u32) -> f32 {
-    let modules = modules as f32;
-    let by_area = MAX_LOGO_AREA.sqrt() - 2.0 * padding / modules;
-    let by_finder = 1.0 - 2.0 * (FINDER_CLEARANCE + padding) / modules;
-    by_area.min(by_finder).max(0.0)
-}
-
 /// Checks a logo against the rules documented on [`Qr::new`].
 fn check_logo(logo: &Logo, modules: u32) -> Result<(), LogoError> {
     // Written as a positive test so that a NaN, which compares false against
@@ -470,9 +446,52 @@ fn in_halves(href: &str, natural: (u32, u32), target: (u32, u32)) -> Option<tiny
     Some(pixmap)
 }
 
+/// The code for `data`, as UTF-8 bytes a phone reads back as the same text.
+///
+/// `qrcode`'s own choice of encoding looks for Shift-JIS Kanji in the raw bytes,
+/// and some UTF-8 byte pairs — Japanese and Chinese text, mostly — look like
+/// Kanji. A scanner then decodes those stretches as Shift-JIS and shows
+/// garbage. ASCII has no byte that could start a Kanji, so it keeps the compact
+/// numeric and alphanumeric modes; anything else is byte mode throughout.
+fn encode(data: &str, ec: qrcode::EcLevel) -> Result<QrCode, qrcode::types::QrError> {
+    if data.is_ascii() {
+        return QrCode::with_error_correction_level(data, ec);
+    }
+    for version in 1..=40 {
+        let mut bits = qrcode::bits::Bits::new(qrcode::Version::Normal(version));
+        if bits.push_byte_data(data.as_bytes()).is_ok() && bits.push_terminator(ec).is_ok() {
+            return QrCode::with_bits(bits, ec);
+        }
+    }
+    Err(qrcode::types::QrError::DataTooLong)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// This text has UTF-8 byte pairs `qrcode`'s own choice would encode as
+    /// Kanji, which a phone would then show as Shift-JIS garbage.
+    #[test]
+    fn non_ascii_text_is_not_mistaken_for_kanji() {
+        let text = "こんにちは、世界！こんにちは";
+        let ec = qrcode::EcLevel::M;
+        let ours = encode(text, ec).unwrap().to_colors();
+        let auto = QrCode::with_error_correction_level(text, ec)
+            .unwrap()
+            .to_colors();
+        assert_ne!(ours, auto, "the auto encoding is the broken one");
+        assert_eq!(
+            read(
+                &Qr::new(text, ErrorCorrection::Medium, &QrStyle::default())
+                    .unwrap()
+                    .to_png(10)
+                    .unwrap()
+            )
+            .as_deref(),
+            Ok(text)
+        );
+    }
 
     const RED: Rgb = Rgb::new(255, 0, 0);
     const GREEN: Rgb = Rgb::new(0, 255, 0);
@@ -960,10 +979,14 @@ mod tests {
 
         assert!(!without.contains("<image"), "{without}");
         assert!(
-            qr.svg().starts_with(without.strip_suffix("</svg>").unwrap()),
+            qr.svg()
+                .starts_with(without.strip_suffix("</svg>").unwrap()),
             "everything before the picture is untouched"
         );
-        assert!(without.ends_with("</svg>"), "and the document is still closed");
+        assert!(
+            without.ends_with("</svg>"),
+            "and the document is still closed"
+        );
 
         // The box, against the numbers the full document writes into the
         // `<image>` itself. Both are in the document's own units, so the one
@@ -977,7 +1000,10 @@ mod tests {
         };
         assert!((inset.offset * side - attr("x")).abs() < 0.001, "{inset:?}");
         assert!((inset.offset * side - attr("y")).abs() < 0.001, "{inset:?}");
-        assert!((inset.side * side - attr("width")).abs() < 0.001, "{inset:?}");
+        assert!(
+            (inset.side * side - attr("width")).abs() < 0.001,
+            "{inset:?}"
+        );
     }
 
     #[test]
@@ -994,58 +1020,6 @@ mod tests {
         let qr = Qr::new(SHORT, ErrorCorrection::High, &style).unwrap();
 
         assert_eq!(qr.size_in_modules(), 21 + 2 * DEFAULT_QUIET_ZONE);
-    }
-
-    /// The ceiling `largest_logo_size` reports is the one `check_logo` keeps.
-    ///
-    /// Walked over every code version rather than asserted at one size, because
-    /// the point is that the answer *moves*: the area rule is a fixed share and
-    /// the finder rule a fixed number of modules, so which one binds changes as
-    /// the code grows.
-    #[test]
-    fn the_largest_size_that_fits_is_the_largest_size_that_is_accepted() {
-        for version in 1..=40u32 {
-            let modules = 17 + 4 * version;
-            let padding = Logo::DEFAULT_PADDING;
-            let largest = largest_logo_size(padding, modules);
-            let at = |size| {
-                check_logo(
-                    &Logo {
-                        size,
-                        padding,
-                        ..Logo::new(logo_image(GREEN))
-                    },
-                    modules,
-                )
-            };
-
-            assert!(largest > 0.0, "{modules} modules leave room for a logo");
-            assert!(
-                at(largest - 0.001).is_ok(),
-                "{modules} modules take a logo of {largest}",
-            );
-            assert!(
-                at(largest + 0.001).is_err(),
-                "{modules} modules refuse a logo past {largest}",
-            );
-        }
-    }
-
-    /// The smallest code takes the default size and not much more.
-    ///
-    /// The number is the interesting part: it says a size control cannot simply
-    /// offer a bigger logo, because a twenty-one-module code has barely a fifth
-    /// of the width to give.
-    #[test]
-    fn the_smallest_code_has_almost_no_room_above_the_default_logo() {
-        let largest = largest_logo_size(Logo::DEFAULT_PADDING, 21);
-
-        assert!(largest > Logo::DEFAULT_SIZE, "{largest}");
-        assert!(largest < 0.2, "{largest}");
-        assert!(
-            largest_logo_size(Logo::DEFAULT_PADDING, 25) > 0.25,
-            "one version further on there is room for a quarter",
-        );
     }
 
     #[test]

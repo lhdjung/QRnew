@@ -1,4 +1,3 @@
-.cargo/
 *.pdb
 QRnew.app/
 QRnew-macos.zip
@@ -9,8 +8,7 @@ qrnew-linux.tar.gz
 **/*.rs.bk
 debug/
 target/
-vendor/
-vendor.tar
+.claude/settings.local.json
 debian/*
 !debian/changelog
 !debian/control

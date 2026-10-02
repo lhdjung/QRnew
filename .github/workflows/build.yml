@@ -6,10 +6,7 @@ name: Build
 
 on:
   push:
-    # `dioxus-native` is here while the rewrite lives on it: Linux and Windows
-    # are the two platforms the migration has never been run on, and a branch
-    # that only builds after it merges answers the question too late.
-    branches: [main, dioxus-native]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -41,8 +38,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: build-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: build-${{ runner.os }}-cargo-
 
       # `fontconfig` is what Parley finds fonts through, and it is linked
       # rather than dlopened, so the build stops without its headers. GTK is
@@ -59,6 +56,15 @@ jobs:
             libfontconfig1-dev
 
       - run: cargo test --workspace --locked
+
+      # **And again optimised, because the two builds do not agree.** Dioxus
+      # compares templates by pointer when the linker has merged identical
+      # statics and by value when it has not, so two `rsx!` arms that are the
+      # same shape are one node in a release build and two in a debug one.
+      # `the_picker_does_not_carry_a_hue_between_wells` is the bug that reached
+      # somebody through that gap with a green suite behind it; it passes in
+      # debug whether the app is right or not, and only bites here.
+      - run: cargo test --workspace --locked --release
 
       # Only on pull requests. A push to `main` builds release binaries in
       # `release.yml`, packages them and publishes them where somebody can
