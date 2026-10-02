@@ -9,3 +9,16 @@ qrnew-linux.tar.gz
 debug/
 target/
 .claude/settings.local.json
+debian/*
+!debian/changelog
+!debian/control
+!debian/copyright
+!debian/install
+!debian/rules
+!debian/source
+QRnew-windows.zip
+QRnew.flatpak
+.flatpak-build/
+.flatpak-builder/
+.flatpak-repo/
+.flatpak-local.yml
