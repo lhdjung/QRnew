@@ -47,6 +47,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use dioxus::prelude::*;
 use dioxus_native::winit::event::{ElementState, WindowEvent};
 use dioxus_native::winit::keyboard::{Key as WinitKey, NamedKey};
@@ -375,9 +376,19 @@ impl Inset {
         // it unwraps the refusal and **the window closes**. So it happens here,
         // at the one moment a picture arrives, rather than in the memo that
         // redraws on every keystroke.
-        let (format, bytes) = match qrnew_core::shrink_logo(&bytes) {
-            Some(scaled) => (ImageFormat::Png, scaled),
-            None => (format, bytes),
+        //
+        // A scaled picture is a PNG whatever went in, and the name follows the
+        // bytes: it is what the card shows and what a theme folder saves the
+        // file under, and `photo.jpg` holding a PNG is a file that lies.
+        let (name, format, bytes) = match qrnew_core::shrink_logo(&bytes) {
+            Some(scaled) => {
+                let renamed = std::path::Path::new(&name)
+                    .with_extension("png")
+                    .to_string_lossy()
+                    .into_owned();
+                (renamed, ImageFormat::Png, scaled)
+            }
+            None => (name, format, bytes),
         };
 
         Some(Self {
@@ -723,7 +734,9 @@ impl Appearance {
     ///
     /// The same three words the sheet's buttons carry as `data-appearance`.
     pub fn named(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|appearance| appearance.slug() == name)
+        Self::ALL
+            .into_iter()
+            .find(|appearance| appearance.slug() == name)
     }
 
     /// What winit is asked to make the title bar.
@@ -841,6 +854,9 @@ pub fn App() -> Element {
             .and_then(|Inlay(path)| Inset::read(std::path::Path::new(&path)))
     });
     let mut inset_error = use_signal(|| false);
+    // The last save or copy of the code failed: the disk or the clipboard said
+    // no. Without it the button looks like it worked.
+    let mut export_error = use_signal(|| false);
     let mut inset_size = use_signal(InsetSize::default);
     let mut editing = use_signal(|| Well::Dark);
     // **What the colour caution said when a pointer took hold of the picker**,
@@ -850,9 +866,8 @@ pub fn App() -> Element {
     //
     // Written from `Picker`'s pointer handlers rather than from an effect
     // watching the colours: an effect here would run on every colour change,
-    // and `reset_puts_black_and_white_back` says why that is not free — the
-    // picker follows an outside colour through an effect of its own, and a
-    // second effect writing a signal `App` renders from starves it for a frame.
+    // and this is a signal `App` renders from, so every drag of the square
+    // would cost a second pass over the whole window.
     let mut held_caution = use_signal(|| None::<bool>);
     let take_the_caution = move |holding: bool| {
         held_caution.set(holding.then(|| contrast(dark(), light()) < SAFE_CONTRAST));
@@ -894,6 +909,8 @@ pub fn App() -> Element {
     // things to do about it: a folder with no settings file in it is the wrong
     // folder, and a settings file with no name in it is a file to fix.
     let mut import_error = use_signal(|| None::<themes::NotATheme>);
+    // A theme that could not be written, by Save or by Export.
+    let mut theme_error = use_signal(|| false);
     // Neither a question nor a complaint outlives the sheet it was made in. One
     // effect rather than a line in each of the five ways out — the cross, the
     // scrim, Escape twice over, and the button in the top bar.
@@ -901,6 +918,7 @@ pub fn App() -> Element {
         if !themes_sheet() {
             condemned.set(None);
             import_error.set(None);
+            theme_error.set(false);
         }
     });
 
@@ -926,10 +944,14 @@ pub fn App() -> Element {
         // to overrule: a picture in the middle needs 30%, so the row shows High
         // and says why. The preference is kept rather than rewritten, so taking
         // the picture away gives it back.
-        ec.set(level_named(theme.error_correction.as_deref().unwrap_or_default()));
+        ec.set(level_named(
+            theme.error_correction.as_deref().unwrap_or_default(),
+        ));
         // A *preferred* size: the largest does not fit a short code, and the
         // memo below draws the largest that does — see `Drawn::capped`.
-        inset_size.set(InsetSize::named(theme.image_size.as_deref().unwrap_or_default()));
+        inset_size.set(InsetSize::named(
+            theme.image_size.as_deref().unwrap_or_default(),
+        ));
         inset.set(
             theme
                 .image_file
@@ -945,9 +967,9 @@ pub fn App() -> Element {
     // The list is re-read off disk rather than pushed onto, so what the sheet
     // shows is what a later run will find — including the case where the write
     // silently failed.
-    let save_theme = {
+    let mut save_theme = {
         let dir = library.clone();
-        move |_| {
+        move || {
             let name = theme_name().trim().to_string();
             let Some(dir) = dir.as_deref() else { return };
             if name.is_empty() {
@@ -958,7 +980,7 @@ pub fn App() -> Element {
             // means that value, and every line written is a line somebody
             // reading the theme by hand has to take in.
             let changed = |changed: bool, word: &str| changed.then(|| word.to_string());
-            themes::save(
+            let written = themes::save(
                 dir,
                 &themes::Theme {
                     name,
@@ -968,24 +990,22 @@ pub fn App() -> Element {
                         .read()
                         .as_ref()
                         .map(|chosen| (chosen.name.clone(), chosen.bytes.clone())),
-                    image_size: changed(
-                        inset_size() != InsetSize::default(),
-                        inset_size().slug(),
-                    ),
+                    image_size: changed(inset_size() != InsetSize::default(), inset_size().slug()),
                     // The preference, not what the code was drawn at: a theme
                     // saved while an inset held the row at 30% would otherwise
                     // come back as a theme that asks for 30% forever.
-                    error_correction: changed(
-                        ec() != ErrorCorrection::Medium,
-                        level_slug(ec()),
-                    ),
+                    error_correction: changed(ec() != ErrorCorrection::Medium, level_slug(ec())),
                     shape: changed(look() != Look::default(), look().slug()),
                     margin: (margin() != DEFAULT_MARGIN).then_some(margin()),
                 },
             );
             saved.set(themes::list(dir));
-            theme_name.set(String::new());
             condemned.set(None);
+            // The name stays when the write failed, so trying again is one click.
+            theme_error.set(written.is_err());
+            if written.is_ok() {
+                theme_name.set(String::new());
+            }
         }
     };
 
@@ -1003,7 +1023,9 @@ pub fn App() -> Element {
                 };
                 // Before anything on screen changes: see `SETTLE`.
                 after(SETTLE).await;
-                let Some(dir) = library.as_deref() else { return };
+                let Some(dir) = library.as_deref() else {
+                    return;
+                };
                 match themes::import(dir, handle.path()) {
                     Ok(()) => {
                         import_error.set(None);
@@ -1095,9 +1117,8 @@ pub fn App() -> Element {
             quiet_zone: margin(),
             module: look().module(),
             finder: look().finder(),
-            // Padding and clearing stay at the core's defaults — half a module
-            // of air and a square cut-out. The size is the one of the three
-            // worth a control.
+            // Padding stays at the core's default, half a module of air. The
+            // size is the one of the two worth a control.
             logo: picture.clone().map(|bytes| Logo {
                 size: asked,
                 ..Logo::new(bytes)
@@ -1153,7 +1174,10 @@ pub fn App() -> Element {
     let read_file = move |_| {
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
-                .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "svg"])
+                .add_filter(
+                    fl!("filter-images"),
+                    &["png", "jpg", "jpeg", "gif", "webp", "svg"],
+                )
                 .pick_file()
                 .await
             else {
@@ -1184,7 +1208,10 @@ pub fn App() -> Element {
     let choose_inset = move |_| {
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
-                .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "svg"])
+                .add_filter(
+                    fl!("filter-images"),
+                    &["png", "jpg", "jpeg", "gif", "webp", "svg"],
+                )
                 .pick_file()
                 .await
             else {
@@ -1203,51 +1230,61 @@ pub fn App() -> Element {
     };
 
     let save_png = move |_| {
-        let Some(Drawn { qr, .. }) = code() else { return };
+        let Some(Drawn { qr, .. }) = code() else {
+            return;
+        };
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
-                .add_filter("PNG Image", &["png"])
+                .add_filter(fl!("filter-png"), &["png"])
                 .set_file_name("qrcode.png")
                 .save_file()
                 .await
             else {
                 return;
             };
-            if let Ok(png) = qr.to_png(export_scale(&qr)) {
-                let _ = std::fs::write(handle.path(), png);
-            }
+            let written = qr
+                .to_png(export_scale(&qr))
+                .ok()
+                .is_some_and(|png| std::fs::write(handle.path(), png).is_ok());
+            export_error.set(!written);
         });
     };
 
     let save_svg = move |_| {
-        let Some(Drawn { qr, .. }) = code() else { return };
+        let Some(Drawn { qr, .. }) = code() else {
+            return;
+        };
         spawn(async move {
             let Some(handle) = rfd::AsyncFileDialog::new()
-                .add_filter("SVG Image", &["svg"])
+                .add_filter(fl!("filter-svg"), &["svg"])
                 .set_file_name("qrcode.svg")
                 .save_file()
                 .await
             else {
                 return;
             };
-            let _ = std::fs::write(handle.path(), qr.into_svg());
+            export_error.set(std::fs::write(handle.path(), qr.into_svg()).is_err());
         });
     };
 
     let copy = move |_| {
-        let Some(Drawn { qr, .. }) = code() else { return };
-        let Ok(raster) = qr.to_rgba(export_scale(&qr)) else {
+        let Some(Drawn { qr, .. }) = code() else {
             return;
         };
-        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-            let copy = clipboard.set_image(arboard::ImageData {
-                width: raster.width as usize,
-                height: raster.height as usize,
-                bytes: raster.pixels.into(),
-            });
-            if copy.is_ok() {
-                copied_image.raise();
-            }
+        let copied = qr.to_rgba(export_scale(&qr)).ok().is_some_and(|raster| {
+            arboard::Clipboard::new().is_ok_and(|mut clipboard| {
+                clipboard
+                    .set_image(arboard::ImageData {
+                        width: raster.width as usize,
+                        height: raster.height as usize,
+                        bytes: raster.pixels.into(),
+                    })
+                    .is_ok()
+            })
+        });
+        export_error.set(!copied);
+        if copied {
+            copied_image.raise();
         }
     };
 
@@ -1268,6 +1305,7 @@ pub fn App() -> Element {
         // not subscribe to the flag it clears — subscribing would make it run
         // on the write that raises it and put it straight back down.
         copied_image.lower();
+        export_error.set(false);
     });
 
     // Whether there is anything to save, copy or look at. It decides both the
@@ -1276,7 +1314,11 @@ pub fn App() -> Element {
 
     // Whether an inset is in place — asked three times below, so read once here.
     let has_inset = inset.read().is_some();
-    let shown_ec = if has_inset { ErrorCorrection::High } else { ec() };
+    let shown_ec = if has_inset {
+        ErrorCorrection::High
+    } else {
+        ec()
+    };
     // Whether the level the code is drawn at is not the level that was asked
     // for. Only ever one way round: an inset raises the row to 30% and nothing
     // lowers it, so this is true exactly when a picture is in the way of a
@@ -1787,6 +1829,9 @@ pub fn App() -> Element {
                             }
                         }
                     }
+                    if export_error() {
+                        p { class: "error", "data-export-error": "true", {fl!("export-error")} }
+                    }
                 }
 
                 section { class: "rail rail-colors",
@@ -1838,18 +1883,28 @@ pub fn App() -> Element {
                                 span { {fl!("color-warning")} }
                             }
                         }
-                        // Two branches rather than one call with a signal
-                        // chosen inside it, because switching wells has to
-                        // *rebuild* the picker: its draft hex and its hue are
-                        // its own state, and a picker handed a different
-                        // colour would carry the first one's over. A `key`
-                        // does not do it — Dioxus diffs a lone child by
-                        // position — but two arms of an `if` are two different
-                        // nodes, and swapping them mounts a fresh one.
-                        if editing() == Well::Dark {
-                            Picker { color: dark, onhold: take_the_caution, onswap: swap }
-                        } else {
-                            Picker { color: light, onhold: take_the_caution, onswap: swap }
+                        // One picker, handed whichever well is being edited.
+                        //
+                        // **This used to be two arms of an `if`**, on the
+                        // argument that swapping them mounts a fresh picker
+                        // and so cannot carry the first well's hue into the
+                        // second. It does not, measured with a `use_hook` that
+                        // prints: the picker mounts once and is still the same
+                        // scope after a switch. Two arms each holding one
+                        // component node compile to templates with the same
+                        // roots and paths, and `Template`'s `PartialEq` finds
+                        // them equal — by pointer where the linker has merged
+                        // the two statics, by value where it has not — so
+                        // `diff_node` reuses the scope, every `use_signal` in
+                        // it included.
+                        //
+                        // Nothing in the picker is its own state now: the hue
+                        // and the hex field are both read off `color`, so
+                        // pointing it at the other well is all this has to do.
+                        Picker {
+                            color: if editing() == Well::Dark { dark } else { light },
+                            onhold: take_the_caution,
+                            onswap: swap,
                         }
                         button {
                             class: "btn wide",
@@ -1872,7 +1927,7 @@ pub fn App() -> Element {
                             span { {fl!("section-inset")} }
                         }
                         if let Some(name) = inset_name {
-                            div { class: "inset",
+                            div { class: "inset-row",
                                 img {
                                     class: "inset-thumb",
                                     "data-inset-thumb": "true",
@@ -1986,6 +2041,7 @@ pub fn App() -> Element {
                 div { class: "scrim", onclick: move |_| themes_sheet.set(false),
                     div {
                         class: "sheet themes-sheet",
+                        role: "dialog",
                         onclick: move |event| event.stop_propagation(),
                         div { class: "sheet-head",
                             h2 {
@@ -2091,7 +2147,7 @@ pub fn App() -> Element {
                                                             else {
                                                                 return;
                                                             };
-                                                            themes::save(handle.path(), &chosen);
+                                                            theme_error.set(themes::save(handle.path(), &chosen).is_err());
                                                         });
                                                     }
                                                 },
@@ -2129,6 +2185,7 @@ pub fn App() -> Element {
                                     match why {
                                         themes::NotATheme::NoFile => fl!("themes-import-error-no-file"),
                                         themes::NotATheme::NoName => fl!("themes-import-error-no-name"),
+                                        themes::NotATheme::Unwritable => fl!("themes-save-error"),
                                     }
                                 }
                             }
@@ -2165,9 +2222,22 @@ pub fn App() -> Element {
                                     aria_label: fl!("themes-name"),
                                     value: "{theme_name}",
                                     oninput: move |event| theme_name.set(event.value()),
-                                    onkeydown: move |event| {
-                                        caret.struck();
-                                        appkit_has_this_key(&event);
+                                    onkeydown: {
+                                        let mut save_theme = save_theme.clone();
+                                        move |event: Event<KeyboardData>| {
+                                            caret.struck();
+                                            appkit_has_this_key(&event);
+                                            if event.key() == Key::Enter {
+                                                save_theme();
+                                            }
+                                            // The only field in the sheet, and
+                                            // buttons take no focus in Blitz:
+                                            // Tab would land on a field behind
+                                            // the scrim and type into it unseen.
+                                            if event.key() == Key::Tab {
+                                                event.prevent_default();
+                                            }
+                                        }
                                     },
                                     onfocusin: move |_| caret.arrived(),
                                     onfocusout: move |_| caret.left(),
@@ -2182,10 +2252,13 @@ pub fn App() -> Element {
                                 class: if can_save { "btn" } else { "btn off" },
                                 "data-theme-save": "true",
                                 aria_disabled: if can_save { "false" } else { "true" },
-                                onclick: save_theme,
+                                onclick: move |_| save_theme(),
                                 {glyph(Glyph::Bookmark, step_ink(can_save), "glyph")}
                                 span { {fl!("themes-save")} }
                             }
+                        }
+                        if theme_error() {
+                            p { class: "error", {fl!("themes-save-error")} }
                         }
                     }
                 }
@@ -2195,6 +2268,7 @@ pub fn App() -> Element {
                 div { class: "scrim", onclick: move |_| appearance_sheet.set(false),
                     div {
                         class: "sheet appearance-sheet",
+                        role: "dialog",
                         // The scrim closes on a click; the panel is not the
                         // scrim.
                         onclick: move |event| event.stop_propagation(),
@@ -2260,6 +2334,7 @@ pub fn App() -> Element {
                 div { class: "scrim", onclick: move |_| about.set(false),
                     div {
                         class: "sheet about",
+                        role: "dialog",
                         // The scrim closes on a click; the panel is not the
                         // scrim.
                         onclick: move |event| event.stop_propagation(),
@@ -2363,16 +2438,37 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
     // field like the other two and blinks like them; it is only in a different
     // component because the colour picker is.
     let mut caret = use_context::<Caret>();
-    // The hex field keeps its own text, because half-typed hex is not a colour
-    // and a field rewritten from `color` on every keystroke cannot be typed in.
-    let mut draft = use_signal(|| color().to_hex());
-    let mut valid = use_signal(|| true);
+    // What is in the hex field while it is being typed in, and nothing when it
+    // is not: half-typed hex is not a colour, and a field written from `color`
+    // on every keystroke cannot be typed in. `None` means "whatever the colour
+    // is", which is how an outside change reaches the field for free.
+    let mut typed = use_signal(|| None::<String>);
+    let showing = typed.read().clone().unwrap_or_else(|| color().to_hex());
+    let valid = parse_hex(&showing).is_some();
 
-    // Hue, saturation and value are held here rather than derived from the
-    // colour on every render, because the conversion back is lossy where a
-    // picker is used: black and grey have no hue, so a square dragged into its
-    // bottom edge would snap the strip to red and strand whoever was dragging.
-    let mut hsv = use_signal(|| to_hsv(color()));
+    // **Where the square and the strip point, which is not simply read off the
+    // colour.** The round trip through HSV is lossy exactly where a picker is
+    // used — a grey has no hue, black has neither hue nor saturation — so a
+    // square dragged into its own bottom edge would snap the strip to red and
+    // strand whoever was dragging it.
+    //
+    // So the picker remembers the hue it last wrote, and that stands wherever
+    // the colour cannot say. **It is a fallback, not the source**: the colour
+    // is read afresh whenever the remembered hue stops producing it, which is
+    // what tells a colour arriving from anywhere else — the other well, a
+    // reset, a theme — from one of the picker's own.
+    //
+    // Holding it in a signal and correcting it from a `use_effect` did not
+    // work, and `the_picker_does_not_carry_a_hue_between_wells` is the report:
+    // the effect subscribes to whichever `color` it read on its last run, so
+    // pointing the picker at the other well never fires it.
+    let picked = color();
+    let mut kept = use_signal(|| to_hsv(picked));
+    let hsv = if from_hsv(*kept.peek()) == picked {
+        *kept.peek()
+    } else {
+        to_hsv(picked)
+    };
     let mut dragging = use_signal(|| false);
     // Taking hold and letting go are the same two words to the square, to the
     // strip, and to the caution a rail-width above them.
@@ -2381,55 +2477,26 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
         onhold.call(holding);
     };
 
-    // The last colour this picker wrote, so a colour arriving from anywhere
-    // else can be told apart from one of its own — "Reset to black & white" is
-    // the one place another comes from.
-    //
-    // A round trip through HSV cannot stand in for this comparison: it is lossy
-    // for exactly the colours a picker is used on, so a half-typed hex would be
-    // mistaken for an outside change and overwritten mid-keystroke.
-    let mut written = use_signal(|| *color.peek());
-
     let mut apply = move |next: Hsv| {
-        hsv.set(next);
-        let rgb = from_hsv(next);
-        color.set(rgb);
-        written.set(rgb);
-        draft.set(rgb.to_hex());
-        valid.set(true);
+        kept.set(next);
+        typed.set(None);
+        color.set(from_hsv(next));
     };
-
-    use_effect(move || {
-        let outside = color();
-        // `peek` rather than a read: this effect must not subscribe to what it
-        // writes, or setting `written` below would schedule it to run again.
-        if outside != *written.peek() {
-            written.set(outside);
-            hsv.set(to_hsv(outside));
-            draft.set(outside.to_hex());
-            valid.set(true);
-        }
-    });
 
     let mut pick_in_square = move |event: Event<PointerData>| {
         let (x, y) = event.element_coordinates().to_tuple();
-        let Hsv { hue, .. } = hsv();
         apply(Hsv {
-            hue,
             saturation: (x / SQUARE_W).clamp(0.0, 1.0) as f32,
             value: 1.0 - (y / SQUARE_H).clamp(0.0, 1.0) as f32,
+            ..hsv
         });
     };
 
     let mut pick_in_strip = move |event: Event<PointerData>| {
         let (x, _) = event.element_coordinates().to_tuple();
-        let Hsv {
-            saturation, value, ..
-        } = hsv();
         apply(Hsv {
             hue: (x / SQUARE_W).clamp(0.0, 1.0) as f32 * 360.0,
-            saturation,
-            value,
+            ..hsv
         });
     };
 
@@ -2437,14 +2504,13 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
         hue,
         saturation,
         value,
-    } = hsv();
+    } = hsv;
     let pure = from_hsv(Hsv {
         hue,
         saturation: 1.0,
         value: 1.0,
     })
     .to_hex();
-    let picked = color();
     let square_mark = marker(
         f64::from(saturation) * SQUARE_W,
         f64::from(1.0 - value) * SQUARE_H,
@@ -2457,7 +2523,11 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
         STRIP_H / 2.0,
         SQUARE_W,
         STRIP_H,
-        from_hsv(Hsv { hue, saturation: 1.0, value: 1.0 }),
+        from_hsv(Hsv {
+            hue,
+            saturation: 1.0,
+            value: 1.0,
+        }),
     );
 
     rsx! {
@@ -2523,31 +2593,22 @@ fn Picker(color: Signal<Rgb>, onhold: EventHandler<bool>, onswap: EventHandler<(
             }
             div { class: "hexrow",
                 input {
-                    class: if valid() { "hex" } else { "hex bad" },
+                    class: if valid { "hex" } else { "hex bad" },
                     r#type: "text",
                     "data-hex": "true",
-                    value: "{draft}",
+                    value: "{showing}",
                     oninput: move |event| {
                         let text = event.value();
-                        match parse_hex(&text) {
-                            Some(parsed) => {
-                                valid.set(true);
-                                hsv.set(to_hsv(parsed));
-                                color.set(parsed);
-                                written.set(parsed);
-                            }
-                            None => valid.set(false),
+                        if let Some(parsed) = parse_hex(&text) {
+                            color.set(parsed);
                         }
-                        draft.set(text);
+                        typed.set(Some(text));
                     },
                     // The same rule the margin field follows: half-typed text
                     // may sit in a field while it is being typed, but it cannot
                     // outlive the keyboard. The code is still drawn in the last
                     // colour that parsed.
-                    onblur: move |_| {
-                        draft.set(color().to_hex());
-                        valid.set(true);
-                    },
+                    onblur: move |_| typed.set(None),
                     onkeydown: move |event| {
                         caret.struck();
                         appkit_has_this_key(&event);
@@ -2627,7 +2688,7 @@ impl Ink {
     /// The five on a bright window.
     const fn light(self) -> &'static str {
         match self {
-            Ink::Accent => "#0F9D63",
+            Ink::Accent => "#0A8452",
             Ink::Plain => "#2B313A",
             Ink::Faint => "#838B95",
             Ink::Warn => "#8A5B06",
@@ -2743,7 +2804,10 @@ impl Glyph {
                 "M12 3.4 C12 3.4 5.6 9.9 5.6 14.1 A6.4 6.4 0 0 0 18.4 14.1 C18.4 9.9 12 3.4 12 3.4 Z",
                 "M9.3 14.7 A2.7 2.7 0 0 0 12 17.4",
             ],
-            Glyph::Undo => &["M3.5 12 A8.5 8.5 0 1 0 6.4 5.7 L3.5 8.7", "M3.5 3.7 V8.7 H8.5"],
+            Glyph::Undo => &[
+                "M3.5 12 A8.5 8.5 0 1 0 6.4 5.7 L3.5 8.7",
+                "M3.5 3.7 V8.7 H8.5",
+            ],
             Glyph::Download => &[
                 "M12 3.6 V15.4",
                 "M7.4 10.9 L12 15.5 L16.6 10.9",
@@ -3079,29 +3143,7 @@ pub(crate) fn parse_hex(text: &str) -> Option<Rgb> {
 /// third more, escaping everything costs three times more, and this is rebuilt
 /// on every keystroke.
 fn data_url(mime: &str, bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    let mut out = String::with_capacity(mime.len() + 13 + bytes.len().div_ceil(3) * 4);
-    out.push_str("data:");
-    out.push_str(mime);
-    out.push_str(";base64,");
-
-    for chunk in bytes.chunks(3) {
-        let block = (u32::from(chunk[0]) << 16)
-            | (chunk.get(1).map_or(0, |&byte| u32::from(byte)) << 8)
-            | chunk.get(2).map_or(0, |&byte| u32::from(byte));
-
-        for slot in 0..4 {
-            if slot <= chunk.len() {
-                let index = (block >> (18 - 6 * slot)) & 0x3f;
-                out.push(ALPHABET[index as usize] as char);
-            } else {
-                out.push('=');
-            }
-        }
-    }
-
-    out
+    format!("data:{mime};base64,{}", BASE64_STANDARD.encode(bytes))
 }
 
 /// A beat every `period`, for as long as the window is open.
@@ -3283,7 +3325,10 @@ mod tests {
             "a {} pixel picture was given {box_px} pixels",
             qrnew_core::MAX_LOGO_SIDE
         );
-        assert!(across <= MAX_EXPORT_PX, "{across} pixels is past the ceiling");
+        assert!(
+            across <= MAX_EXPORT_PX,
+            "{across} pixels is past the ceiling"
+        );
     }
 
     /// **An icon's ink and the stylesheet's have to be the same colour.**
@@ -3368,7 +3413,11 @@ mod tests {
 
         let chosen = block(".appearance-dark {");
         assert!(chosen.len() > 20, "the palette is most of the window");
-        assert_eq!(chosen, block(".appearance-system {"), "the two copies have drifted");
+        assert_eq!(
+            chosen,
+            block(".appearance-system {"),
+            "the two copies have drifted"
+        );
     }
 
     #[test]

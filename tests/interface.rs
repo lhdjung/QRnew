@@ -113,33 +113,8 @@ fn curved(path: &str) -> bool {
 }
 
 fn decode_base64(text: &str) -> Vec<u8> {
-    let value = |byte: u8| -> u32 {
-        match byte {
-            b'A'..=b'Z' => u32::from(byte - b'A'),
-            b'a'..=b'z' => u32::from(byte - b'a') + 26,
-            b'0'..=b'9' => u32::from(byte - b'0') + 52,
-            b'+' => 62,
-            b'/' => 63,
-            other => panic!("{} is not base64", other as char),
-        }
-    };
-
-    let mut out = Vec::with_capacity(text.len() / 4 * 3);
-    for chunk in text.as_bytes().chunks(4) {
-        let kept = chunk.iter().filter(|&&byte| byte != b'=').count();
-        let mut block = 0u32;
-        for slot in 0..4 {
-            let digit = chunk
-                .get(slot)
-                .filter(|&&byte| byte != b'=')
-                .map_or(0, |&byte| value(byte));
-            block |= digit << (18 - 6 * slot);
-        }
-        for byte in 0..kept - 1 {
-            out.push(((block >> (16 - 8 * byte)) & 0xff) as u8);
-        }
-    }
-    out
+    use base64::prelude::{BASE64_STANDARD, Engine as _};
+    BASE64_STANDARD.decode(text).expect("the app writes base64")
 }
 
 /// A harness with the app in it, ready for the first event.
@@ -254,7 +229,10 @@ impl NetProvider for DataUri {
 /// The code as a *document* is checked off the `data:` URL by [`preview`]. What
 /// needs this is the code as a *box on the stage*: an image that never loaded
 /// has no intrinsic size — see `the_appearance_does_not_take_the_code_off_the_stage`.
-fn app_drawn(text: &str, image: Option<&std::path::Path>) -> Harness<dioxus_native::DioxusDocument> {
+fn app_drawn(
+    text: &str,
+    image: Option<&std::path::Path>,
+) -> Harness<dioxus_native::DioxusDocument> {
     let mut vdom = VirtualDom::new(App).with_root_context(Fill(text.to_string()));
     if let Some(image) = image {
         vdom = vdom.with_root_context(Inlay(image.to_string_lossy().into_owned()));
@@ -406,10 +384,15 @@ fn the_code_is_square_until_somebody_says_otherwise() {
     let svg = preview(&harness).unwrap();
 
     for path in outlines(&svg) {
-        assert!(!curved(path), "nothing in an untouched code is curved: {path}");
+        assert!(
+            !curved(path),
+            "nothing in an untouched code is curved: {path}"
+        );
     }
     assert_eq!(
-        harness.attr("[data-look=\"square\"]", "aria-pressed").as_deref(),
+        harness
+            .attr("[data-look=\"square\"]", "aria-pressed")
+            .as_deref(),
         Some("true")
     );
 }
@@ -420,7 +403,10 @@ fn the_code_is_square_until_somebody_says_otherwise() {
 /// the focused node, so this also tests the `autofocus` on each Close button.
 #[test]
 fn escape_closes_a_sheet() {
-    for (open, panel) in [(".about-open", ".about"), (".appearance-open", ".appearance-sheet")] {
+    for (open, panel) in [
+        (".about-open", ".about"),
+        (".appearance-open", ".appearance-sheet"),
+    ] {
         let mut harness = app();
         harness.click(open);
         harness.pump();
@@ -900,14 +886,17 @@ fn reset_puts_black_and_white_back() {
         Some("#000000"),
         "the hex field says what the code is actually painted with"
     );
-    assert_eq!(harness.text_content("[data-well=\"dark\"]"), "Foreground#000000");
+    assert_eq!(
+        harness.text_content("[data-well=\"dark\"]"),
+        "Foreground#000000"
+    );
 }
 
 /// **And it follows a reset that takes the colour caution down with it.**
 ///
-/// The one state with two things to redraw at once, which is where a caution
-/// written as a second effect starves the first. It is why the held caution is
-/// written from the picker's pointer handlers instead.
+/// The one state with two things to redraw at once: the colours and the banner
+/// above them. It is why the held caution is written from the picker's pointer
+/// handlers rather than from an effect watching the colours.
 #[test]
 fn the_picker_follows_a_reset_that_takes_the_caution_down() {
     let mut harness = app();
@@ -1197,7 +1186,10 @@ fn clicking_beside_the_about_panel_closes_it() {
     let panel = harness.layout_rect(".about");
     harness.click_at(panel.x + panel.width / 2.0, panel.y + 8.0);
     harness.pump();
-    assert!(harness.query(".about").is_some(), "the panel is not its own scrim");
+    assert!(
+        harness.query(".about").is_some(),
+        "the panel is not its own scrim"
+    );
 
     harness.click_at(24.0, 24.0);
     harness.pump();
@@ -1224,7 +1216,9 @@ fn a_press_that_drifts_still_counts() {
     harness.pump();
 
     assert_eq!(
-        harness.attr("[data-ec=\"high\"]", "aria-pressed").as_deref(),
+        harness
+            .attr("[data-ec=\"high\"]", "aria-pressed")
+            .as_deref(),
         Some("true"),
         "a slow press on a button still works it"
     );
@@ -1293,7 +1287,10 @@ fn anything_but_square_says_what_it_costs() {
             "{look} is cautioned about"
         );
         assert!(
-            !harness.text_content("[data-shape-warning]").trim().is_empty(),
+            !harness
+                .text_content("[data-shape-warning]")
+                .trim()
+                .is_empty(),
             "{look}: and the caution says something"
         );
     }
@@ -1517,7 +1514,9 @@ fn a_code_too_small_for_a_size_still_takes_the_ask() {
         Some("true"),
         "the row points at the size that was asked for"
     );
-    let large = harness.attr("[data-inset-size=\"large\"]", "class").unwrap();
+    let large = harness
+        .attr("[data-inset-size=\"large\"]", "class")
+        .unwrap();
     assert!(
         large.contains("on") && large.contains("off"),
         "and shows it as held, because it is not what was drawn: {large:?}"
@@ -1531,7 +1530,9 @@ fn a_code_too_small_for_a_size_still_takes_the_ask() {
     harness.click(".field");
     harness.type_text("https://example.org");
     harness.pump();
-    let large = harness.attr("[data-inset-size=\"large\"]", "class").unwrap();
+    let large = harness
+        .attr("[data-inset-size=\"large\"]", "class")
+        .unwrap();
     assert!(
         !large.contains("off"),
         "a longer address is a bigger code, and it has the room: {large:?}"
@@ -1576,12 +1577,18 @@ fn a_shrinking_code_keeps_its_picture_and_says_the_size_is_held() {
     harness.pump();
 
     let svg = preview(&harness).expect("the code is still drawn, at a size that fits");
-    assert_eq!(modules_across(&svg), 21 + 2 * 2, "down to the smallest code");
+    assert_eq!(
+        modules_across(&svg),
+        21 + 2 * 2,
+        "down to the smallest code"
+    );
     assert!(
         inset_width(&harness) < asked,
         "the picture was drawn smaller rather than not at all"
     );
-    let large = harness.attr("[data-inset-size=\"large\"]", "class").unwrap();
+    let large = harness
+        .attr("[data-inset-size=\"large\"]", "class")
+        .unwrap();
     assert!(
         large.contains("on") && large.contains("off"),
         "and the row shows the size it asked for as held: {large:?}"
@@ -1607,9 +1614,18 @@ fn no_control_is_below_the_fold() {
     for height in [860, 820] {
         for (state, mut harness) in [
             ("as it opens", app()),
-            ("with a picture in it", app_with_inset("https://example.org", "fold")),
-            ("cautioning about the margin", app_after(&["[data-margin-less]"; 2])),
-            ("cautioning about the colours", app_after(&["[data-swatch=\"#ffffff\"]"])),
+            (
+                "with a picture in it",
+                app_with_inset("https://example.org", "fold"),
+            ),
+            (
+                "cautioning about the margin",
+                app_after(&["[data-margin-less]"; 2]),
+            ),
+            (
+                "cautioning about the colours",
+                app_after(&["[data-swatch=\"#ffffff\"]"]),
+            ),
         ] {
             harness.set_viewport_size(1280, height);
             harness.pump();
@@ -1852,11 +1868,16 @@ fn the_picker_marks_where_it_was_clicked() {
     let mut harness = app();
 
     let square = harness.layout_rect("[data-square]");
-    let target = (square.x + square.width * 0.75, square.y + square.height * 0.25);
+    let target = (
+        square.x + square.width * 0.75,
+        square.y + square.height * 0.25,
+    );
     harness.click_at(target.0, target.1);
     harness.pump();
 
-    let style = harness.attr("[data-square]", "style").expect("the square is painted");
+    let style = harness
+        .attr("[data-square]", "style")
+        .expect("the square is painted");
     assert!(
         !style.contains("radial-gradient"),
         "nothing here may be positioned with a radial gradient: {style}"
@@ -1876,7 +1897,9 @@ fn the_picker_marks_where_it_was_clicked() {
     let strip = harness.layout_rect("[data-strip]");
     harness.click_at(strip.x + strip.width / 2.0, strip.y + strip.height / 2.0);
     harness.pump();
-    let style = harness.attr("[data-strip]", "style").expect("the strip is painted");
+    let style = harness
+        .attr("[data-strip]", "style")
+        .expect("the strip is painted");
     let x = strip.width / 2.0 - 10.0;
     assert!(
         style.contains(&format!("{x:.1}px 1.0px")),
@@ -1912,7 +1935,75 @@ fn the_wells_choose_what_the_picker_edits() {
     harness.click("[data-well=\"light\"]");
     harness.pump();
     assert!(harness.query("[data-square]").is_some());
-    assert_eq!(harness.attr("[data-hex]", "value").as_deref(), Some("#ffffff"));
+    assert_eq!(
+        harness.attr("[data-hex]", "value").as_deref(),
+        Some("#ffffff")
+    );
+}
+
+/// **And it does not carry the last well's hue into the next one.**
+///
+/// The square and the strip need a hue the colour cannot always give — a grey
+/// has none to read back — so the picker remembers one. Remembering it in a
+/// signal, and correcting it from an effect, left it wherever the *other* well
+/// put it: the two wells share one `Picker`, and the effect subscribed to
+/// whichever colour it read on its first run, so switching wells never fired
+/// it. The marker stayed put and the next touch of the square jumped the
+/// colour to a hue nobody had chosen.
+///
+/// It is a fallback now: read off the colour on every render, and the
+/// remembered hue stands only while it still produces that colour.
+///
+/// **This test only bit in a release build**, which is how the bug reached use
+/// past a green suite. The picker's scope is reused after a switch in either
+/// build — the two arms of the `if` this used to be never remounted anything —
+/// but the `use_effect` that corrected the hue ran on every switch when
+/// unoptimised and never when optimised. Why debug re-runs it is not chased
+/// here; that it does is why `build.yml` now runs the tests twice.
+///
+/// The top-right corner of the square is the hue at full strength, so it is the
+/// one press that says which hue the picker is on.
+#[test]
+fn the_picker_does_not_carry_a_hue_between_wells() {
+    let mut harness = app();
+    harness.click(".field");
+    harness.type_text("hello");
+    harness.pump();
+
+    // The foreground is taken to cyan: the pure hue out of the square, then
+    // halfway along the strip.
+    let square = harness.layout_rect("[data-square]");
+    harness.click_at(square.x + square.width - 2.0, square.y + 2.0);
+    harness.pump();
+    let strip = harness.layout_rect("[data-strip]");
+    harness.click_at(strip.x + strip.width / 2.0, strip.y + strip.height / 2.0);
+    harness.pump();
+    let shown = harness
+        .attr("[data-hex]", "value")
+        .expect("the picker says so");
+    let (r, g, b) = hex(&shown);
+    assert!(
+        g > 200 && b > 200 && r < 60,
+        "halfway along the strip is cyan, not ({r}, {g}, {b})"
+    );
+
+    // The background is white, whose hue is red's. The same press has to give
+    // red, not the cyan the foreground was left on.
+    harness.click("[data-well=\"light\"]");
+    harness.pump();
+    // Measured again: cyan on white earned the colour caution, and that banner
+    // sits above the square.
+    let square = harness.layout_rect("[data-square]");
+    harness.click_at(square.x + square.width - 2.0, square.y + 2.0);
+    harness.pump();
+    let shown = harness
+        .attr("[data-hex]", "value")
+        .expect("the picker says so");
+    let (r, g, b) = hex(&shown);
+    assert!(
+        r > 200 && g < 60 && b < 60,
+        "this well's own hue, not the one the other well was left on: ({r}, {g}, {b})"
+    );
 }
 
 /// **A stepper button says when it has nowhere to go.**
@@ -2368,7 +2459,9 @@ fn an_inset_holds_error_correction_at_thirty_percent() {
 
     let denser = modules_across(&preview(&harness).unwrap());
     assert_eq!(
-        harness.attr("[data-ec=\"high\"]", "aria-pressed").as_deref(),
+        harness
+            .attr("[data-ec=\"high\"]", "aria-pressed")
+            .as_deref(),
         Some("true"),
         "the row shows the level the code is actually drawn at"
     );
@@ -2383,7 +2476,9 @@ fn an_inset_holds_error_correction_at_thirty_percent() {
     harness.click("[data-ec=\"low\"]");
     harness.pump();
     assert_eq!(
-        harness.attr("[data-ec=\"high\"]", "aria-pressed").as_deref(),
+        harness
+            .attr("[data-ec=\"high\"]", "aria-pressed")
+            .as_deref(),
         Some("true"),
     );
     assert_eq!(modules_across(&preview(&harness).unwrap()), denser);
@@ -2614,16 +2709,30 @@ fn the_appearance_is_the_desktops_until_somebody_picks_one() {
 
         let case = format!("{desktop:?} desktop, {chosen} picked");
         assert!(
-            harness.query(&format!(".app.appearance-{chosen}")).is_some(),
+            harness
+                .query(&format!(".app.appearance-{chosen}"))
+                .is_some(),
             "{case}: the root wears the choice, not the outcome"
         );
 
         // And the icons agree with the palette that choice resolves to.
         let pairs = harness.query_all(".lit").len();
         assert!(pairs > 10, "{case}: the window is full of icons");
-        assert_eq!(harness.query_all(".dim").len(), pairs, "{case}: one of each");
-        let (lit, dim) = if wanted == "dark" { (0, pairs) } else { (pairs, 0) };
-        assert_eq!(shown(&harness, ".lit"), lit, "{case}: light-ink icons shown");
+        assert_eq!(
+            harness.query_all(".dim").len(),
+            pairs,
+            "{case}: one of each"
+        );
+        let (lit, dim) = if wanted == "dark" {
+            (0, pairs)
+        } else {
+            (pairs, 0)
+        };
+        assert_eq!(
+            shown(&harness, ".lit"),
+            lit,
+            "{case}: light-ink icons shown"
+        );
         assert_eq!(shown(&harness, ".dim"), dim, "{case}: dark-ink icons shown");
     }
 }
@@ -2679,7 +2788,10 @@ fn the_code_on_the_stage_is_the_code_in_the_file() {
     // And the allowance is exactly the two things named above. The declaration
     // is the head of the file and nothing else went missing; every other byte
     // of difference is a space before a slash, one per empty element.
-    assert!(in_the_file.starts_with("<?xml"), "the file is an XML document");
+    assert!(
+        in_the_file.starts_with("<?xml"),
+        "the file is an XML document"
+    );
     assert!(!on_screen.contains("?>"), "and the stage is not");
     let empty_elements = body(&on_screen).matches("/>").count();
     assert!(empty_elements > 1, "there are empty elements to count");
@@ -2718,7 +2830,11 @@ fn the_appearance_does_not_take_the_code_off_the_stage() {
     };
 
     let code = square(&harness, "[data-preview] svg", "before the sheet is opened");
-    let inset = square(&harness, "[data-preview-inset]", "before the sheet is opened");
+    let inset = square(
+        &harness,
+        "[data-preview-inset]",
+        "before the sheet is opened",
+    );
 
     harness.click(".appearance-open");
     harness.pump();
@@ -2755,8 +2871,15 @@ fn the_sheet_writes_a_choice_down_and_nothing_else() {
     let mut harness = Harness::from_vdom(vdom, HarnessOptions::default());
     harness.set_viewport_size(1280, 860);
     harness.pump();
-    assert!(harness.query(".app.appearance-dark").is_some(), "the seed took");
-    assert_eq!(seen(), vec![], "a seeded window has not been asked anything");
+    assert!(
+        harness.query(".app.appearance-dark").is_some(),
+        "the seed took"
+    );
+    assert_eq!(
+        seen(),
+        vec![],
+        "a seeded window has not been asked anything"
+    );
 
     harness.click(".appearance-open");
     harness.pump();
@@ -2784,12 +2907,17 @@ fn the_sheet_writes_a_choice_down_and_nothing_else() {
 #[test]
 fn the_appearance_sheet_opens_chooses_and_closes() {
     let mut harness = app();
-    assert!(harness.query("[data-appearance]").is_none(), "it starts closed");
+    assert!(
+        harness.query("[data-appearance]").is_none(),
+        "it starts closed"
+    );
 
     harness.click(".appearance-open");
     harness.pump();
     assert_eq!(
-        harness.attr("[data-appearance=\"system\"]", "aria-pressed").as_deref(),
+        harness
+            .attr("[data-appearance=\"system\"]", "aria-pressed")
+            .as_deref(),
         Some("true"),
         "the sheet opens on the answer in force"
     );
@@ -2797,11 +2925,15 @@ fn the_appearance_sheet_opens_chooses_and_closes() {
     harness.click("[data-appearance=\"dark\"]");
     harness.pump();
     assert_eq!(
-        harness.attr("[data-appearance=\"dark\"]", "aria-pressed").as_deref(),
+        harness
+            .attr("[data-appearance=\"dark\"]", "aria-pressed")
+            .as_deref(),
         Some("true"),
     );
     assert_eq!(
-        harness.attr("[data-appearance=\"system\"]", "aria-pressed").as_deref(),
+        harness
+            .attr("[data-appearance=\"system\"]", "aria-pressed")
+            .as_deref(),
         Some("false"),
         "and only one of them at a time"
     );
@@ -2842,6 +2974,29 @@ fn app_with_library(
     harness.set_viewport_size(1280, 860);
     harness.pump();
     harness
+}
+
+/// Enter in the name field saves, like the button beside it; Tab stays in the
+/// field rather than walking to the colour code behind the scrim.
+#[test]
+fn enter_saves_a_theme_and_tab_stays_in_the_sheet() {
+    let dir = a_library("enter");
+    let mut harness = app_with_library("https://example.org", None, &dir);
+    harness.click(".themes-open");
+    harness.pump();
+    harness.click("[data-theme-name]");
+    harness.type_text("Mine");
+    harness.press(keyboard_types::Key::Tab);
+    harness.type_text("!");
+    harness.pump();
+    assert_eq!(
+        harness.attr("[data-theme-name]", "value").as_deref(),
+        Some("Mine!"),
+        "Tab left the name field"
+    );
+    harness.press(keyboard_types::Key::Enter);
+    harness.pump();
+    assert!(harness.query("[data-theme=\"Mine!\"]").is_some());
 }
 
 /// **The whole point of a theme: the look comes back and the text does not
@@ -2930,10 +3085,7 @@ fn a_theme_gives_back_the_look_and_leaves_the_text_alone() {
     harness.click("[data-theme-remove-yes=\"Uni Bern\"]");
     harness.pump();
     assert!(harness.query("[data-theme]").is_none());
-    assert!(
-        qrnew::themes::list(&dir).is_empty(),
-        "off the disk as well"
-    );
+    assert!(qrnew::themes::list(&dir).is_empty(), "off the disk as well");
 }
 
 /// A theme worth saving, straight to disk.
@@ -2950,7 +3102,8 @@ fn a_saved_theme(dir: &std::path::Path, name: &str, image: Option<&str>) {
             margin: Some(2),
             shape: Some("square".to_string()),
         },
-    );
+    )
+    .unwrap();
 }
 
 /// The row is a name, a picture's file name, *Export theme* and a bin — and the
@@ -3023,7 +3176,11 @@ fn deleting_a_theme_is_asked_about_first() {
             .query("[data-theme-remove-yes=\"Uni Bern\"]")
             .is_some()
     );
-    assert_eq!(qrnew::themes::list(&dir).len(), 1, "and nothing is gone yet");
+    assert_eq!(
+        qrnew::themes::list(&dir).len(),
+        1,
+        "and nothing is gone yet"
+    );
 
     // Keeping it puts the row back.
     harness.click("[data-theme-remove-no=\"Uni Bern\"]");
@@ -3134,7 +3291,10 @@ fn the_name_field_has_a_prompt_that_does_not_eat_the_click() {
 fn without_somewhere_to_keep_them_there_are_no_themes() {
     let harness = app();
     assert!(harness.query(".themes-open").is_none());
-    assert!(harness.query(".appearance-open").is_some(), "the others stay");
+    assert!(
+        harness.query(".appearance-open").is_some(),
+        "the others stay"
+    );
     assert!(harness.query(".about-open").is_some());
 }
 
@@ -3199,7 +3359,8 @@ fn a_full_themes_sheet_still_fits_the_window() {
                 margin: Some(2),
                 shape: Some("square".to_string()),
             },
-        );
+        )
+        .unwrap();
     }
 
     for height in [860, 820] {
@@ -3223,7 +3384,6 @@ fn a_full_themes_sheet_still_fits_the_window() {
         );
     }
 }
-
 
 /// **A theme's image size is a preference, not an instruction.**
 ///
@@ -3255,7 +3415,8 @@ fn a_theme_asking_for_a_size_that_does_not_fit_draws_the_one_that_does() {
             margin: Some(2),
             shape: Some("square".to_string()),
         },
-    );
+    )
+    .unwrap();
 
     // Four characters: the smallest code there is.
     let mut harness = app_with_library("hiya", None, &dir);
@@ -3354,11 +3515,15 @@ fn a_theme_carries_the_margin_the_shape_and_the_level() {
     );
     assert_eq!(modules_across(&preview(&harness).unwrap()), 25 + 2 * 3);
     assert_eq!(
-        harness.attr("[data-look=\"dots\"]", "aria-pressed").as_deref(),
+        harness
+            .attr("[data-look=\"dots\"]", "aria-pressed")
+            .as_deref(),
         Some("true")
     );
     assert_eq!(
-        harness.attr("[data-ec=\"quartile\"]", "aria-pressed").as_deref(),
+        harness
+            .attr("[data-ec=\"quartile\"]", "aria-pressed")
+            .as_deref(),
         Some("true")
     );
 }
@@ -3388,7 +3553,8 @@ fn a_themes_level_gives_way_to_the_picture_and_says_so() {
             margin: Some(2),
             shape: Some("square".to_string()),
         },
-    );
+    )
+    .unwrap();
 
     let mut harness = app_with_library("https://example.org", None, &dir);
     harness.click(".themes-open");
@@ -3397,7 +3563,9 @@ fn a_themes_level_gives_way_to_the_picture_and_says_so() {
     harness.pump();
 
     assert_eq!(
-        harness.attr("[data-ec=\"high\"]", "aria-pressed").as_deref(),
+        harness
+            .attr("[data-ec=\"high\"]", "aria-pressed")
+            .as_deref(),
         Some("true"),
         "the picture's answer, not the theme's"
     );

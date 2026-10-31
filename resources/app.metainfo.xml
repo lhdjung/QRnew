@@ -48,8 +48,10 @@
          window's own minimum rather than a guess: `main.rs` asks winit for a
          minimum surface of 1160x700, because three columns of controls do not
          fit in less. 360 was here from the COSMIC template, and advertised
-         the app to software centres at a size it cannot open at. -->
-    <display_length compare="ge">1160</display_length>
+         the app to software centres at a size it cannot open at. `side`
+         is spelled out because it defaults to the *shortest* edge. -->
+    <display_length side="longest" compare="ge">1160</display_length>
+    <display_length side="shortest" compare="ge">700</display_length>
   </requires>
   <supports>
     <control>keyboard</control>

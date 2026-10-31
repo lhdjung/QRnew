@@ -95,6 +95,11 @@ pub enum FinderShape {
 }
 
 /// Shape and color of the finder patterns.
+///
+/// The two colors are not decoration. `every_combination_of_shapes_scans_with_
+/// a_logo_in_the_way` stops finding a code the moment rounded finders are drawn
+/// in the same color as square modules beside a large logo: a finder a decoder
+/// can separate from its neighbours is what the whole scan starts from.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Finder {
     pub shape: FinderShape,
@@ -116,15 +121,6 @@ impl Finder {
     }
 }
 
-/// Outline of the area a logo clears out of the matrix.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum Clearing {
-    #[default]
-    Square,
-    Rounded,
-    Circle,
-}
-
 /// An image placed in the middle of the code.
 ///
 /// The modules underneath are left out rather than painted over, so nothing
@@ -139,10 +135,12 @@ pub struct Logo {
     /// Side of the logo, as a fraction of the code's width. The quiet zone
     /// does not count towards that width.
     pub size: f32,
-    /// Blank margin kept around the logo, in modules.
+    /// Blank margin kept around the logo, in modules. It is what keeps a
+    /// decoder from running the picture together with the modules beside it,
+    /// so it is worth more than it looks: `every_combination_of_shapes_scans_
+    /// with_a_logo_in_the_way` stops scanning below three quarters of a module
+    /// at the largest size the app offers.
     pub padding: f32,
-    /// Outline of the cleared area.
-    pub clearing: Clearing,
 }
 
 impl Logo {
@@ -158,7 +156,6 @@ impl Logo {
             image,
             size: Self::DEFAULT_SIZE,
             padding: Self::DEFAULT_PADDING,
-            clearing: Clearing::default(),
         }
     }
 }

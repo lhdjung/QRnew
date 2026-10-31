@@ -62,8 +62,18 @@ pub fn write(key: &str, value: &str) {
     if let Some(directory) = path.parent()
         && std::fs::create_dir_all(directory).is_ok()
     {
-        let _ = std::fs::write(&path, lines.join("\n") + "\n");
+        let _ = replace(&path, &(lines.join("\n") + "\n"));
     }
+}
+
+/// Writes `contents` to `path` whole or not at all: into a file beside it, then
+/// renamed over it. A plain write truncates first, so a crash or a full disk
+/// halfway through would leave an empty file where a good one was.
+pub(crate) fn replace(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    let mut draft = path.as_os_str().to_owned();
+    draft.push(".tmp");
+    std::fs::write(&draft, contents)?;
+    std::fs::rename(&draft, path)
 }
 
 /// The key a line sets, if it sets one.
@@ -146,7 +156,10 @@ mod tests {
     /// read as the value it appended.
     #[test]
     fn the_last_line_wins() {
-        assert_eq!(value_of("appearance = light\nappearance = dark\n", "appearance"), Some("dark"));
+        assert_eq!(
+            value_of("appearance = light\nappearance = dark\n", "appearance"),
+            Some("dark")
+        );
     }
 
     #[test]
@@ -168,6 +181,9 @@ mod tests {
         };
         assert!(path.is_absolute(), "{path:?}");
         assert_eq!(path.file_name().and_then(|name| name.to_str()), Some(FILE));
-        assert!(path.parent().is_some_and(|it| it.parent().is_some()), "{path:?}");
+        assert!(
+            path.parent().is_some_and(|it| it.parent().is_some()),
+            "{path:?}"
+        );
     }
 }

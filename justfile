@@ -60,13 +60,6 @@ default: build-release
 clean:
     cargo clean
 
-# Removes vendored dependencies
-clean-vendor:
-    rm -rf .cargo vendor vendor.tar
-
-# `cargo clean` and removes vendored dependencies
-clean-dist: clean clean-vendor
-
 # Compiles with debug profile
 build-debug *args:
     cargo build --locked {{args}}
@@ -74,15 +67,9 @@ build-debug *args:
 # Compiles with release profile
 build-release *args: (build-debug '--release' args)
 
-# Compiles release profile with vendored dependencies
-build-vendored *args: vendor-extract (build-release '--frozen --offline' args)
-
 # Runs a clippy check
 check *args:
     cargo clippy --all-features --locked {{args}} -- -W clippy::pedantic
-
-# Runs a clippy check with JSON message format
-check-json: (check '--message-format=json')
 
 # Run the application for testing purposes
 run *args:
@@ -257,32 +244,21 @@ flatpak-keygen:
     echo
     gpg --armor --export-secret-keys "$fpr"
 
-# Vendor dependencies locally
-vendor:
-    mkdir -p .cargo
-    cargo vendor | head -n -1 > .cargo/config.toml
-    echo 'directory = "vendor"' >> .cargo/config.toml
-    tar pcf vendor.tar vendor
-    rm -rf vendor
-
-# Extracts vendored dependencies
-vendor-extract:
-    rm -rf vendor
-    tar pxf vendor.tar
-
 # The `v` is the tag's and nothing else's: `release.yml` publishes a numbered
 # release for `tags: ['v*']`, and the one tag in the repository is `v0.0.1`, so
 # a tag written without it is a release nothing ever builds. The argument is
 # the bare number — `just tag 0.1.1` — because that is what goes into
 # `Cargo.toml` on the line above.
+#
+# `perl` rather than `sed -i`: the two `sed`s disagree about `-i` and about the
+# `0,/re/` address, so the GNU spelling this used to have failed on a Mac,
+# which is where the app is developed.
 
 # Bump cargo version, create git commit, and tag it `v<version>`
 tag version:
-    find -type f -name Cargo.toml -exec sed -i '0,/^version/s/^version.*/version = "{{version}}"/' '{}' \; -exec git add '{}' \;
+    perl -0pi -e 's/^version = "[^"]*"/version = "{{version}}"/m' Cargo.toml qrnew-core/Cargo.toml
     cargo check
-    cargo clean
-    git add Cargo.lock
+    git add Cargo.toml qrnew-core/Cargo.toml Cargo.lock
     git commit -m 'release: {{version}}'
-    git commit --amend
     git tag -a v{{version}} -m ''
 
